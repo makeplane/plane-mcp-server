@@ -1,5 +1,5 @@
 {
-  "name": "plane-mcp-server",
+  "name": "@makeplane/plane-mcp-server",
   "version": "1.0.0",
   "description": "The Plane MCP Server is a Model Context Protocol (MCP) server that provides seamless integration with Plane APIs, enabling projects, work items, and automations capabilities for develops and AI interfaces.",
   "main": "index.js",
