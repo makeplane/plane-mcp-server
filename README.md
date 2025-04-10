@@ -11,78 +11,287 @@ The Plane MCP Server is a Model Context Protocol (MCP) server that provides seam
 - Extracting and analyzing data from Projects and Members inside Plane
 - Building AI powered tools and applications that interact with Plane's ecosystem
 
-## Tools 
+## Configuration Parameters
+
+1. `PLANE_API_HOST_URL` - The host URL of the Plane API Server. Defaults to https://api.plane.so/
+2. `PLANE_API_KEY` - The user's API token. This can be obtained from the `/settings/api-tokens/` page in the UI.
+3. `PLANE_WORKSPACE_SLUG` - The workspace slug for your Plane instance.
+
+## Tools
 
 ### Users
 
-- `get_me` - Get details of the authenticated user
-
-    - No parameters required
+- `get_user` - Get the current user's information
+  - No parameters required
 
 ### Projects
 
-- `create_project` - Create Project within the Workspace
+- `get_projects` - Get all projects for the current user
 
-    - `name`: Project title (string, required)
-    - `description`: Project description (string, required)
+  - No parameters required
+
+- `create_project` - Create a new project
+  - `name`: Project name (string, required)
+
+### Issue Types
+
+- `list_issue_types` - Get all issue types for a specific project
+
+  - `project_id`: UUID of the project (string, required)
+
+- `get_issue_type` - Get details of a specific issue type
+
+  - `project_id`: UUID of the project (string, required)
+  - `type_id`: UUID of the issue type (string, required)
+
+- `create_issue_type` - Create a new issue type in a project
+
+  - `project_id`: UUID of the project (string, required)
+  - `issue_type_data`: Object containing:
+    - `name`: Name of the issue type (string, required)
+    - `description`: Description of the issue type (string, required)
+
+- `update_issue_type` - Update an existing issue type
+
+  - `project_id`: UUID of the project (string, required)
+  - `type_id`: UUID of the issue type (string, required)
+  - `issue_type_data`: Fields to update on the issue type (object)
+
+- `delete_issue_type` - Delete an issue type
+  - `project_id`: UUID of the project (string, required)
+  - `type_id`: UUID of the issue type (string, required)
+
+### States
+
+- `list_states` - Get all states for a specific project
+
+  - `project_id`: UUID of the project (string, required)
+
+- `get_state` - Get details of a specific state
+
+  - `project_id`: UUID of the project (string, required)
+  - `state_id`: UUID of the state (string, required)
+
+- `create_state` - Create a new state in a project
+
+  - `project_id`: UUID of the project (string, required)
+  - `state_data`: Object containing:
+    - `name`: Name of the state (string, required)
+    - `color`: Color code for the state (string, required)
+
+- `update_state` - Update an existing state
+
+  - `project_id`: UUID of the project (string, required)
+  - `state_id`: UUID of the state (string, required)
+  - `state_data`: Fields to update on the state (object)
+
+- `delete_state` - Delete a state
+  - `project_id`: UUID of the project (string, required)
+  - `state_id`: UUID of the state (string, required)
+
+### Labels
+
+- `list_labels` - Get all labels for a specific project
+
+  - `project_id`: UUID of the project (string, required)
+
+- `get_label` - Get details of a specific label
+
+  - `project_id`: UUID of the project (string, required)
+  - `label_id`: UUID of the label (string, required)
+
+- `create_label` - Create a new label in a project
+
+  - `project_id`: UUID of the project (string, required)
+  - `label_data`: Object containing:
+    - `name`: Name of the label (string, required)
+    - `color`: Color code for the label (string, required)
+
+- `update_label` - Update an existing label
+
+  - `project_id`: UUID of the project (string, required)
+  - `label_id`: UUID of the label (string, required)
+  - `label_data`: Fields to update on the label (object)
+
+- `delete_label` - Delete a label
+  - `project_id`: UUID of the project (string, required)
+  - `label_id`: UUID of the label (string, required)
 
 ### Issues
 
-- `get_issue` - Gets the contents of an issue within a Project
-    
-    - `user`: Current user (string, required)
-    - `issue_number`: Issue number (number, required)
+- `get_issue_using_readable_identifier` - Get issue details using readable identifier (e.g., PROJ-123)
 
-- `get_issue_comments` - Get comments for a GitHub issue
+  - `project_identifier`: Project identifier (e.g., "PROJ") (string, required)
+  - `issue_identifier`: Issue number (e.g., "123") (string, required)
 
-    - `user`: Current user (string, required)
-    - `issue_number`: Issue number (number, required)
+- `get_issue_comments` - Get all comments for a specific issue
 
-- `create_issue` - Create a new issue in the Project
-
-    - `user`: Current user (string, required)
-    - `project`: Project name (string, required)
-    - `title`: Issue title (string, required)
-    - `body`: Issue body content (string, optional)
-    - `collaborates`: Usernames to assign to this issue (string[], optional)
-    - `labels`: Labels to apply to this issue (string[], optional)
+  - `project_id`: UUID of the project (string, required)
+  - `issue_id`: UUID of the issue (string, required)
 
 - `add_issue_comment` - Add a comment to an issue
 
-    - `user`: Current user (string, required)
-    - `issue_number`: Issue number (number, required)
-    - `body`: Comment text (string, required)
+  - `project_id`: UUID of the project (string, required)
+  - `issue_id`: UUID of the issue (string, required)
+  - `comment_html`: HTML content of the comment (string, required)
 
-- `list_issues` - List and filter Project issues
-    
-    - `user`: Current user (string, required)
-    - `project`: Project name (string, required)
-    - `state`: Filter by state ('open', 'closed', 'all') (string, optional)
-    - `labels`: Labels to filter by (string[], optional)
-    - `sort`: Sort by ('created', 'updated', 'comments') (string, optional)
-    - `direction`: Sort direction ('asc', 'desc') (string, optional)
-    - `since`: Filter by date (ISO 8601 timestamp) (string, optional)
-    - `page`: Page number (number, optional)
-    - `perPage`: Results per page (number, optional)
+- `create_issue` - Create a new issue
 
-- `update_issue` - Update an existing issue in a GitHub Project
+  - `project_id`: UUID of the project (string, required)
+  - `issue_data`: Object containing:
+    - `name`: Title of the issue (string, required)
+    - `description_html`: HTML description of the issue (string, required)
 
-    - `user`: Current user (string, required)
-    - `issue_number`: Issue number to update (number, required)
-    - `title`: New title (string, optional)
-    - `body`: New description (string, optional)
-    - `state`: New state ('open' or 'closed') (string, optional)
-    - `labels`: New labels (string[], optional)
-    - `assignees`: New assignee (string, optional)
-    - `properties`: New properties (string[], optional)
+- `update_issue` - Update an existing issue
+  - `project_id`: UUID of the project (string, required)
+  - `issue_id`: UUID of the issue (string, required)
+  - `issue_data`: Fields to update on the issue (object)
 
-- `search_issues` - Search for issues and pull requests
+### Modules
 
-    - `query`: Search query (string, required)
-    - `sort`: Sort field (string, optional)
-    - `order`: Sort order (string, optional)
-    - `page`: Page number (number, optional)
-    - `perPage`: Results per page (number, optional)
+- `list_modules` - Get all modules for a specific project
+
+  - `project_id`: UUID of the project (string, required)
+
+- `get_module` - Get details of a specific module
+
+  - `project_id`: UUID of the project (string, required)
+  - `module_id`: UUID of the module (string, required)
+
+- `create_module` - Create a new module in a project
+
+  - `project_id`: UUID of the project (string, required)
+  - `module_data`: Object containing:
+    - `name`: Name of the module (string, required)
+
+- `update_module` - Update an existing module
+
+  - `project_id`: UUID of the project (string, required)
+  - `module_id`: UUID of the module (string, required)
+  - `module_data`: Fields to update on the module (object)
+
+- `delete_module` - Delete a module
+  - `project_id`: UUID of the project (string, required)
+  - `module_id`: UUID of the module (string, required)
+
+### Module Issues
+
+- `list_module_issues` - Get all issues for a specific module
+
+  - `project_id`: UUID of the project (string, required)
+  - `module_id`: UUID of the module (string, required)
+
+- `add_module_issues` - Add issues to a module
+
+  - `project_id`: UUID of the project (string, required)
+  - `module_id`: UUID of the module (string, required)
+  - `issues`: Array of issue UUIDs to add (string[], required)
+
+- `delete_module_issue` - Remove an issue from a module
+  - `project_id`: UUID of the project (string, required)
+  - `module_id`: UUID of the module (string, required)
+  - `issue_id`: UUID of the issue to remove (string, required)
+
+### Cycles
+
+- `list_cycles` - Get all cycles for a specific project
+
+  - `project_id`: UUID of the project (string, required)
+
+- `get_cycle` - Get details of a specific cycle
+
+  - `project_id`: UUID of the project (string, required)
+  - `cycle_id`: UUID of the cycle (string, required)
+
+- `create_cycle` - Create a new cycle in a project
+
+  - `project_id`: UUID of the project (string, required)
+  - `cycle_data`: Object containing:
+    - `name`: Name of the cycle (string, required)
+    - `start_date`: Start date (YYYY-MM-DD) (string, required)
+    - `end_date`: End date (YYYY-MM-DD) (string, required)
+
+- `update_cycle` - Update an existing cycle
+
+  - `project_id`: UUID of the project (string, required)
+  - `cycle_id`: UUID of the cycle (string, required)
+  - `cycle_data`: Fields to update on the cycle (object)
+
+- `delete_cycle` - Delete a cycle
+  - `project_id`: UUID of the project (string, required)
+  - `cycle_id`: UUID of the cycle (string, required)
+
+### Cycle Issues
+
+- `list_cycle_issues` - Get all issues for a specific cycle
+
+  - `project_id`: UUID of the project (string, required)
+  - `cycle_id`: UUID of the cycle (string, required)
+
+- `add_cycle_issues` - Add issues to a cycle
+
+  - `project_id`: UUID of the project (string, required)
+  - `cycle_id`: UUID of the cycle (string, required)
+  - `issues`: Array of issue UUIDs to add (string[], required)
+
+- `delete_cycle_issue` - Remove an issue from a cycle
+  - `project_id`: UUID of the project (string, required)
+  - `cycle_id`: UUID of the cycle (string, required)
+  - `issue_id`: UUID of the issue to remove (string, required)
+
+### Work Logs
+
+- `get_issue_worklogs` - Get all worklogs for a specific issue
+
+  - `project_id`: UUID of the project (string, required)
+  - `issue_id`: UUID of the issue (string, required)
+
+- `get_total_worklogs` - Get total logged time for a project
+
+  - `project_id`: UUID of the project (string, required)
+
+- `create_worklog` - Create a new worklog for an issue
+
+  - `project_id`: UUID of the project (string, required)
+  - `issue_id`: UUID of the issue (string, required)
+  - `worklog_data`: Object containing:
+    - `description`: Description of the work done (string, required)
+    - `duration`: Duration in minutes (integer, required)
+
+- `update_worklog` - Update an existing worklog
+
+  - `project_id`: UUID of the project (string, required)
+  - `issue_id`: UUID of the issue (string, required)
+  - `worklog_id`: UUID of the worklog (string, required)
+  - `worklog_data`: Fields to update on the worklog (object)
+
+- `delete_worklog` - Delete a worklog
+  - `project_id`: UUID of the project (string, required)
+  - `issue_id`: UUID of the issue (string, required)
+  - `worklog_id`: UUID of the worklog (string, required)
+
+## Usage with Claude Desktop
+
+Adding plane mcp server like below to your `claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "plane": {
+       "command": "npx",
+      "args": [
+        "-y",
+        "@makeplane/plane-mcp-server"
+      ],
+      "env": {
+        "PLANE_API_KEY": "<YOUR_API_KEY>",
+        "PLANE_API_HOST_URL": "<HOST_URL_FOR_SELF_HOSTED",
+        "PLANE_WORKSPACE_SLUG": "<YOUR_WORKSPACE_SLUG>"
+      }
+    }
+  }
+}
+```
 
 ## License
 
