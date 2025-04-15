@@ -35,43 +35,19 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      - name: Update version and create tag
-        run: |
-          # Update package.json version
-          npm version ${{ github.event.inputs.version }} --no-git-tag-version
-
-          # Stage and commit package.json
-          git add package.json
-          git commit -m "chore: bump version to ${{ github.event.inputs.version }}"
-
-          # Create and push tag
-          git tag -a v${{ github.event.inputs.version }} -m "Release v${{ github.event.inputs.version }}"
-          git push origin main
-          git push origin v${{ github.event.inputs.version }}
-
       - name: Build package
         run: npm run build
 
-      - name: Generate Release Notes
-        id: generate_notes
-        run: |
-          # Get all commits since last tag
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$LAST_TAG" ]; then
-            COMMITS=$(git log --pretty=format:"- %s" --no-merges)
-          else
-            COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s" --no-merges)
-          fi
-          echo "$COMMITS" > RELEASE_NOTES.md
-
-      - name: Publish to NPM
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # - name: Publish to NPM
+      #   run: npm publish --access public
+      #   env:
+      #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ github.event.inputs.version }}
-          name: Release v${{ github.event.inputs.version }}
-          body_path: RELEASE_NOTES.md
+          name: v${{ github.event.inputs.version }}
+          draft: false
+          prerelease: false
+          generate_notes: true
