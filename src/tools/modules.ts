@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { makePlaneRequest } from "../request-helper.js";
+import { makePlaneRequest } from "../common/request-helper.js";
 import { Module as ModuleSchema } from "../schemas.js";
 
 export const registerModuleTools = (server: McpServer) => {

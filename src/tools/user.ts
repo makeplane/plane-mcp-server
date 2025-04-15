@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { makePlaneRequest } from "../request-helper.js";
+import { makePlaneRequest } from "../common/request-helper.js";
 
 export const registerUserTools = (server: McpServer) => {
   server.tool("get_user", "Get the current user's information", {}, async () => {

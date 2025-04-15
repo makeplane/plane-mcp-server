@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { makePlaneRequest } from "../request-helper.js";
+import { makePlaneRequest } from "../common/request-helper.js";
 
 export const registerProjectTools = (server: McpServer) => {
   server.tool("get_projects", "Get all projects for the current user", {}, async () => {
