@@ -13,11 +13,9 @@ export const registerIssueTools = (server: McpServer) => {
       issue_identifier: z.string().describe("The identifier of the issue to get"),
     },
     async ({ project_identifier, issue_identifier }) => {
-      const issue = IssueSchema.parse(
-        await makePlaneRequest(
-          "GET",
-          `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/issues/${project_identifier}-${issue_identifier}/`
-        )
+      const issue = await makePlaneRequest(
+        "GET",
+        `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/issues/${project_identifier}-${issue_identifier}/`
       );
       return {
         content: [
