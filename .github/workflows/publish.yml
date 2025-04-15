@@ -38,15 +38,6 @@ jobs:
       - name: Build package
         run: npm run build
 
-      - name: Update version and create tag
-        run: |
-          # Update package.json version
-          npm version ${{ github.event.inputs.version }} --no-git-tag-version
-          # Stage and commit package.json
-          git add package.json
-          git commit -m "chore: bump version to ${{ github.event.inputs.version }}"
-          git push origin main
-
       - name: Publish to NPM
         run: npm publish --access public
         env:
