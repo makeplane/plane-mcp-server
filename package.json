@@ -1,11 +1,14 @@
 {
   "name": "@makeplane/plane-mcp-server",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "The Plane MCP Server is a Model Context Protocol (MCP) server that provides seamless integration with Plane APIs, enabling projects, work items, and automations capabilities for develops and AI interfaces.",
-  "main": "index.js",
+  "bin": {
+    "plane-mcp-server": "./build/index.js"
+  },
   "type": "module",
+  "author": "engineering@plane.so",
   "scripts": {
-    "build": "tsc && chmod 755 build/index.js",
+    "build": "rm -rf build && tsc && chmod 755 build/index.js",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -19,8 +22,7 @@
     "url": "git+https://github.com/makeplane/plane-mcp-server.git"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/makeplane/plane-mcp-server/issues"
   },
