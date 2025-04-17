@@ -1,7 +1,9 @@
 import axios, { AxiosRequestConfig } from "axios";
 
 export async function makePlaneRequest<T>(method: string, path: string, body: any = null): Promise<T> {
-  const url = `${process.env.PLANE_API_HOST_URL}api/v1/${path}`;
+  const hostUrl = process.env.PLANE_API_HOST_URL || "";
+  const host = hostUrl.endsWith("/") ? hostUrl : `${hostUrl}/`;
+  const url = `${host}api/v1/${path}`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-API-Key": process.env.PLANE_API_KEY || "",
