@@ -4,7 +4,7 @@ import { makePlaneRequest } from "../common/request-helper.js";
 
 export const registerUserTools = (server: McpServer) => {
   server.tool("get_user", "Get the current user's information", {}, async () => {
-    const user = await makePlaneRequest("GET", `users/me/`);
+    const user = await makePlaneRequest("GET", "users/me/");
     return {
       content: [{ type: "text", text: JSON.stringify(user, null, 2) }],
     };
