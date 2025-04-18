@@ -49,7 +49,12 @@ export const registerProjectTools = (server: McpServer) => {
     "Create a new project",
     {
       name: z.string().describe("The name of the project"),
-      identifier: z.string().max(7).describe("The identifier of the project. This is typically a word of around 5 characters derived from the name of the project in uppercase."),
+      identifier: z
+        .string()
+        .max(7)
+        .describe(
+          "The identifier of the project. This is typically a word of around 5 characters derived from the name of the project in uppercase."
+        ),
     },
     async ({ name, identifier }) => {
       const project = await makePlaneRequest("POST", `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/`, {
