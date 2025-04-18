@@ -270,9 +270,11 @@ The Plane MCP Server is a Model Context Protocol (MCP) server that provides seam
   - `issue_id`: UUID of the issue (string, required)
   - `worklog_id`: UUID of the worklog (string, required)
 
-## Usage with Claude Desktop
+## Usage
 
-Adding plane mcp server like below to your `claude_desktop_config.json`
+### Claude Desktop
+
+Add Plane to [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) by editing your `claude_desktop_config.json`.
 
 ```json
 {
@@ -291,6 +293,30 @@ Adding plane mcp server like below to your `claude_desktop_config.json`
     }
   }
 }
+```
+
+### VSCode
+
+Add Plane to [VSCode](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server) by editing your `.vscode.json/mcp.json`.
+
+```json
+{
+  "servers": {
+    "plane": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@makeplane/plane-mcp-server"
+      ],
+      "env": {
+        "PLANE_API_KEY": "<YOUR_API_KEY>",
+        "PLANE_API_HOST_URL": "<HOST_URL_FOR_SELF_HOSTED",
+        "PLANE_WORKSPACE_SLUG": "<YOUR_WORKSPACE_SLUG>"
+      }
+    }
+  }
+}
+
 ```
 
 ## License
