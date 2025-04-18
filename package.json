@@ -13,6 +13,8 @@
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
+    "test-startup": "node build/server.js",
+    "test": "npm run lint && npm run format:check && npm run build && npm run test-startup",
     "prepublishOnly": "npm run build"
   },
   "files": [

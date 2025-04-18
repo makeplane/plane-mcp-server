@@ -1,21 +1,10 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
-import { getVersion } from "./common/version.js";
-import { registerTools } from "./tools/index.js";
+import { createServer } from "./server.js";
 
 async function main() {
-  const version = getVersion();
-
-  const server = new McpServer({
-    name: "plane-mcp-server",
-    version,
-    capabilities: {},
-  });
-
-  registerTools(server);
-
+  const { server, version } = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`Plane MCP Server running on stdio: ${version}`);
