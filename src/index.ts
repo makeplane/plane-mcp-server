@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { registerTools } from "./tools/index.js";
+
 import { getVersion } from "./common/version.js";
+import { registerTools } from "./tools/index.js";
 
 async function main() {
   const version = getVersion();
