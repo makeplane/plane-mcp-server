@@ -13,9 +13,9 @@ The Plane MCP Server is a Model Context Protocol (MCP) server that provides seam
 
 ## Configuration Parameters
 
-1. `PLANE_API_HOST_URL` - The host URL of the Plane API Server. Defaults to https://api.plane.so/
-2. `PLANE_API_KEY` - The user's API token. This can be obtained from the `/settings/api-tokens/` page in the UI.
-3. `PLANE_WORKSPACE_SLUG` - The workspace slug for your Plane instance.
+1. `PLANE_API_KEY` - The user's API token. This can be obtained from the `/settings/api-tokens/` page in the UI.
+2. `PLANE_WORKSPACE_SLUG` - The workspace slug for your Plane instance.
+3. `PLANE_API_HOST_URL` (optional) - The host URL of the Plane API Server. Defaults to https://api.plane.so/
 
 ## Tools
 
