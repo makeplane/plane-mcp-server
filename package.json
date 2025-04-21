@@ -1,6 +1,6 @@
 {
   "name": "@makeplane/plane-mcp-server",
-  "version": "0.1.1",
+  "version": "0.1.1-semantically-released",
   "description": "The Plane MCP Server is a Model Context Protocol (MCP) server that provides seamless integration with Plane APIs, enabling projects, work items, and automations capabilities for develops and AI interfaces.",
   "bin": {
     "plane-mcp-server": "./build/index.js"
@@ -50,5 +50,17 @@
     "prettier": "^3.5.3",
     "typescript": "^5.8.3",
     "zod": "^3.24.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "release": {
+    "branches": ["main"],
+    "plugins": [
+      ["@semantic-release/commit-analyzer", { "preset": "conventionalcommits" }],
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/npm",
+      "@semantic-release/github"
+    ]
   }
 }
