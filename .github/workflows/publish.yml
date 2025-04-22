@@ -50,4 +50,4 @@ jobs:
           name: v${{ github.event.inputs.version }}
           draft: false
           prerelease: false
-          generate_notes: true
+          generate_release_notes: true
