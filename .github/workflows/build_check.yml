@@ -1,18 +1,15 @@
-### Create a workflow to check the build of the project on pull request
-
 name: Build Check
 
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize]
     branches:
-      - build-check-workflow
-#   pull_request:
-#     branches:
-#       - canary
-#       - main
+      - canary
+      - main
 
 jobs:
   build:
+    name: Build Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
