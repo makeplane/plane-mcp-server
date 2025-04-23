@@ -1,0 +1,27 @@
+### Create a workflow to check the build of the project on pull request
+
+name: Build Check
+
+on:
+  push:
+    branches:
+      - build-check-workflow
+#   pull_request:
+#     branches:
+#       - canary
+#       - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
