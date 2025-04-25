@@ -32,6 +32,7 @@
   "homepage": "https://github.com/makeplane/plane-mcp-server#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0",
+    "@scarf/scarf": "^1.4.0",
     "axios": "^1.8.4",
     "zod-to-json-schema": "^3.24.5"
   },
