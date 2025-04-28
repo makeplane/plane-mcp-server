@@ -1,0 +1,76 @@
+name: Version Change Before Release
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Get PR Branch version
+        id: pr_version
+        run: |
+          if [ ! -f package.json ]; then
+            echo "Error: package.json not found in PR branch"
+            exit 1
+          fi
+          VERSION=$(node -p "require('./package.json').version")
+          if [ -z "$VERSION" ]; then
+            echo "Error: Version not found in PR branch package.json"
+            exit 1
+          fi
+          echo "PR_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "PR version: $VERSION"
+
+      - name: Fetch base branch
+        run: git fetch origin main:main
+
+      - name: Get Master Branch version
+        id: master_version
+        run: |
+          git checkout main
+          if [ ! -f package.json ]; then
+            echo "Error: package.json not found in main branch"
+            exit 1
+          fi
+          VERSION=$(node -p "require('./package.json').version")
+          if [ -z "$VERSION" ]; then
+            echo "Error: Version not found in main branch package.json"
+            exit 1
+          fi
+          echo "MASTER_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Master version: $VERSION"
+
+      - name: Compare versions
+        run: |
+          echo "Comparing versions: PR version is $PR_VERSION, Master version is $MASTER_VERSION"
+
+          # Check if versions are valid semver
+          if ! node -e "require('semver').valid('$PR_VERSION') && require('semver').valid('$MASTER_VERSION')"; then
+            echo "Error: Invalid semver version format"
+            exit 1
+          fi
+
+          # Check if PR version is greater
+          if ! node -e "process.exit(require('semver').gt('$PR_VERSION', '$MASTER_VERSION') ? 0 : 1)"; then
+            echo "Error: PR version must be greater than master version"
+            exit 1
+          fi
+
+          echo "Version check passed. PR version is newer than master version."
+        env:
+          PR_VERSION: ${{ env.PR_VERSION }}
+          MASTER_VERSION: ${{ env.MASTER_VERSION }}
