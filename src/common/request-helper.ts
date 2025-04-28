@@ -5,20 +5,27 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
   const host = hostUrl.endsWith("/") ? hostUrl : `${hostUrl}/`;
   const url = `${host}api/v1/${path}`;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     "X-API-Key": process.env.PLANE_API_KEY || "",
   };
+
+  // Only add Content-Type for non-GET requests
+  if (method.toUpperCase() !== 'GET') {
+    headers["Content-Type"] = "application/json";
+  }
 
   try {
     const config: AxiosRequestConfig = {
       url,
       method,
       headers,
-      data: body,
     };
 
-    const response = await axios(config);
+    // Only include body for non-GET requests
+    if (method.toUpperCase() !== 'GET' && body !== null) {
+      config.data = body;
+    }
 
+    const response = await axios(config);
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error)) {
