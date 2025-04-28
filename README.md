@@ -2,6 +2,10 @@
 
 The Plane MCP Server is a Model Context Protocol (MCP) server that provides seamless integration with Plane APIs, enabling projects, work items, and automations capabilities for develops and AI interfaces.
 
+<a href="https://glama.ai/mcp/servers/@makeplane/plane-mcp-server">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@makeplane/plane-mcp-server/badge" alt="Plane Server MCP server" />
+</a>
+
 ## Use Cases
 
 - Create, update Projects and Work items
