@@ -34,7 +34,8 @@
     "@modelcontextprotocol/sdk": "^1.9.0",
     "@scarf/scarf": "^1.4.0",
     "axios": "^1.8.4",
-    "zod-to-json-schema": "^3.24.5"
+    "zod-to-json-schema": "^3.24.5",
+    "mcp-evals": "^1.0.18"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
