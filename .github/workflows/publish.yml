@@ -1,12 +1,9 @@
-name: NPM Package Release
+name: NPM + Github Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version number (e.g., 0.1.0)"
-        required: true
-        type: string
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -43,11 +40,15 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: get-npm-version
+        id: package-version
+        uses: martinbeentjes/npm-get-version-action@v1.3.1
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ github.event.inputs.version }}
-          name: v${{ github.event.inputs.version }}
+          tag_name: v${{ steps.package-version.outputs.current-version }}
+          name: v${{ steps.package-version.outputs.current-version }}
           draft: false
           prerelease: false
           generate_release_notes: true
