@@ -1,0 +1,29 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+startCommand:
+  type: stdio
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({ command: 'node', args: ['build/index.js'], env: { PLANE_API_KEY: config.planeApiKey, PLANE_WORKSPACE_SLUG: config.planeWorkspaceSlug, PLANE_API_HOST_URL: config.planeApiHostUrl } })
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - planeApiKey
+      - planeWorkspaceSlug
+    properties:
+      planeApiKey:
+        type: string
+        description: Your Plane API token
+      planeWorkspaceSlug:
+        type: string
+        description: Your Plane workspace slug
+      planeApiHostUrl:
+        type: string
+        default: https://api.plane.so/
+        description: Plane API host URL
+  exampleConfig:
+    planeApiKey: sk_exampleapikey123
+    planeWorkspaceSlug: my-workspace
+    planeApiHostUrl: https://api.plane.so/
