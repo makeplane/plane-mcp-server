@@ -4,7 +4,7 @@ import { z } from "zod";
 import { makePlaneRequest } from "../common/request-helper.js";
 import { Issue as IssueSchema } from "../schemas.js";
 
-export const registerIssueTools = (server: McpServer) => {
+export const registerIssueTools = (server: McpServer): void => {
   server.tool(
     "get_issue_using_readable_identifier",
     "Get all issues for a specific project. When issue identifier is provided something like FIRST-123, ABC-123, etc. For FIRST-123, project_identifier is FIRST and issue_identifier is 123",
@@ -124,6 +124,29 @@ export const registerIssueTools = (server: McpServer) => {
           {
             type: "text",
             text: JSON.stringify(response, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    "delete_issue",
+    "Delete an issue permanently. This requests project_id and issue_id as uuid parameters. If you have a readable identifier, you can use the get_issue_using_readable_identifier tool to get the issue_id and project_id. WARNING: This action cannot be undone.",
+    {
+      project_id: z.string().describe("The uuid identifier of the project containing the issue"),
+      issue_id: z.string().describe("The uuid identifier of the issue to delete"),
+    },
+    async ({ project_id, issue_id }) => {
+      await makePlaneRequest(
+        "DELETE",
+        `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/issues/${issue_id}/`
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Issue ${issue_id} has been successfully deleted from project ${project_id}.`,
           },
         ],
       };
