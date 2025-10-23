@@ -2,15 +2,72 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { makePlaneRequest } from "../common/request-helper.js";
-import { Issue as IssueSchema } from "../schemas.js";
+import { type Issue, Issue as IssueSchema } from "../schemas.js";
 
-export const registerIssueTools = (server: McpServer) => {
+type IssuesResponse = {
+  grouped_by: null;
+  sub_grouped_by: null;
+  total_count: number;
+  next_cursor: string;
+  prev_cursor: string;
+  next_page_results: boolean;
+  prev_page_results: boolean;
+  count: number;
+  total_pages: number;
+  total_results: number;
+  extra_stats: null;
+  results: Issue[];
+};
+
+export const registerIssueTools = (server: McpServer): void => {
+  server.tool(
+    "list_project_issues",
+    "Get all issues for a specific project. This requests project_id as uuid parameter. If you have a readable identifier for project, you can use the get_projects tool to get the project_id from it",
+    {
+      project_id: z.string().describe("The uuid identifier of the project to get issues for"),
+    },
+    async ({ project_id }) => {
+      const issuesResponse: IssuesResponse = await makePlaneRequest<IssuesResponse>(
+        "GET",
+        `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/issues/`
+      );
+
+      // Return only essential fields to reduce token usage and improve LLM processing
+      const simplifiedIssues = issuesResponse.results.map((issue) => ({
+        id: issue.id,
+        name: issue.name,
+        sequence_id: issue.sequence_id,
+        state: issue.state,
+        priority: issue.priority,
+        created_at: issue.created_at,
+        updated_at: issue.updated_at,
+      }));
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                total_count: issuesResponse.total_count,
+                count: issuesResponse.count,
+                results: simplifiedIssues,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
   server.tool(
     "get_issue_using_readable_identifier",
-    "Get all issues for a specific project. When issue identifier is provided something like FIRST-123, ABC-123, etc. For FIRST-123, project_identifier is FIRST and issue_identifier is 123",
+    "Get a specific issue using its readable identifier. When issue identifier is provided something like FIRST-123, ABC-123, etc. For FIRST-123, project_identifier is FIRST and issue_identifier is 123",
     {
-      project_identifier: z.string().describe("The readable identifier of the project to get issues for"),
-      issue_identifier: z.string().describe("The identifier of the issue to get"),
+      project_identifier: z.string().describe("The readable identifier of the project (e.g., 'FIRST' for FIRST-123)"),
+      issue_identifier: z.string().describe("The issue number (e.g., '123' for FIRST-123)"),
     },
     async ({ project_identifier, issue_identifier }) => {
       const issue = await makePlaneRequest(
