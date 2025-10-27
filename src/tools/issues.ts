@@ -4,6 +4,25 @@ import { z } from "zod";
 import { makePlaneRequest } from "../common/request-helper.js";
 import { type Issue, Issue as IssueSchema } from "../schemas.js";
 
+type IssueStateSummary = {
+  id: string;
+  name?: string;
+  color?: string;
+  group?: string;
+};
+
+type IssuePrioritySummary = {
+  id?: string;
+  label?: string;
+  name?: string;
+  key?: string;
+};
+
+type IssueWithDetails = Issue & {
+  state_detail?: IssueStateSummary | null;
+  priority_detail?: IssuePrioritySummary | null;
+};
+
 type IssuesResponse = {
   grouped_by: null;
   sub_grouped_by: null;
@@ -16,7 +35,7 @@ type IssuesResponse = {
   total_pages: number;
   total_results: number;
   extra_stats: null;
-  results: Issue[];
+  results: IssueWithDetails[];
 };
 
 export const registerIssueTools = (server: McpServer): void => {
@@ -33,15 +52,33 @@ export const registerIssueTools = (server: McpServer): void => {
       );
 
       // Return only essential fields to reduce token usage and improve LLM processing
-      const simplifiedIssues = issuesResponse.results.map((issue) => ({
-        id: issue.id,
-        name: issue.name,
-        sequence_id: issue.sequence_id,
-        state: issue.state,
-        priority: issue.priority,
-        created_at: issue.created_at,
-        updated_at: issue.updated_at,
-      }));
+      const simplifiedIssues = issuesResponse.results.map((issue) => {
+        const stateDetail = issue.state_detail ?? null;
+        const priorityDetail =
+          issue.priority_detail ??
+          (typeof issue.priority === "object" && issue.priority !== null
+            ? (issue.priority as IssuePrioritySummary)
+            : null);
+
+        return {
+          id: issue.id,
+          name: issue.name,
+          sequence_id: issue.sequence_id,
+          state: {
+            id: issue.state ?? stateDetail?.id ?? null,
+            name: stateDetail?.name ?? null,
+            color: stateDetail?.color ?? null,
+            group: stateDetail?.group ?? null,
+          },
+          priority: {
+            id: typeof issue.priority === "string" ? issue.priority : (priorityDetail?.id ?? null),
+            label: priorityDetail?.label ?? priorityDetail?.name ?? null,
+            key: priorityDetail?.key ?? null,
+          },
+          created_at: issue.created_at,
+          updated_at: issue.updated_at,
+        };
+      });
 
       return {
         content: [
