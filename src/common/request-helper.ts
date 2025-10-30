@@ -9,7 +9,7 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
   };
 
   // Only add Content-Type for non-GET requests
-  if (method.toUpperCase() !== 'GET') {
+  if (method.toUpperCase() !== "GET") {
     headers["Content-Type"] = "application/json";
   }
 
@@ -21,7 +21,7 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
     };
 
     // Only include body for non-GET requests
-    if (method.toUpperCase() !== 'GET' && body !== null) {
+    if (method.toUpperCase() !== "GET" && body !== null) {
       config.data = body;
     }
 
