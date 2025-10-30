@@ -4,7 +4,7 @@ import { z } from "zod";
 import { makePlaneRequest } from "../common/request-helper.js";
 import { Module as ModuleSchema } from "../schemas.js";
 
-export const registerModuleTools = (server: McpServer) => {
+export const registerModuleTools = (server: McpServer): void => {
   server.tool(
     "list_modules",
     "Get all modules for a specific project",
