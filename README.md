@@ -1,5 +1,7 @@
 # Plane MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@makeplane/plane-mcp-server)](https://smithery.ai/server/@makeplane/plane-mcp-server)
+
 The Plane MCP Server brings the power of Model Context Protocol (MCP) to Plane, allowing AI agents and developer tools to interact programmatically with your Plane workspace.
 
 Whether you're building intelligent assistants, automation scripts, or workflow-driven tools, this server provides a seamless bridge to Plane’s API—so you can create projects, manage issues, assign tasks, and keep your work in sync with AI-powered tools.
@@ -334,6 +336,14 @@ This server unlocks all sorts of useful capabilities for anyone working with Pla
 - `PLANE_API_HOST_URL` (optional) - The host URL of the Plane API Server. Defaults to https://api.plane.so/
 
 ## Usage
+
+### Installing via Smithery
+
+To install Plane Server for Claude Desktop automatically via [Smithery](https://smithery.ai/session/@makeplane/plane-mcp-server):
+
+```bash
+npx -y @smithery/cli install @makeplane/plane-mcp-server --client claude
+```
 
 ### Claude Desktop
 
