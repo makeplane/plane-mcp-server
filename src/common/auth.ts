@@ -84,13 +84,21 @@ export async function authenticateWithPassword(
     if (setCookieHeader) {
       debugLog(`[AUTH] Set-Cookie headers received: ${JSON.stringify(setCookieHeader)}`);
     } else {
-      debugLog(`[AUTH] WARNING: No Set-Cookie headers in login response!`);
+      debugLog(`[AUTH] ERROR: No Set-Cookie headers in login response!`);
+      return false;
     }
 
-    // Check cookies after login
+    // Verify cookies were stored in the jar
     const loginCookies = await jar.getCookies(host);
     debugLog(`[AUTH] Cookies after login: ${loginCookies.map(c => `${c.key}=${c.value.substring(0, 10)}...`).join(", ")}`);
     debugLog(`[AUTH] Total cookies stored: ${loginCookies.length}`);
+
+    // Validate that session cookie was received
+    const sessionCookie = loginCookies.find((c) => c.key === "session-id");
+    if (!sessionCookie) {
+      debugLog("[AUTH] ERROR: session-id cookie not found after login!");
+      return false;
+    }
 
     // Log full cookie details for debugging
     loginCookies.forEach(c => {
