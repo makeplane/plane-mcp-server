@@ -147,6 +147,19 @@ export async function authenticateWithPassword(
       debugLog(`[AUTH] Cookie detail - ${c.key}: domain=${c.domain}, path=${c.path}, httpOnly=${c.httpOnly}, secure=${c.secure}`);
     });
 
+    // Verify the session works with a test API call
+    try {
+      const verifyResponse = await instance.get(`${host}api/v1/users/me/`);
+      if (verifyResponse.status !== 200) {
+        debugLog(`[AUTH] Session verification failed with status: ${verifyResponse.status}`);
+        return { success: false, error: 'credentials', message: 'Session verification failed' };
+      }
+      debugLog("[AUTH] Session verified successfully");
+    } catch (verifyError) {
+      debugLog(`[AUTH] Session verification request failed: ${verifyError}`);
+      return { success: false, error: 'credentials', message: 'Could not verify session validity' };
+    }
+
     isAuthenticated = true;
     debugLog("[AUTH] Authentication successful");
     return { success: true };
@@ -189,14 +202,21 @@ export function isSessionAuthenticated(): boolean {
  * @returns Promise that resolves when authentication is reset
  */
 export async function resetAuthentication(): Promise<void> {
-  if (axiosInstance) {
-    const jar = (axiosInstance.defaults as any).jar as CookieJar | undefined;
-    if (jar) {
-      await jar.removeAllCookies();
-      debugLog("[AUTH] Cookie jar cleared");
+  try {
+    if (axiosInstance) {
+      const maybeJar = (axiosInstance.defaults as Record<string, unknown>).jar;
+      if (maybeJar instanceof CookieJar) {
+        const jar = maybeJar;
+        await jar.removeAllCookies();
+        debugLog("[AUTH] Cookie jar cleared");
+      }
     }
+  } catch (error) {
+    debugLog(`[AUTH] Error clearing cookies: ${error}`);
+    // Continue with cleanup even if cookie removal fails
+  } finally {
+    axiosInstance = null;
+    isAuthenticated = false;
+    debugLog("[AUTH] Authentication reset");
   }
-  axiosInstance = null;
-  isAuthenticated = false;
-  debugLog("[AUTH] Authentication reset");
 }

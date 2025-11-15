@@ -66,18 +66,23 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
       const jar = (sessionAxios.defaults as any).jar;
       if (jar) {
         const cookies = await jar.getCookies(url);
-        debugLog(`[REQUEST] Cookies available for ${url}: ${cookies.map((c: any) => `${c.key}=${c.value.substring(0, 10)}...`).join(", ")}`);
+        debugLog(`[REQUEST] Cookies available for ${url}: ${cookies.map((c: any) => c.key).join(", ")}`);
         debugLog(`[REQUEST] Total cookies: ${cookies.length}`);
       } else {
         debugLog(`[REQUEST] WARNING: No cookie jar found!`);
       }
 
+      const headers: Record<string, string> = {};
+
+      // Only add Content-Type for non-GET requests
+      if (method.toUpperCase() !== "GET") {
+        headers["Content-Type"] = "application/json";
+      }
+
       const config: AxiosRequestConfig = {
         url,
         method,
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
       };
 
       // Include body for non-GET requests
