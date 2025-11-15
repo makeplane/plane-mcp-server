@@ -119,12 +119,13 @@ export async function authenticateWithPassword(
 
     // Log response details
     debugLog(`[AUTH] Login response status: ${loginResponse.status}`);
-    debugLog(`[AUTH] Login response headers: ${JSON.stringify(loginResponse.headers)}`);
+    const headerNames = Object.keys(loginResponse.headers ?? {});
+    debugLog(`[AUTH] Login response headers present: ${headerNames.join(", ")}`);
 
     // Check if Set-Cookie headers are present
     const setCookieHeader = loginResponse.headers['set-cookie'];
     if (setCookieHeader) {
-      debugLog(`[AUTH] Set-Cookie headers received: ${JSON.stringify(setCookieHeader)}`);
+      debugLog(`[AUTH] Set-Cookie headers received: ${Array.isArray(setCookieHeader) ? setCookieHeader.length : 1} cookie(s)`);
     } else {
       debugLog(`[AUTH] ERROR: No Set-Cookie headers in login response!`);
       return { success: false, error: 'cookies', message: 'No session cookies received from server' };
