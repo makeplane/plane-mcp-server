@@ -250,3 +250,30 @@ export const IssueWorkLog = z.object({
 });
 
 export type IssueWorkLog = z.infer<typeof IssueWorkLog>;
+
+export const Page = z.object({
+  id: z.string().uuid().readonly(),
+  name: z.string().optional(),
+  owned_by: z.string().uuid().readonly(),
+  access: z.number().int().gte(0).lte(1).optional().describe("0 = Public, 1 = Private"),
+  color: z.string().max(255).optional(),
+  labels: z.array(z.string().uuid()).optional(),
+  parent: z.string().uuid().optional(),
+  is_favorite: z.boolean().readonly(),
+  is_locked: z.boolean().optional(),
+  archived_at: z.string().date().optional(),
+  workspace: z.string().uuid().readonly(),
+  created_at: z.string().datetime({ offset: true }).readonly(),
+  updated_at: z.string().datetime({ offset: true }).readonly(),
+  created_by: z.string().uuid().readonly(),
+  updated_by: z.string().uuid().readonly(),
+  view_props: z.any().optional(),
+  logo_props: z.any().optional(),
+  label_ids: z.array(z.string().uuid()).readonly(),
+  project_ids: z.array(z.string().uuid()).readonly(),
+  description_html: z.string().optional(),
+  description: z.any().optional(),
+  description_binary: z.string().optional(),
+});
+
+export type Page = z.infer<typeof Page>;
