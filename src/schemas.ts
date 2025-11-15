@@ -253,7 +253,7 @@ export type IssueWorkLog = z.infer<typeof IssueWorkLog>;
 
 export const Page = z.object({
   id: z.string().uuid().readonly(),
-  name: z.string().optional(),
+  name: z.string().max(255).optional(),
   owned_by: z.string().uuid().readonly(),
   access: z.number().int().gte(0).lte(1).optional().describe("0 = Public, 1 = Private"),
   color: z.string().max(255).optional(),
@@ -261,7 +261,7 @@ export const Page = z.object({
   parent: z.string().uuid().optional(),
   is_favorite: z.boolean().readonly(),
   is_locked: z.boolean().optional(),
-  archived_at: z.string().date().optional(),
+  archived_at: z.string().datetime({ offset: true }).optional(),
   workspace: z.string().uuid().readonly(),
   created_at: z.string().datetime({ offset: true }).readonly(),
   updated_at: z.string().datetime({ offset: true }).readonly(),

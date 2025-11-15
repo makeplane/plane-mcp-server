@@ -11,13 +11,31 @@ function debugLog(message: string) {
   console.error(message);
 }
 
+/**
+ * Makes an authenticated request to the Plane API
+ *
+ * This function handles routing requests to the correct API endpoint and authentication method:
+ * - Pages endpoints (matching `/pages/`, `/pages-summary/`, etc.) use session authentication and /api/ prefix
+ * - All other endpoints use API key authentication and /api/v1/ prefix
+ *
+ * Session authentication requires prior login via plane_login tool.
+ * API key authentication requires PLANE_API_KEY environment variable.
+ *
+ * @template T - Expected response type
+ * @param method - HTTP method (GET, POST, PATCH, DELETE, etc.)
+ * @param path - API path without prefix (e.g., "workspaces/my-workspace/projects")
+ * @param body - Request body for POST/PATCH/PUT requests (optional)
+ * @returns Promise resolving to typed response data
+ * @throws Error if authentication is required but not configured, or if request fails
+ */
 export async function makePlaneRequest<T>(method: string, path: string, body: any = null): Promise<T> {
   const hostUrl = process.env.PLANE_API_HOST_URL || "https://api.plane.so/";
   const host = hostUrl.endsWith("/") ? hostUrl : `${hostUrl}/`;
 
   // Conditional API versioning: Pages use /api/, others use /api/v1/
   // Plane has mixed versioning - pages endpoints don't use version prefix
-  const isPagesEndpoint = /\/pages\/|\/pages$|\/pages-summary\/|\/favorite-pages\/|\/description\/|\/versions\//.test(path);
+  // Match pages-specific patterns to avoid false positives with future endpoints
+  const isPagesEndpoint = /\/pages\/|\/pages$|\/pages-summary\/|\/favorite-pages\/|\/pages\/[^/]+\/description\/|\/pages\/[^/]+\/versions\//.test(path);
   const usesV1 = !isPagesEndpoint;
   const apiPrefix = usesV1 ? 'api/v1/' : 'api/';
   const url = `${host}${apiPrefix}${path}`;

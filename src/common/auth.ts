@@ -12,11 +12,27 @@ function debugLog(message: string) {
   console.error(message);
 }
 
+/**
+ * Result of an authentication attempt
+ * @property success - Whether authentication was successful
+ * @property error - Type of error if authentication failed
+ * @property message - Detailed error message if authentication failed
+ */
+export interface AuthResult {
+  success: boolean;
+  error?: 'network' | 'csrf' | 'credentials' | 'cookies' | 'unknown';
+  message?: string;
+}
+
 let axiosInstance: AxiosInstance | null = null;
 let isAuthenticated = false;
 
 debugLog(`[AUTH] Module loaded - PID: ${process.pid}`);
 
+/**
+ * Gets or creates an Axios instance with cookie jar support for session authentication
+ * @returns Configured Axios instance with cookie persistence
+ */
 export function getAxiosInstance(): AxiosInstance {
   if (!axiosInstance) {
     debugLog("[AUTH] Creating new axios instance with cookie jar");
@@ -28,11 +44,27 @@ export function getAxiosInstance(): AxiosInstance {
   return axiosInstance;
 }
 
+/**
+ * Authenticates with Plane using email and password, establishing a session with cookies
+ *
+ * This function performs a two-step authentication flow:
+ * 1. Requests a CSRF token from the server
+ * 2. Submits credentials with CSRF token to establish session
+ *
+ * Session cookies are automatically stored in the axios instance's cookie jar
+ * and will be included in subsequent requests to /api/ endpoints.
+ *
+ * @param email - User's Plane account email address
+ * @param password - User's Plane account password
+ * @param hostUrl - Plane server URL (e.g., "https://api.plane.so/" or self-hosted URL)
+ * @returns Authentication result with success status and error details if failed
+ * @throws Never throws - all errors are captured in AuthResult
+ */
 export async function authenticateWithPassword(
   email: string,
   password: string,
   hostUrl: string
-): Promise<boolean> {
+): Promise<AuthResult> {
   try {
     const instance = getAxiosInstance();
     const host = hostUrl.endsWith("/") ? hostUrl : `${hostUrl}/`;
@@ -53,7 +85,7 @@ export async function authenticateWithPassword(
 
     if (!csrfCookie) {
       debugLog("[AUTH] CSRF token not found in cookies");
-      return false;
+      return { success: false, error: 'csrf', message: 'CSRF token not found in response' };
     }
 
     // Step 3: Login with email, password, and CSRF token
@@ -85,7 +117,7 @@ export async function authenticateWithPassword(
       debugLog(`[AUTH] Set-Cookie headers received: ${JSON.stringify(setCookieHeader)}`);
     } else {
       debugLog(`[AUTH] ERROR: No Set-Cookie headers in login response!`);
-      return false;
+      return { success: false, error: 'cookies', message: 'No session cookies received from server' };
     }
 
     // Verify cookies were stored in the jar
@@ -97,7 +129,7 @@ export async function authenticateWithPassword(
     const sessionCookie = loginCookies.find((c) => c.key === "session-id");
     if (!sessionCookie) {
       debugLog("[AUTH] ERROR: session-id cookie not found after login!");
-      return false;
+      return { success: false, error: 'cookies', message: 'session-id cookie not found after login' };
     }
 
     // Log full cookie details for debugging
@@ -107,19 +139,54 @@ export async function authenticateWithPassword(
 
     isAuthenticated = true;
     debugLog("[AUTH] Authentication successful");
-    return true;
+    return { success: true };
   } catch (error) {
     debugLog(`[AUTH] Authentication failed: ${error}`);
-    return false;
+
+    if (axios.isAxiosError(error)) {
+      if (!error.response) {
+        return { success: false, error: 'network', message: 'Network error - could not connect to server' };
+      }
+      if (error.response.status === 401 || error.response.status === 403) {
+        return { success: false, error: 'credentials', message: 'Invalid email or password' };
+      }
+      return { success: false, error: 'unknown', message: `Server error: ${error.response.status}` };
+    }
+
+    return { success: false, error: 'unknown', message: String(error) };
   }
 }
 
+/**
+ * Checks whether a session is currently authenticated
+ * @returns true if authenticated, false otherwise
+ */
 export function isSessionAuthenticated(): boolean {
   debugLog(`[AUTH] isSessionAuthenticated() called - returning: ${isAuthenticated}`);
   return isAuthenticated;
 }
 
-export function resetAuthentication(): void {
+/**
+ * Resets the authentication state and clears all session cookies
+ *
+ * This function:
+ * 1. Removes all cookies from the cookie jar
+ * 2. Clears the axios instance
+ * 3. Resets authentication flag
+ *
+ * Call this when logging out or when authentication needs to be cleared.
+ *
+ * @returns Promise that resolves when authentication is reset
+ */
+export async function resetAuthentication(): Promise<void> {
+  if (axiosInstance) {
+    const jar = (axiosInstance.defaults as any).jar as CookieJar | undefined;
+    if (jar) {
+      await jar.removeAllCookies();
+      debugLog("[AUTH] Cookie jar cleared");
+    }
+  }
   axiosInstance = null;
   isAuthenticated = false;
+  debugLog("[AUTH] Authentication reset");
 }

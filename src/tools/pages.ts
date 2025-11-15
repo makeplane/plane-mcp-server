@@ -4,6 +4,36 @@ import { z } from "zod";
 import { makePlaneRequest } from "../common/request-helper.js";
 import { type Page } from "../schemas.js";
 
+/**
+ * Validates that PLANE_WORKSPACE_SLUG environment variable is set
+ * @throws Error if PLANE_WORKSPACE_SLUG is not configured
+ */
+function validateWorkspaceSlug(): void {
+  if (!process.env.PLANE_WORKSPACE_SLUG) {
+    throw new Error(
+      "PLANE_WORKSPACE_SLUG environment variable is required for page operations. " +
+      "Please set it to your workspace slug."
+    );
+  }
+}
+
+/**
+ * Registers Plane Pages API tools
+ *
+ * Provides comprehensive page management tools including:
+ * - CRUD operations: list, get, create, update, delete
+ * - Access control: set_page_access
+ * - Organization: archive, unarchive, lock, unlock
+ * - Favorites: favorite_page, unfavorite_page
+ * - Templates: duplicate_page
+ * - Content: get_page_description, update_page_description
+ * - History: get_page_versions, get_page_version
+ * - Overview: get_pages_summary
+ *
+ * All page operations require session authentication via plane_login.
+ *
+ * @param server - MCP server instance to register tools with
+ */
 export const registerPageTools = (server: McpServer) => {
   server.tool(
     "list_pages",
@@ -12,6 +42,7 @@ export const registerPageTools = (server: McpServer) => {
       project_id: z.string().uuid().describe("The uuid identifier of the project to get pages for"),
     },
     async ({ project_id }) => {
+      validateWorkspaceSlug();
       const pages: Page[] = await makePlaneRequest<Page[]>(
         "GET",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/`
@@ -49,6 +80,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to get"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       const page = await makePlaneRequest<Page>(
         "GET",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/`
@@ -77,6 +109,7 @@ export const registerPageTools = (server: McpServer) => {
       parent: z.string().uuid().optional().describe("Parent page ID if this is a sub-page"),
     },
     async ({ project_id, name, description_html, access, color, parent }) => {
+      validateWorkspaceSlug();
       const pageData: any = {
         name,
       };
@@ -127,6 +160,7 @@ export const registerPageTools = (server: McpServer) => {
       parent: z.string().uuid().optional().describe("Parent page ID if this is a sub-page"),
     },
     async ({ project_id, page_id, name, description_html, access, color, parent }) => {
+      validateWorkspaceSlug();
       const updateData: any = {};
 
       if (name !== undefined) {
@@ -174,6 +208,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to delete"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       await makePlaneRequest(
         "DELETE",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/`
@@ -198,6 +233,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to archive"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       await makePlaneRequest(
         "POST",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/archive/`
@@ -222,6 +258,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to unarchive"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       await makePlaneRequest(
         "DELETE",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/archive/`
@@ -246,6 +283,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to lock"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       await makePlaneRequest(
         "POST",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/lock/`
@@ -270,6 +308,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to unlock"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       await makePlaneRequest(
         "DELETE",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/lock/`
@@ -294,6 +333,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to favorite"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       await makePlaneRequest(
         "POST",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/favorite-pages/${page_id}/`
@@ -318,6 +358,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to unfavorite"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       await makePlaneRequest(
         "DELETE",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/favorite-pages/${page_id}/`
@@ -342,6 +383,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page to duplicate"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       const duplicatedPage = await makePlaneRequest<Page>(
         "POST",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/duplicate/`
@@ -367,6 +409,7 @@ export const registerPageTools = (server: McpServer) => {
       access: z.number().int().gte(0).lte(1).describe("0 = Public, 1 = Private"),
     },
     async ({ project_id, page_id, access }) => {
+      validateWorkspaceSlug();
       const page = await makePlaneRequest<Page>(
         "POST",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/access/`,
@@ -391,6 +434,7 @@ export const registerPageTools = (server: McpServer) => {
       project_id: z.string().uuid().describe("The uuid identifier of the project to get pages summary for"),
     },
     async ({ project_id }) => {
+      validateWorkspaceSlug();
       const pages: Page[] = await makePlaneRequest<Page[]>(
         "GET",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages-summary/`
@@ -415,6 +459,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       const description = await makePlaneRequest(
         "GET",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/description/`
@@ -440,6 +485,7 @@ export const registerPageTools = (server: McpServer) => {
       description_html: z.string().describe("The HTML content for the page description"),
     },
     async ({ project_id, page_id, description_html }) => {
+      validateWorkspaceSlug();
       const description = await makePlaneRequest(
         "PATCH",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/description/`,
@@ -465,6 +511,7 @@ export const registerPageTools = (server: McpServer) => {
       page_id: z.string().uuid().describe("The uuid identifier of the page"),
     },
     async ({ project_id, page_id }) => {
+      validateWorkspaceSlug();
       const versions = await makePlaneRequest(
         "GET",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/versions/`
@@ -490,6 +537,7 @@ export const registerPageTools = (server: McpServer) => {
       version_id: z.string().uuid().describe("The uuid identifier of the specific version"),
     },
     async ({ project_id, page_id, version_id }) => {
+      validateWorkspaceSlug();
       const version = await makePlaneRequest(
         "GET",
         `workspaces/${process.env.PLANE_WORKSPACE_SLUG}/projects/${project_id}/pages/${page_id}/versions/${version_id}/`
