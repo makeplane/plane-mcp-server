@@ -1,13 +1,18 @@
 import axios, { AxiosRequestConfig } from "axios";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { getAxiosInstance, isSessionAuthenticated } from "./auth.js";
 
-const logFile = path.join("/tmp", "plane-mcp-debug.log");
+const logFile = path.join(os.tmpdir(), "plane-mcp-debug.log");
 function debugLog(message: string) {
   const timestamp = new Date().toISOString();
   const logMessage = `[${timestamp}] ${message}\n`;
-  fs.appendFileSync(logFile, logMessage);
+  try {
+    fs.appendFileSync(logFile, logMessage);
+  } catch (error) {
+    console.error(`[REQUEST] debugLog write failed: ${error}`);
+  }
   console.error(message);
 }
 

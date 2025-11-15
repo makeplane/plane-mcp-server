@@ -2,13 +2,18 @@ import axios, { AxiosInstance } from "axios";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
-const logFile = path.join("/tmp", "plane-mcp-debug.log");
+const logFile = path.join(os.tmpdir(), "plane-mcp-debug.log");
 function debugLog(message: string) {
   const timestamp = new Date().toISOString();
   const logMessage = `[${timestamp}] ${message}\n`;
-  fs.appendFileSync(logFile, logMessage);
+  try {
+    fs.appendFileSync(logFile, logMessage);
+  } catch (error) {
+    console.error(`[AUTH] debugLog write failed: ${error}`);
+  }
   console.error(message);
 }
 
@@ -77,9 +82,14 @@ export async function authenticateWithPassword(
     debugLog("[AUTH] CSRF token requested");
 
     // Step 2: Extract CSRF token from cookie jar for the request header
-    const jar = (instance.defaults as any).jar as CookieJar;
+    const maybeJar = (instance.defaults as Record<string, unknown>).jar;
+    if (!(maybeJar instanceof CookieJar)) {
+      debugLog("[AUTH] ERROR: Cookie jar not found on axios instance");
+      return { success: false, error: "cookies", message: "Cookie jar not available for session authentication" };
+    }
+    const jar = maybeJar;
     const cookies = await jar.getCookies(host);
-    debugLog(`[AUTH] Cookies after CSRF request: ${cookies.map(c => `${c.key}=${c.value.substring(0, 10)}...`).join(", ")}`);
+    debugLog(`[AUTH] Cookies after CSRF request: ${cookies.map(c => c.key).join(", ")}`);
 
     const csrfCookie = cookies.find((c) => c.key === "csrftoken");
 
@@ -122,7 +132,7 @@ export async function authenticateWithPassword(
 
     // Verify cookies were stored in the jar
     const loginCookies = await jar.getCookies(host);
-    debugLog(`[AUTH] Cookies after login: ${loginCookies.map(c => `${c.key}=${c.value.substring(0, 10)}...`).join(", ")}`);
+    debugLog(`[AUTH] Cookies after login: ${loginCookies.map(c => c.key).join(", ")}`);
     debugLog(`[AUTH] Total cookies stored: ${loginCookies.length}`);
 
     // Validate that session cookie was received
