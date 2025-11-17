@@ -20,320 +20,14 @@ This server unlocks all sorts of useful capabilities for anyone working with Pla
 - Build smart apps that interact naturally with Plane—whether it’s an AI agent logging work, or a bot keeping projects tidy.
 
 
-## Tools
+## Usage
 
-### Users
+### Configuration Parameters
 
-- `get_user`  
-  - Get the current user's information
-  - No parameters required
-
-### Projects
-
-- `get_projects`
-  - Get all projects for the current user
-  - No parameters required
-
-- `create_project`   
-  - Create a new project
-  - Parameters:
-    - `name` (string, required): Project name 
-
-### Issue Types
-
-- `list_issue_types`  
-    - Get all issue types for a specific project
-    - Parameters: 
-      - `project_id` (string, required): UUID of the project
-
-- `get_issue_type`
-  - Get details of a specific issue type
-  - Parameters: 
-      - `project_id` (string, required): UUID of the project
-      - `type_id` (string, required): UUID of the issue type
-
-- `create_issue_type`
-  - Create a new issue type in a project
-  - Parameters: 
-    - `project_id` (string, required): UUID of the project 
-    - `issue_type_data`: Object containing:
-       - `name` (string, required): Name of the issue type 
-        - `description` (string, required): Description of the issue type 
-
-- `update_issue_type` 
-  - Update an existing issue type
-  - Parameters: 
-    - `project_id` (string, required): UUID of the project 
-    - `type_id` (string, required): UUID of the issue type
-    - `issue_type_data` (object): Fields to update on the issue type
-
-- `delete_issue_type` 
-  - Delete an issue type
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `type_id`  (string, required): UUID of the issue type
-
-### States
-
-- `list_states` 
-  - Get all states for a specific project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-
-- `get_state` 
-  - Get details of a specific state
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `state_id` (string, required): UUID of the state 
-
-- `create_state` 
-  - Create a new state in a project
-   - Parameters:
-     - `project_id` (string, required): UUID of the project
-     - `state_data`: Object containing:
-        - `name` (string, required): Name of the state 
-        - `color` (string, required): Color code for the state 
-
-- `update_state`
-   - Update an existing state
-   - Parameters:
-      - `project_id` (string, required): UUID of the project 
-      - `state_id` (string, required): UUID of the state 
-      - `state_data` (object): Fields to update on the state 
-
-- `delete_state` 
-  - Delete a state
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `state_id` (string, required): UUID of the state 
-
-### Labels
-
-- `list_labels` 
-  - Get all labels for a specific project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-
-- `get_label` 
-  - Get details of a specific label
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `label_id` (string, required): UUID of the label 
-
-- `create_label` 
-  - Create a new label in a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `label_data`: Object containing:
-      - `name` (string, required): Name of the label 
-      - `color` (string, required): Color code for the label 
-
-- `update_label` 
-  - Update an existing label
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `label_id`  (string, required): UUID of the label
-    - `label_data` (object): Fields to update on the label 
-
-- `delete_label`
-  - Delete a label
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `label_id` (string, required): UUID of the label 
-
-### Issues
-
-- `get_issue_using_readable_identifier` 
-  - Get issue details using readable identifier (e.g., PROJ-123)
-  - Parameters:
-    - `project_identifier` (string, required)
-    - `issue_identifier` (string, required): Issue numbe: Project identifier (e.g., "PROJ") r (e.g., "123") 
-
-- `get_issue_comments` 
-  - Get all comments for a specific issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `issue_id` (string, required): UUID of the issue 
-
-- `add_issue_comment` 
-  - Add a comment to an issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `issue_id` (string, required): UUID of the issue 
-    - `comment_html` (string, required): HTML content of the comment 
-
-- `create_issue` 
-  - Create a new issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `issue_data`: Object containing:
-     - `name` (string, required): Title of the issue 
-      - `description_html` (string, required): HTML description of the issue 
-
-- `update_issue` 
-  - Update an existing issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `issue_id` (string, required): UUID of the issue 
-    - `issue_data` (object): Fields to update on the issue 
-
-### Modules
-
-- `list_modules` 
-  - Get all modules for a specific project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-
-- `get_module` 
-  - Get details of a specific module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `module_id` (string, required): UUID of the module 
-
-- `create_module` 
-  - Create a new module in a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `module_data`: Object containing:
-      - `name` (string, required): Name of the module 
-
-- `update_module` 
-  - Update an existing module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `module_id` (string, required): UUID of the module 
-    - `module_data` (object): Fields to update on the module 
-
-- `delete_module` 
-  - Delete a module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `module_id` (string, required): UUID of the module 
-
-### Module Issues
-
-- `list_module_issues` 
-  - Get all issues for a specific module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `module_id` (string, required): UUID of the module 
-
-- `add_module_issues` 
-  - Add issues to a module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `module_id` (string, required): UUID of the module 
-    - `issues` (string[], required): Array of issue UUIDs to add 
-
-- `delete_module_issue` 
-  - Remove an issue from a module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `module_id` (string, required): UUID of the module 
-    - `issue_id` (string, required): UUID of the issue to remove 
-
-### Cycles
-
-- `list_cycles` 
-  - Get all cycles for a specific project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-
-- `get_cycle` 
-  - Get details of a specific cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `cycle_id` (string, required): UUID of the cycle 
-
-- `create_cycle` 
-  - Create a new cycle in a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `cycle_data`: Object containing:
-     - `name` (string, required): Name of the cycle 
-      - `start_date` (string, required): Start date (YYYY-MM-DD) 
-      - `end_date` (string, required)
-: End date (YYYY-MM-DD) 
-- `update_cycle` 
-  - Update an existing cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `cycle_id` (string, required): UUID of the cycle 
-    - `cycle_data` (object): Fields to update on the cycle 
-
-- `delete_cycle` 
-  - Delete a cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `cycle_id` (string, required): UUID of the cycle 
-
-### Cycle Issues
-
-- `list_cycle_issues` 
-  - Get all issues for a specific cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `cycle_id` (string, required): UUID of the cycle 
-
-- `add_cycle_issues` 
-  - Add issues to a cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `cycle_id` (string, required): UUID of the cycle 
-    - `issues` (string[], required): Array of issue UUIDs to add 
-
-- `delete_cycle_issue` 
-  - Remove an issue from a cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `cycle_id` (string, required): UUID of the cycle 
-    - `issue_id` (string, required): UUID of the issue to remove 
-
-### Work Logs
-
-- `get_issue_worklogs` 
-  - Get all worklogs for a specific issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `issue_id` (string, required): UUID of the issue 
-
-- `get_total_worklogs` 
-  - Get total logged time for a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-
-- `create_worklog` 
-  - Create a new worklog for an issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `issue_id` (string, required): UUID of the issue 
-    - `worklog_data`: Object containing:
-      - `description` (string, required): Description of the work done 
-      - `duration` (integer, required): Duration in minutes 
-
-- `update_worklog` 
-  - Update an existing worklog
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_id` (string, required): UUID of the issue 
-    - `worklog_id` (string, required): UUID of the worklog 
-    - `worklog_data` (object): Fields to update on the worklog 
-
-- `delete_worklog` 
-  - Delete a worklog
-  - Parameters:
-    - `project_id` (string, required): UUID of the project 
-    - `issue_id` (string, required): UUID of the issue 
-    - `worklog_id` (string, required): UUID of the worklog 
-
-
-## Configuration Parameters
-
-- `PLANE_API_KEY` - Your Plane API token. You can generate one from the Workspace Settings > API Tokens page (`/settings/api-tokens/`) in the Plane app. 
+- `PLANE_API_KEY` - Your Plane API token. You can generate one from the Workspace Settings > API Tokens page (`/settings/api-tokens/`) in the Plane app.
 - `PLANE_WORKSPACE_SLUG` - The workspace slug for your Plane instance. The workspace-slug represents the unique workspace identifier for a workspace in Plane. It can be found in the URL.
 - `PLANE_API_HOST_URL` (optional) - The host URL of the Plane API Server. Defaults to https://api.plane.so/
 
-## Usage
 
 ### Claude Desktop
 
@@ -381,6 +75,313 @@ You can also connect Plane to [VSCode](https://code.visualstudio.com/docs/copilo
 }
 
 ```
+
+## Tools
+
+### Users
+
+- `get_user`
+  - Get the current user's information
+  - No parameters required
+
+### Projects
+
+- `get_projects`
+  - Get all projects for the current user
+  - No parameters required
+
+- `create_project`
+  - Create a new project
+  - Parameters:
+    - `name` (string, required): Project name
+
+### Issue Types
+
+- `list_issue_types`
+    - Get all issue types for a specific project
+    - Parameters:
+      - `project_id` (string, required): UUID of the project
+
+- `get_issue_type`
+  - Get details of a specific issue type
+  - Parameters:
+      - `project_id` (string, required): UUID of the project
+      - `type_id` (string, required): UUID of the issue type
+
+- `create_issue_type`
+  - Create a new issue type in a project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_type_data`: Object containing:
+       - `name` (string, required): Name of the issue type
+        - `description` (string, required): Description of the issue type
+
+- `update_issue_type`
+  - Update an existing issue type
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `type_id` (string, required): UUID of the issue type
+    - `issue_type_data` (object): Fields to update on the issue type
+
+- `delete_issue_type`
+  - Delete an issue type
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `type_id`  (string, required): UUID of the issue type
+
+### States
+
+- `list_states`
+  - Get all states for a specific project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+
+- `get_state`
+  - Get details of a specific state
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `state_id` (string, required): UUID of the state
+
+- `create_state`
+  - Create a new state in a project
+   - Parameters:
+     - `project_id` (string, required): UUID of the project
+     - `state_data`: Object containing:
+        - `name` (string, required): Name of the state
+        - `color` (string, required): Color code for the state
+
+- `update_state`
+   - Update an existing state
+   - Parameters:
+      - `project_id` (string, required): UUID of the project
+      - `state_id` (string, required): UUID of the state
+      - `state_data` (object): Fields to update on the state
+
+- `delete_state`
+  - Delete a state
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `state_id` (string, required): UUID of the state
+
+### Labels
+
+- `list_labels`
+  - Get all labels for a specific project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+
+- `get_label`
+  - Get details of a specific label
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `label_id` (string, required): UUID of the label
+
+- `create_label`
+  - Create a new label in a project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `label_data`: Object containing:
+      - `name` (string, required): Name of the label
+      - `color` (string, required): Color code for the label
+
+- `update_label`
+  - Update an existing label
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `label_id`  (string, required): UUID of the label
+    - `label_data` (object): Fields to update on the label
+
+- `delete_label`
+  - Delete a label
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `label_id` (string, required): UUID of the label
+
+### Issues
+
+- `get_issue_using_readable_identifier`
+  - Get issue details using readable identifier (e.g., PROJ-123)
+  - Parameters:
+    - `project_identifier` (string, required)
+    - `issue_identifier` (string, required): Issue numbe: Project identifier (e.g., "PROJ") r (e.g., "123")
+
+- `get_issue_comments`
+  - Get all comments for a specific issue
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_id` (string, required): UUID of the issue
+
+- `add_issue_comment`
+  - Add a comment to an issue
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_id` (string, required): UUID of the issue
+    - `comment_html` (string, required): HTML content of the comment
+
+- `create_issue`
+  - Create a new issue
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_data`: Object containing:
+     - `name` (string, required): Title of the issue
+      - `description_html` (string, required): HTML description of the issue
+
+- `update_issue`
+  - Update an existing issue
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_id` (string, required): UUID of the issue
+    - `issue_data` (object): Fields to update on the issue
+
+### Modules
+
+- `list_modules`
+  - Get all modules for a specific project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+
+- `get_module`
+  - Get details of a specific module
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `module_id` (string, required): UUID of the module
+
+- `create_module`
+  - Create a new module in a project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `module_data`: Object containing:
+      - `name` (string, required): Name of the module
+
+- `update_module`
+  - Update an existing module
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `module_id` (string, required): UUID of the module
+    - `module_data` (object): Fields to update on the module
+
+- `delete_module`
+  - Delete a module
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `module_id` (string, required): UUID of the module
+
+### Module Issues
+
+- `list_module_issues`
+  - Get all issues for a specific module
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `module_id` (string, required): UUID of the module
+
+- `add_module_issues`
+  - Add issues to a module
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `module_id` (string, required): UUID of the module
+    - `issues` (string[], required): Array of issue UUIDs to add
+
+- `delete_module_issue`
+  - Remove an issue from a module
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `module_id` (string, required): UUID of the module
+    - `issue_id` (string, required): UUID of the issue to remove
+
+### Cycles
+
+- `list_cycles`
+  - Get all cycles for a specific project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+
+- `get_cycle`
+  - Get details of a specific cycle
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `cycle_id` (string, required): UUID of the cycle
+
+- `create_cycle`
+  - Create a new cycle in a project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `cycle_data`: Object containing:
+     - `name` (string, required): Name of the cycle
+      - `start_date` (string, required): Start date (YYYY-MM-DD)
+      - `end_date` (string, required)
+: End date (YYYY-MM-DD)
+- `update_cycle`
+  - Update an existing cycle
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `cycle_id` (string, required): UUID of the cycle
+    - `cycle_data` (object): Fields to update on the cycle
+
+- `delete_cycle`
+  - Delete a cycle
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `cycle_id` (string, required): UUID of the cycle
+
+### Cycle Issues
+
+- `list_cycle_issues`
+  - Get all issues for a specific cycle
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `cycle_id` (string, required): UUID of the cycle
+
+- `add_cycle_issues`
+  - Add issues to a cycle
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `cycle_id` (string, required): UUID of the cycle
+    - `issues` (string[], required): Array of issue UUIDs to add
+
+- `delete_cycle_issue`
+  - Remove an issue from a cycle
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `cycle_id` (string, required): UUID of the cycle
+    - `issue_id` (string, required): UUID of the issue to remove
+
+### Work Logs
+
+- `get_issue_worklogs`
+  - Get all worklogs for a specific issue
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_id` (string, required): UUID of the issue
+
+- `get_total_worklogs`
+  - Get total logged time for a project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+
+- `create_worklog`
+  - Create a new worklog for an issue
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_id` (string, required): UUID of the issue
+    - `worklog_data`: Object containing:
+      - `description` (string, required): Description of the work done
+      - `duration` (integer, required): Duration in minutes
+
+- `update_worklog`
+  - Update an existing worklog
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_id` (string, required): UUID of the issue
+    - `worklog_id` (string, required): UUID of the worklog
+    - `worklog_data` (object): Fields to update on the worklog
+
+- `delete_worklog`
+  - Delete a worklog
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `issue_id` (string, required): UUID of the issue
+    - `worklog_id` (string, required): UUID of the worklog
+
 
 ## License
 
