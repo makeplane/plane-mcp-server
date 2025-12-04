@@ -12,7 +12,7 @@ from plane.models.work_items import (
     WorkItemSearch,
 )
 
-from plane_mcp.client import get_plane_client
+from plane_mcp.client import get_plane_client_context
 
 
 def register_work_item_tools(mcp: FastMCP) -> None:
@@ -20,7 +20,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_work_items(
-        workspace_slug: str,
         project_id: str,
         cursor: str | None = None,
         per_page: int | None = None,
@@ -32,7 +31,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     ) -> list[WorkItem]:
         """
         List all work items in a project.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
@@ -43,12 +42,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             order_by: Field to order results by. Prefix with '-' for descending order
             external_id: External system identifier for filtering or lookup
             external_source: External system source name for filtering or lookup
-            
+
         Returns:
             List of WorkItem objects
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         params = WorkItemQueryParams(
             cursor=cursor,
             per_page=per_page,
@@ -58,18 +57,17 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_id=external_id,
             external_source=external_source,
         )
-        
+
         response: PaginatedWorkItemResponse = client.work_items.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
             params=params,
         )
-        
+
         return response.results
 
     @mcp.tool()
     def create_work_item(
-        workspace_slug: str,
         project_id: str,
         name: str,
         assignees: list[str] | None = None,
@@ -92,7 +90,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     ) -> WorkItem:
         """
         Create a new work item.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
@@ -114,12 +112,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             state: UUID of the state
             estimate_point: Estimate point value
             type: Work item type identifier
-            
+
         Returns:
             Created WorkItem object
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         data = CreateWorkItem(
             name=name,
             assignees=assignees,
@@ -140,14 +138,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             estimate_point=estimate_point,
             type=type,
         )
-        
+
         return client.work_items.create(
             workspace_slug=workspace_slug, project_id=project_id, data=data
         )
 
     @mcp.tool()
     def retrieve_work_item(
-        workspace_slug: str,
         project_id: str,
         work_item_id: str,
         expand: str | None = None,
@@ -158,7 +155,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     ) -> WorkItemDetail:
         """
         Retrieve a work item by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
@@ -168,12 +165,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_id: External system identifier for filtering
             external_source: External system source name for filtering
             order_by: Field to order results by (typically not used for single item retrieval)
-            
+
         Returns:
             WorkItemDetail object with expanded relationships
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         params = RetrieveQueryParams(
             expand=expand,
             fields=fields,
@@ -181,7 +178,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_source=external_source,
             order_by=order_by,
         )
-        
+
         return client.work_items.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -191,7 +188,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def retrieve_work_item_by_identifier(
-        workspace_slug: str,
         project_identifier: str,
         issue_identifier: int,
         expand: str | None = None,
@@ -202,7 +198,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     ) -> WorkItemDetail:
         """
         Retrieve a work item by project identifier and issue sequence number.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_identifier: Project identifier string (e.g., "MP" for "My Project")
@@ -212,12 +208,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_id: External system identifier for filtering
             external_source: External system source name for filtering
             order_by: Field to order results by (typically not used for single item retrieval)
-            
+
         Returns:
             WorkItemDetail object with expanded relationships
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         params = RetrieveQueryParams(
             expand=expand,
             fields=fields,
@@ -225,7 +221,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_source=external_source,
             order_by=order_by,
         )
-        
+
         return client.work_items.retrieve_by_identifier(
             workspace_slug=workspace_slug,
             project_identifier=project_identifier,
@@ -235,7 +231,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def update_work_item(
-        workspace_slug: str,
         project_id: str,
         work_item_id: str,
         name: str | None = None,
@@ -259,7 +254,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     ) -> WorkItem:
         """
         Update a work item by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
@@ -282,12 +277,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             state: UUID of the state
             estimate_point: Estimate point value
             type: Work item type identifier
-            
+
         Returns:
             Updated WorkItem object
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         data = UpdateWorkItem(
             name=name,
             assignees=assignees,
@@ -308,7 +303,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             estimate_point=estimate_point,
             type=type,
         )
-        
+
         return client.work_items.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -317,23 +312,22 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def delete_work_item(workspace_slug: str, project_id: str, work_item_id: str) -> None:
+    def delete_work_item(project_id: str, work_item_id: str) -> None:
         """
         Delete a work item by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             work_item_id: UUID of the work item
         """
-        client = get_plane_client()
+        client, workspace_slug = get_plane_client_context()
         client.work_items.delete(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
 
     @mcp.tool()
     def search_work_items(
-        workspace_slug: str,
         query: str,
         expand: str | None = None,
         fields: str | None = None,
@@ -343,22 +337,22 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     ) -> WorkItemSearch:
         """
         Search work items across a workspace.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
-            query: This is a free-form text search and will be used to search the work items 
+            query: This is a free-form text search and will be used to search the work items
                     by name, description etc.
             expand: Comma-separated list of related fields to expand in response
             fields: Comma-separated list of fields to include in response
             external_id: External system identifier for filtering
             external_source: External system source name for filtering
             order_by: Field to order results by. Prefix with '-' for descending order
-            
+
         Returns:
             WorkItemSearch object containing search results
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         params = RetrieveQueryParams(
             expand=expand,
             fields=fields,
@@ -366,6 +360,5 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_source=external_source,
             order_by=order_by,
         )
-        
-        return client.work_items.search(workspace_slug=workspace_slug, query=query, params=params)
 
+        return client.work_items.search(workspace_slug=workspace_slug, query=query, params=params)

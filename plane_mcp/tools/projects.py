@@ -14,7 +14,7 @@ from plane.models.projects import (
 from plane.models.query_params import PaginatedQueryParams
 from plane.models.users import UserLite
 
-from plane_mcp.client import get_plane_client
+from plane_mcp.client import get_plane_client_context
 
 
 def register_project_tools(mcp: FastMCP) -> None:
@@ -22,7 +22,6 @@ def register_project_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_projects(
-        workspace_slug: str,
         cursor: str | None = None,
         per_page: int | None = None,
         expand: str | None = None,
@@ -31,7 +30,7 @@ def register_project_tools(mcp: FastMCP) -> None:
     ) -> list[Project]:
         """
         List all projects in a workspace.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             cursor: Pagination cursor for getting next set of results
@@ -39,12 +38,12 @@ def register_project_tools(mcp: FastMCP) -> None:
             expand: Comma-separated list of related fields to expand in response
             fields: Comma-separated list of fields to include in response
             order_by: Field to order results by. Prefix with '-' for descending order
-            
+
         Returns:
             List of Project objects
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         params = PaginatedQueryParams(
             cursor=cursor,
             per_page=per_page,
@@ -52,17 +51,16 @@ def register_project_tools(mcp: FastMCP) -> None:
             fields=fields,
             order_by=order_by,
         )
-        
+
         response: PaginatedProjectResponse = client.projects.list(
             workspace_slug=workspace_slug,
             params=params,
         )
-        
+
         return response.results
 
     @mcp.tool()
     def create_project(
-        workspace_slug: str,
         name: str,
         identifier: str,
         description: str | None = None,
@@ -85,7 +83,7 @@ def register_project_tools(mcp: FastMCP) -> None:
     ) -> Project:
         """
         Create a new project.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             name: Project name
@@ -107,12 +105,12 @@ def register_project_tools(mcp: FastMCP) -> None:
             external_source: External system source name
             external_id: External system identifier
             is_issue_type_enabled: Enable issue types
-            
+
         Returns:
             Created Project object
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         data = CreateProject(
             name=name,
             identifier=identifier,
@@ -134,27 +132,26 @@ def register_project_tools(mcp: FastMCP) -> None:
             external_id=external_id,
             is_issue_type_enabled=is_issue_type_enabled,
         )
-        
+
         return client.projects.create(workspace_slug=workspace_slug, data=data)
 
     @mcp.tool()
-    def retrieve_project(workspace_slug: str, project_id: str) -> Project:
+    def retrieve_project(project_id: str) -> Project:
         """
         Retrieve a project by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            
+
         Returns:
             Project object
         """
-        client = get_plane_client()
+        client, workspace_slug = get_plane_client_context()
         return client.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
     def update_project(
-        workspace_slug: str,
         project_id: str,
         name: str | None = None,
         description: str | None = None,
@@ -181,7 +178,7 @@ def register_project_tools(mcp: FastMCP) -> None:
     ) -> Project:
         """
         Update a project by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
@@ -207,12 +204,12 @@ def register_project_tools(mcp: FastMCP) -> None:
             is_time_tracking_enabled: Enable time tracking
             default_state: UUID of the default state
             estimate: Estimate configuration
-            
+
         Returns:
             Updated Project object
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         data = UpdateProject(
             name=name,
             description=description,
@@ -237,82 +234,77 @@ def register_project_tools(mcp: FastMCP) -> None:
             default_state=default_state,
             estimate=estimate,
         )
-        
+
         return client.projects.update(
             workspace_slug=workspace_slug, project_id=project_id, data=data
         )
 
     @mcp.tool()
-    def delete_project(workspace_slug: str, project_id: str) -> None:
+    def delete_project(project_id: str) -> None:
         """
         Delete a project by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
         """
-        client = get_plane_client()
+        client, workspace_slug = get_plane_client_context()
         client.projects.delete(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def get_project_worklog_summary(
-        workspace_slug: str, project_id: str
-    ) -> list[ProjectWorklogSummary]:
+    def get_project_worklog_summary(project_id: str) -> list[ProjectWorklogSummary]:
         """
         Get work log summary for a project.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            
+
         Returns:
             List of ProjectWorklogSummary objects containing work item IDs and durations
         """
-        client = get_plane_client()
+        client, workspace_slug = get_plane_client_context()
         return client.projects.get_worklog_summary(
             workspace_slug=workspace_slug, project_id=project_id
         )
 
     @mcp.tool()
     def get_project_members(
-        workspace_slug: str, project_id: str, params: dict[str, Any] | None = None
+        project_id: str, params: dict[str, Any] | None = None
     ) -> list[UserLite]:
         """
         Get all members of a project.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             params: Optional query parameters as a dictionary
-            
+
         Returns:
             List of UserLite objects representing project members
         """
-        client = get_plane_client()
+        client, workspace_slug = get_plane_client_context()
         return client.projects.get_members(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
 
     @mcp.tool()
-    def get_project_features(workspace_slug: str, project_id: str) -> ProjectFeature:
+    def get_project_features(project_id: str) -> ProjectFeature:
         """
         Get features of a project.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            
+
         Returns:
             ProjectFeature object containing enabled/disabled features
         """
-        client = get_plane_client()
-        return client.projects.get_features(
-            workspace_slug=workspace_slug, project_id=project_id
-        )
+        client, workspace_slug = get_plane_client_context()
+        return client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
     def update_project_features(
-        workspace_slug: str,
         project_id: str,
         epics: bool | None = None,
         modules: bool | None = None,
@@ -324,7 +316,7 @@ def register_project_tools(mcp: FastMCP) -> None:
     ) -> ProjectFeature:
         """
         Update features of a project.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
@@ -335,12 +327,12 @@ def register_project_tools(mcp: FastMCP) -> None:
             pages: Enable/disable pages feature
             intakes: Enable/disable intakes feature
             work_item_types: Enable/disable work item types feature
-            
+
         Returns:
             Updated ProjectFeature object
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         data = ProjectFeature(
             epics=epics,
             modules=modules,
@@ -350,8 +342,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             intakes=intakes,
             work_item_types=work_item_types,
         )
-        
+
         return client.projects.update_features(
             workspace_slug=workspace_slug, project_id=project_id, data=data
         )
-

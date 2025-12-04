@@ -14,7 +14,7 @@ from plane.models.work_item_property_configurations import (
     TextAttributeSettings,
 )
 
-from plane_mcp.client import get_plane_client
+from plane_mcp.client import get_plane_client_context
 
 # Type alias for settings
 PropertySettings = TextAttributeSettings | DateAttributeSettings | dict | None
@@ -25,24 +25,23 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_work_item_properties(
-        workspace_slug: str,
         project_id: str,
         type_id: str,
         params: dict[str, Any] | None = None,
     ) -> list[WorkItemProperty]:
         """
         List work item properties for a work item type.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             type_id: UUID of the work item type
             params: Optional query parameters as a dictionary
-            
+
         Returns:
             List of WorkItemProperty objects
         """
-        client = get_plane_client()
+        client, workspace_slug = get_plane_client_context()
         return client.work_item_properties.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -52,7 +51,6 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def create_work_item_property(
-        workspace_slug: str,
         project_id: str,
         type_id: str,
         display_name: str,
@@ -71,7 +69,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
     ) -> WorkItemProperty:
         """
         Create a new work item property.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
@@ -91,23 +89,25 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             external_source: External system source name
             external_id: External system identifier
             options: List of option dictionaries for OPTION properties
-            
+
         Returns:
             Created WorkItemProperty object
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         # Convert settings dict to appropriate settings object if needed
         processed_settings: PropertySettings = None
         if settings:
-            prop_type = property_type.value if isinstance(property_type, PropertyType) else property_type
+            prop_type = (
+                property_type.value if isinstance(property_type, PropertyType) else property_type
+            )
             if prop_type == "TEXT" and isinstance(settings, dict):
                 processed_settings = TextAttributeSettings(**settings)
             elif prop_type == "DATETIME" and isinstance(settings, dict):
                 processed_settings = DateAttributeSettings(**settings)
             else:
                 processed_settings = settings
-        
+
         data = CreateWorkItemProperty(
             display_name=display_name,
             property_type=property_type,
@@ -123,31 +123,30 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             external_id=external_id,
             options=options,
         )
-        
+
         return client.work_item_properties.create(
             workspace_slug=workspace_slug, project_id=project_id, type_id=type_id, data=data
         )
 
     @mcp.tool()
     def retrieve_work_item_property(
-        workspace_slug: str,
         project_id: str,
         type_id: str,
         work_item_property_id: str,
     ) -> WorkItemProperty:
         """
         Retrieve a work item property by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             type_id: UUID of the work item type
             work_item_property_id: UUID of the property
-            
+
         Returns:
             WorkItemProperty object
         """
-        client = get_plane_client()
+        client, workspace_slug = get_plane_client_context()
         return client.work_item_properties.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -157,7 +156,6 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def update_work_item_property(
-        workspace_slug: str,
         project_id: str,
         type_id: str,
         work_item_property_id: str,
@@ -176,7 +174,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
     ) -> WorkItemProperty:
         """
         Update a work item property by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
@@ -196,23 +194,25 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             validation_rules: Validation rules dictionary
             external_source: External system source name
             external_id: External system identifier
-            
+
         Returns:
             Updated WorkItemProperty object
         """
-        client = get_plane_client()
-        
+        client, workspace_slug = get_plane_client_context()
+
         # Convert settings dict to appropriate settings object if needed
         processed_settings: PropertySettings = None
         if settings and property_type:
-            prop_type = property_type.value if isinstance(property_type, PropertyType) else property_type
+            prop_type = (
+                property_type.value if isinstance(property_type, PropertyType) else property_type
+            )
             if prop_type == "TEXT" and isinstance(settings, dict):
                 processed_settings = TextAttributeSettings(**settings)
             elif prop_type == "DATETIME" and isinstance(settings, dict):
                 processed_settings = DateAttributeSettings(**settings)
             else:
                 processed_settings = settings
-        
+
         data = UpdateWorkItemProperty(
             display_name=display_name,
             property_type=property_type,
@@ -227,7 +227,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             external_source=external_source,
             external_id=external_id,
         )
-        
+
         return client.work_item_properties.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -238,25 +238,23 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def delete_work_item_property(
-        workspace_slug: str,
         project_id: str,
         type_id: str,
         work_item_property_id: str,
     ) -> None:
         """
         Delete a work item property by ID.
-        
+
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             type_id: UUID of the work item type
             work_item_property_id: UUID of the property
         """
-        client = get_plane_client()
+        client, workspace_slug = get_plane_client_context()
         client.work_item_properties.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
             type_id=type_id,
             work_item_property_id=work_item_property_id,
         )
-

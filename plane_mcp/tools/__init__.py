@@ -17,4 +17,3 @@ __all__ = [
     "register_initiative_tools",
     "register_work_item_property_tools",
 ]
-

@@ -1,5 +1,6 @@
 """Main entry point for the Plane MCP Server."""
 
+import os
 import sys
 
 import uvicorn
@@ -40,6 +41,13 @@ def main() -> None:
         uvicorn.run(starlette_app, host="127.0.0.1", port=8211)
     else:
         # For stdio transport, use the standard run method
+
+        # Validate API_KEY and PLANE_WORKSPACE_SLUG are set
+        if not os.getenv("PLANE_API_KEY"):
+            raise ValueError("PLANE_API_KEY is not set")
+        if not os.getenv("PLANE_WORKSPACE_SLUG"):
+            raise ValueError("PLANE_WORKSPACE_SLUG is not set")
+
         app.run(transport=transport)
 
 

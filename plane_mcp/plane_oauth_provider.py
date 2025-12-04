@@ -35,13 +35,40 @@ from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
 from key_value.aio.protocols import AsyncKeyValue
 from plane.models.users import UserLite
-from pydantic import AnyHttpUrl, SecretStr, field_validator
+from pydantic import AnyHttpUrl, BaseModel, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = get_logger(__name__)
 
 
 DEFAULT_PLANE_BASE_URL = "https://api.plane.so"
+
+
+class WorkspaceDetail(BaseModel):
+    """Workspace detail information."""
+
+    name: str
+    slug: str
+    id: str
+    logo_url: str | None = None
+
+
+class PlaneOAuthAppInstallation(BaseModel):
+    """Plane OAuth app installation information."""
+
+    id: str
+    workspace_detail: WorkspaceDetail
+    created_at: str
+    updated_at: str
+    deleted_at: str | None = None
+    status: str
+    created_by: str | None = None
+    updated_by: str | None = None
+    workspace: str
+    application: str
+    installed_by: str
+    app_bot: str
+    webhook: str | None = None
 
 
 class PlaneOAuthProviderSettings(BaseSettings):
@@ -124,6 +151,19 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
 
                 expires_at = int(time.time() + 3600)
 
+                installations: list[PlaneOAuthAppInstallation] = await client.get(
+                    f"{base_url}/auth/o/app-installation/",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                if not installations:
+                    raise ValueError("No app installations found")
+
+                installation = installations[0]
+
                 # Create AccessToken with Plane user info
                 return AccessToken(
                     token=token,
@@ -139,6 +179,8 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                         "avatar": user.avatar,
                         "avatar_url": user.avatar_url,
                         "plane_user_data": user_data,
+                        "workspace_slug": installation.workspace_detail.slug,
+                        "workspace": installation.workspace_detail,
                     },
                 )
 
