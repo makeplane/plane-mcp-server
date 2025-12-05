@@ -20,13 +20,7 @@ def main() -> None:
 
     # For HTTP transports, get the Starlette app and add CORS middleware
     if transport in {"sse", "streamable-http", "http"}:
-        # Get the Starlette app for the specified transport
-        if transport == "sse":
-            starlette_app = app.http_app(transport="sse")
-        elif transport == "streamable-http":
-            starlette_app = app.http_app(transport="streamable-http")
-        else:
-            starlette_app = app.http_app(transport="http")
+        starlette_app = app.http_app(transport=transport)
 
         # Add CORS middleware directly to the Starlette app
         starlette_app.add_middleware(
@@ -38,7 +32,7 @@ def main() -> None:
         )
 
         # Run the server with uvicorn
-        uvicorn.run(starlette_app, host="127.0.0.1", port=8211)
+        uvicorn.run(starlette_app, host="0.0.0.0", port=8211, log_level="info")
     else:
         # For stdio transport, use the standard run method
 

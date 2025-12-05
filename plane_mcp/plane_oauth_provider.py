@@ -124,10 +124,12 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify Plane OAuth token by calling Plane API."""
+        logger.info(f"verify_token called with token (first 20 chars): {token[:20] if token else 'None'}...")
         try:
             # Build the user endpoint URL
             base_url = self.plane_base_url.rstrip("/")
             user_url = f"{base_url}/api/v1/users/me/"
+            logger.info(f"Verifying token against: {user_url}")
 
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 # Get current user info to verify token
@@ -139,8 +141,9 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                     },
                 )
 
+                logger.info(f"Plane API response status: {response.status_code}")
                 if response.status_code != 200:
-                    logger.debug(
+                    logger.info(
                         f"Plane token verification failed: {response.status_code} - {response.text[:200]}"
                     )
                     return None
@@ -151,13 +154,17 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
 
                 expires_at = int(time.time() + 3600)
 
-                installations: list[PlaneOAuthAppInstallation] = await client.get(
+                logger.info(f"User: ({user.id}) - {user.display_name}")
+
+                installations_response = await client.get(
                     f"{base_url}/auth/o/app-installation/",
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",
                     },
                 )
+
+                installations: list[PlaneOAuthAppInstallation] = installations_response.json()
 
                 if not installations:
                     raise ValueError("No app installations found")
@@ -179,16 +186,16 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                         "avatar": user.avatar,
                         "avatar_url": user.avatar_url,
                         "plane_user_data": user_data,
-                        "workspace_slug": installation.workspace_detail.slug,
-                        "workspace": installation.workspace_detail,
+                        "workspace_slug": installation.get('workspace_detail', {}).get('slug'),
+                        "workspace": installation.get('workspace_detail', {}),
                     },
                 )
 
         except httpx.RequestError as e:
-            logger.debug(f"Failed to verify Plane token (request error): {e}")
+            logger.info(f"Failed to verify Plane token (request error): {e}")
             return None
         except Exception as e:
-            logger.debug(f"Failed to verify Plane token: {e}")
+            logger.info(f"Failed to verify Plane token: {e}", exc_info=True)
             return None
 
 
