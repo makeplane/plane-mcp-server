@@ -11,7 +11,7 @@ from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
-from plane_mcp.server import header_mcp, oauth_mcp, stdio_mcp
+from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
 
 logger = get_logger(__name__)
 
@@ -45,15 +45,15 @@ def main() -> None:
         if not os.getenv("PLANE_WORKSPACE_SLUG"):
             raise ValueError("PLANE_WORKSPACE_SLUG is not set")
 
-        stdio_mcp.run()
+        get_stdio_mcp().run()
         return
 
 
     if server_mode == ServerMode.HTTP:
-        oauth_app = oauth_mcp.http_app()
-        header_app = header_mcp.http_app()
+        oauth_app = get_oauth_mcp().http_app()
+        header_app = get_header_mcp().http_app()
 
-        oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
+        oauth_well_known = get_oauth_mcp().auth.get_well_known_routes(mcp_path="/mcp")
 
         app = Starlette(
             routes=[

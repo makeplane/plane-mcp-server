@@ -11,14 +11,13 @@ from plane_mcp.tools.work_item_properties import register_work_item_property_too
 from plane_mcp.tools.work_items import register_work_item_tools
 
 
-def register_tools(mcps: list[FastMCP]) -> None:
+def register_tools(mcp: FastMCP) -> None:
     """Register all tools with the MCP server."""
-    for mcp in mcps:
-        register_project_tools(mcp)
-        register_work_item_tools(mcp)
-        register_cycle_tools(mcp)
-        register_user_tools(mcp)
-        register_module_tools(mcp)
-        register_initiative_tools(mcp)
-        register_work_item_property_tools(mcp)
+    register_project_tools(mcp)
+    register_work_item_tools(mcp)
+    register_cycle_tools(mcp)
+    register_user_tools(mcp)
+    register_module_tools(mcp)
+    register_initiative_tools(mcp)
+    register_work_item_property_tools(mcp)
 
