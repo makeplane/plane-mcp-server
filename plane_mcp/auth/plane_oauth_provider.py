@@ -124,12 +124,12 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify Plane OAuth token by calling Plane API."""
-        logger.debug(f"verify_token called with token (first 20 chars): {token[:20] if token else 'None'}...")
+        logger.info(f"verify_token called with token (first 20 chars): {token[:20] if token else 'None'}...")
         try:
             # Build the user endpoint URL
             base_url = self.plane_base_url.rstrip("/")
             user_url = f"{base_url}/api/v1/users/me/"
-            logger.debug(f"Verifying token against: {user_url}")
+            logger.info(f"Verifying token against: {user_url}")
 
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 # Get current user info to verify token
@@ -141,7 +141,7 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                     },
                 )
 
-                logger.debug(f"Plane API response status: {response.status_code}")
+                logger.info(f"Plane API response status: {response.status_code}")
                 if response.status_code != 200:
                     logger.info(
                         f"Plane token verification failed: {response.status_code} - {response.text[:200]}"
@@ -154,7 +154,7 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
 
                 expires_at = int(time.time() + 3600)
 
-                logger.debug(f"User: ({user.id}) - {user.display_name}")
+                logger.info(f"User: ({user.id}) - {user.display_name}")
 
                 installations_response = await client.get(
                     f"{base_url}/auth/o/app-installation/",
@@ -351,7 +351,7 @@ class PlaneOAuthProvider(OAuthProxy):
             valid_scopes=["read", "write"],
         )
 
-        logger.debug(
+        logger.info(
             "Initialized Plane OAuth provider for client %s with scopes: %s",
             settings.client_id,
             required_scopes_final,
