@@ -29,5 +29,5 @@ ENV FASTMCP_PORT=8211
 # Default to streamable-http transport, but allow override via command
 # Users can override by passing different transport as CMD
 ENTRYPOINT ["python", "-m", "plane_mcp"]
-CMD ["streamable-http"]
+CMD ["http"]
 
