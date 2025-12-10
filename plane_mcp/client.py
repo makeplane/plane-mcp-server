@@ -48,6 +48,7 @@ def get_plane_client_context() -> PlaneClientContext:
         # Determine authentication method to use appropriate PlaneClient constructor
         auth_method = stored_access_token.claims.get("auth_method", "oauth")
         token = stored_access_token.token
+        workspace_slug = stored_access_token.claims.get("workspace_slug", "")
 
         # For API key auth methods, use api_key parameter; for OAuth, use access_token
         if auth_method in ("api_key_env", "api_key_header"):
