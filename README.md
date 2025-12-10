@@ -9,64 +9,11 @@ A Model Context Protocol (MCP) server for Plane integration. This server provide
 * 🌐 **Remote & Local**: Works both locally and as a remote service
 * 🛠️ **Extensible**: Easy to add new tools and resources
 
-## Installation
-
-### Using uvx (Recommended - No Installation Required)
-
-`uvx` allows you to run the server directly without installing it globally. This is the recommended method for MCP clients:
-
-```bash
-uvx plane-mcp-server stdio
-```
-
-No installation needed! `uvx` will automatically download and run the package from PyPI.
-
-### Installing with uv (Optional)
-
-If you prefer to install the package globally:
-
-```bash
-uv pip install plane-mcp-server
-```
-
-Then you can run it using:
-```bash
-plane-mcp-server stdio
-# or
-python -m plane_mcp stdio
-```
-
-### Installing with pip (Alternative)
-
-```bash
-pip install plane-mcp-server
-```
-
-### Development Installation
-
-```bash
-git clone <repository-url>
-cd plane-mcp-server-py
-uv pip install -e ".[dev]"
-```
-
 ## Usage
 
 The server supports three transport methods. **We recommend using `uvx`** as it doesn't require installation.
 
 ### 1. Stdio Transport (for local use)
-
-**Recommended: Using uvx (no installation required)**
-```bash
-uvx plane-mcp-server stdio
-```
-
-**Alternative: If installed locally**
-```bash
-python -m plane_mcp stdio
-# or
-plane-mcp-server stdio
-```
 
 **MCP Client Configuration** (using uvx - recommended):
 
@@ -75,56 +22,60 @@ plane-mcp-server stdio
   "mcpServers": {
     "plane": {
       "command": "uvx",
-      "args": ["plane-mcp-server", "stdio"]
+      "args": ["plane-mcp-server", "stdio"],
+      "env": {
+        "PLANE_API_KEY": "<your-api-key>",
+        "PLANE_WORKSPACE_SLUG": "<your-workspace-slug>",
+        "PLANE_BASE_URL": "https://api.plane.so"
+      }
     }
   }
 }
 ```
 
-**MCP Client Configuration** (if installed globally):
+### 2. Remote HTTP Transport with OAuth
+
+Connect to the hosted Plane MCP server using OAuth authentication.
+
+**URL**: `https://mcp.plane.so/mcp`
+
+**MCP Client Configuration** (for tools like Claude Desktop without native remote MCP support):
 
 ```json
 {
   "mcpServers": {
     "plane": {
-      "command": "plane-mcp-server",
-      "args": ["stdio"]
+      "command": "npx",
+      "args": ["mcp-remote@0.1.29", "https://mcp.plane.so/mcp"]
     }
   }
 }
 ```
 
-### 2. SSE Transport (Server-Sent Events - Deprecated)
+**Note**: OAuth authentication will be handled automatically when connecting to the remote server.
 
-```bash
-uvx plane-mcp-server sse
-```
+### 3. Remote HTTP Transport using PAT Token
 
-**SSE transport connection**:
+Connect to the hosted Plane MCP server using a Personal Access Token (PAT).
 
-```json
-{
-  "mcpServers": {
-    "plane": {
-      "url": "http://localhost:8000/sse"
-    }
-  }
-}
-```
+**URL**: `https://mcp.plane.so/api-key/mcp`
 
-### 3. Streamable HTTP Transport (Recommended for remote connections)
+**Headers**:
+- `Authorization: Bearer <PAT_TOKEN>`
+- `X-Workspace-slug: <SLUG>`
 
-```bash
-uvx plane-mcp-server streamable-http
-```
-
-**Streamable HTTP transport connection**:
+**MCP Client Configuration** (for tools like Claude Desktop without native remote MCP support):
 
 ```json
 {
   "mcpServers": {
     "plane": {
-      "url": "http://localhost:8000/mcp"
+      "command": "npx",
+      "args": ["mcp-remote@0.1.29", "https://mcp.plane.so/api-key/mcp"],
+      "headers": {
+        "Authorization": "Bearer <PAT_TOKEN>",
+        "X-Workspace-slug": "<SLUG>"
+      }
     }
   }
 }
@@ -136,36 +87,19 @@ uvx plane-mcp-server streamable-http
 
 The server requires authentication via environment variables:
 
-- `PLANE_BASE_URL`: Base URL for Plane API (default: `https://api.plane.so`)
-- `PLANE_API_KEY`: API key for authentication (required if access_token not provided)
-- `PLANE_ACCESS_TOKEN`: Access token for authentication (required if api_key not provided)
+- `PLANE_BASE_URL`: Base URL for Plane API (default: `https://api.plane.so`) - Optional
+- `PLANE_API_KEY`: API key for authentication (required for stdio transport)
+- `PLANE_WORKSPACE_SLUG`: Workspace slug identifier (required for stdio transport)
+- `PLANE_ACCESS_TOKEN`: Access token for authentication (alternative to API key)
 
-**Example**:
+**Example** (for stdio transport):
 ```bash
 export PLANE_BASE_URL="https://api.plane.so"
 export PLANE_API_KEY="your-api-key"
-# or
-export PLANE_ACCESS_TOKEN="your-access-token"
+export PLANE_WORKSPACE_SLUG="your-workspace-slug"
 ```
 
-### Server Configuration
-
-When running the server with **SSE or Streamable HTTP protocols**, you can set:
-
-- `FASTMCP_PORT`: Port the server listens on (default: `8017`)
-
-**Example (Windows PowerShell)**:
-```powershell
-$env:FASTMCP_PORT="8007"
-uvx plane-mcp-server streamable-http
-```
-
-**Example (Linux/macOS)**:
-```bash
-FASTMCP_PORT=8007 uvx plane-mcp-server streamable-http
-```
-
-**Note**: When using the **stdio protocol**, no additional environment variables are required.
+**Note**: For remote HTTP transports (OAuth or PAT), authentication is handled via the connection method (OAuth flow or PAT headers) and does not require these environment variables.
 
 ## Available Tools
 
@@ -280,4 +214,43 @@ MIT License - see LICENSE for details.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Deprecation Notice
+
+⚠️ **The Node.js-based `plane-mcp-server` is deprecated and no longer maintained.**
+
+This repository represents the new Python+FastMCP based implementation of the Plane MCP server. If you were using the previous Node.js version, please migrate to this Python-based version for continued support and updates.
+
+The new implementation offers:
+- Better type safety with Pydantic models
+- Improved performance with FastMCP
+- Enhanced tool coverage
+- Active maintenance and development
+
+For migration assistance, please refer to the configuration examples in this README or open an issue for support.
+
+**Old Node.js Configuration (Deprecated):**
+
+If you were using the previous Node.js-based `@makeplane/plane-mcp-server`, your configuration looked like this:
+
+```json
+{
+  "mcpServers": {
+    "plane": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@makeplane/plane-mcp-server"
+      ],
+      "env": {
+        "PLANE_API_KEY": "<YOUR_API_KEY>",
+        "PLANE_API_HOST_URL": "<HOST_URL_FOR_SELF_HOSTED>",
+        "PLANE_WORKSPACE_SLUG": "<YOUR_WORKSPACE_SLUG>"
+      }
+    }
+  }
+}
+```
+
+**Please migrate to the new Python-based configuration shown in the Usage section above.**
 
