@@ -58,7 +58,7 @@ def main() -> None:
                 # Well-known routes for OAuth and Header HTTP
                 *oauth_well_known,
                 # Mount both MCP servers
-                Mount("/header", app=header_app),
+                Mount("/api-key", app=header_app),
                 Mount("/", app=oauth_app),
             ],
             lifespan=lambda app: combined_lifespan(oauth_app, header_app),
