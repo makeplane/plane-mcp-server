@@ -124,7 +124,9 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify Plane OAuth token by calling Plane API."""
-        logger.info(f"verify_token called with token (first 20 chars): {token[:20] if token else 'None'}...")
+        logger.info(
+            f"verify_token called with token (first 20 chars): {token[:20] if token else 'None'}..."
+        )
         try:
             # Build the user endpoint URL
             base_url = self.plane_base_url.rstrip("/")
@@ -187,8 +189,8 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                         "avatar": user.avatar,
                         "avatar_url": user.avatar_url,
                         "plane_user_data": user_data,
-                        "workspace_slug": installation.get('workspace_detail', {}).get('slug'),
-                        "workspace": installation.get('workspace_detail', {}),
+                        "workspace_slug": installation.get("workspace_detail", {}).get("slug"),
+                        "workspace": installation.get("workspace_detail", {}),
                     },
                 )
 

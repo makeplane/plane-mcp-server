@@ -11,10 +11,8 @@ from plane_mcp.tools import register_tools
 
 
 def get_oauth_mcp():
-
     redis_host = os.getenv("REDIS_HOST")
     redis_port = os.getenv("REDIS_PORT")
-
 
     if redis_host and redis_port:
         client_storage = RedisStore(host=redis_host, port=redis_port)

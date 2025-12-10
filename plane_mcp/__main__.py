@@ -37,7 +37,6 @@ def main() -> None:
     if len(sys.argv) > 1:
         server_mode = ServerMode(sys.argv[1])
 
-
     if server_mode == ServerMode.STDIO:
         # Validate API_KEY and PLANE_WORKSPACE_SLUG are set
         if not os.getenv("PLANE_API_KEY"):
@@ -47,7 +46,6 @@ def main() -> None:
 
         get_stdio_mcp().run()
         return
-
 
     if server_mode == ServerMode.HTTP:
         oauth_app = get_oauth_mcp().http_app()
@@ -81,4 +79,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

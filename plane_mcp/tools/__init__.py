@@ -20,4 +20,3 @@ def register_tools(mcp: FastMCP) -> None:
     register_module_tools(mcp)
     register_initiative_tools(mcp)
     register_work_item_property_tools(mcp)
-
