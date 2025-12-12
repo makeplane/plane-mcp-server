@@ -66,7 +66,8 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
 
         const jar = (sessionAxios.defaults as any).jar;
         if (jar) {
-          const cookies = await jar.getCookies(host);
+          // Use full URL to match path-scoped cookies
+          const cookies = await jar.getCookies(url);
           const csrfCookie = cookies.find((c: any) => ["csrftoken", "csrf", "XSRF-TOKEN"].includes(c.key));
           if (csrfCookie) {
             headers["X-CSRFToken"] = csrfCookie.value;

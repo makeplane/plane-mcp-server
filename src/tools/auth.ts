@@ -33,7 +33,7 @@ export const registerAuthTools = (server: McpServer) => {
                 {
                   message: "Successfully authenticated with Plane",
                   authenticated: true,
-                  note: "Session authentication enabled for Pages and /api/ endpoints. Other endpoints (/api/v1/) use API key if configured.",
+                  note: "Session authentication enables access to Pages and /api/ endpoints. Standard /api/v1/ endpoints (Issues, Projects, etc.) still require an API key if configured.",
                 },
                 null,
                 2
@@ -81,10 +81,10 @@ export const registerAuthTools = (server: McpServer) => {
                 api_key_configured: hasApiKey,
                 current_mode: authenticated ? "session (Pages + /api/ endpoints)" : hasApiKey ? "api_key (/api/v1/ endpoints)" : "unauthenticated",
                 note: authenticated
-                  ? "Using session authentication - access to Pages and /api/ endpoints"
+                  ? "Session active: Access to Pages and /api/ endpoints enabled. (API key required for /api/v1/ endpoints)"
                   : hasApiKey
-                  ? "Using API key - access to /api/v1/ endpoints only"
-                  : "No authentication configured",
+                  ? "API Key active: Access to /api/v1/ endpoints only."
+                  : "No authentication configured.",
               },
               null,
               2
