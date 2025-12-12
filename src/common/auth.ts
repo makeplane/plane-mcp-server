@@ -1,21 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
-import fs from "fs";
-import os from "os";
-import path from "path";
-
-const logFile = path.join(os.tmpdir(), "plane-mcp-debug.log");
-function debugLog(message: string) {
-  const timestamp = new Date().toISOString();
-  const logMessage = `[${timestamp}] ${message}\n`;
-  try {
-    fs.appendFileSync(logFile, logMessage);
-  } catch (error) {
-    console.error(`[AUTH] debugLog write failed: ${error}`);
-  }
-  console.error(message);
-}
+import { debugLog } from "./debug.js";
 
 /**
  * Result of an authentication attempt
@@ -32,7 +18,7 @@ export interface AuthResult {
 let axiosInstance: AxiosInstance | null = null;
 let isAuthenticated = false;
 
-debugLog(`[AUTH] Module loaded - PID: ${process.pid}`);
+debugLog(`[AUTH] Module loaded - PID: ${process.pid}`).catch(() => {});
 
 /**
  * Gets or creates an Axios instance with cookie jar support for session authentication
@@ -40,11 +26,11 @@ debugLog(`[AUTH] Module loaded - PID: ${process.pid}`);
  */
 export function getAxiosInstance(): AxiosInstance {
   if (!axiosInstance) {
-    debugLog("[AUTH] Creating new axios instance with cookie jar");
+    debugLog("[AUTH] Creating new axios instance with cookie jar").catch(() => {});
     const jar = new CookieJar();
     axiosInstance = wrapper(axios.create({ jar, withCredentials: true }));
   } else {
-    debugLog("[AUTH] Reusing existing axios instance");
+    debugLog("[AUTH] Reusing existing axios instance").catch(() => {});
   }
   return axiosInstance;
 }
@@ -74,29 +60,29 @@ export async function authenticateWithPassword(
     const instance = getAxiosInstance();
     const host = hostUrl.endsWith("/") ? hostUrl : `${hostUrl}/`;
 
-    debugLog("[AUTH] Starting authentication flow...");
-    debugLog(`[AUTH] Host URL: ${host}`);
+    await debugLog("[AUTH] Starting authentication flow...");
+    await debugLog(`[AUTH] Host URL: ${host}`);
 
     // Step 1: Get CSRF token (stored in cookie jar automatically)
     const csrfResponse = await instance.get(`${host}auth/get-csrf-token/`);
-    debugLog(`[AUTH] CSRF response status: ${csrfResponse.status}`);
-    debugLog(`[AUTH] CSRF response headers: ${JSON.stringify(csrfResponse.headers)}`);
-    debugLog("[AUTH] CSRF token requested");
+    await debugLog(`[AUTH] CSRF response status: ${csrfResponse.status}`);
+    await debugLog(`[AUTH] CSRF response headers: ${JSON.stringify(csrfResponse.headers)}`);
+    await debugLog("[AUTH] CSRF token requested");
 
     // Step 2: Extract CSRF token from cookie jar for the request header
     const maybeJar = (instance.defaults as Record<string, unknown>).jar;
     if (!(maybeJar instanceof CookieJar)) {
-      debugLog("[AUTH] ERROR: Cookie jar not found on axios instance");
+      await debugLog("[AUTH] ERROR: Cookie jar not found on axios instance");
       return { success: false, error: "cookies", message: "Cookie jar not available for session authentication" };
     }
     const jar = maybeJar;
     const cookies = await jar.getCookies(host);
-    debugLog(`[AUTH] Cookies after CSRF request: ${cookies.map(c => c.key).join(", ")}`);
+    await debugLog(`[AUTH] Cookies after CSRF request: ${cookies.map(c => c.key).join(", ")}`);
 
     const csrfCookie = cookies.find((c) => ["csrftoken", "csrf", "XSRF-TOKEN"].includes(c.key));
 
     if (!csrfCookie) {
-      debugLog("[AUTH] CSRF token not found in cookies");
+      await debugLog("[AUTH] CSRF token not found in cookies");
       return { success: false, error: 'csrf', message: 'CSRF token not found in response' };
     }
 
@@ -106,10 +92,10 @@ export async function authenticateWithPassword(
     formData.append('email', email);
     formData.append('password', password);
 
-    debugLog(`[AUTH] Sending login request to: ${host}auth/sign-in/`);
-    debugLog(`[AUTH] Login email: ${email}`);
-    debugLog(`[AUTH] Login password: ${password}`);
-    debugLog(`[AUTH] CSRF token: ${csrfCookie.value.substring(0, 10)}...`);
+    await debugLog(`[AUTH] Sending login request to: ${host}auth/sign-in/`);
+    await debugLog(`[AUTH] Login email: ${email}`);
+    // Do NOT log password
+    await debugLog("[AUTH] CSRF token found");
 
     const loginResponse = await instance.post(
       `${host}auth/sign-in/`,
@@ -125,71 +111,73 @@ export async function authenticateWithPassword(
     );
 
     // Log response details
-    debugLog(`[AUTH] Login response status: ${loginResponse.status}`);
+    await debugLog(`[AUTH] Login response status: ${loginResponse.status}`);
     const headerNames = Object.keys(loginResponse.headers ?? {});
-    debugLog(`[AUTH] Login response headers present: ${headerNames.join(", ")}`);
+    await debugLog(`[AUTH] Login response headers present: ${headerNames.join(", ")}`);
 
     // Log ALL headers for debugging
-    debugLog(`[AUTH] Login response headers FULL: ${JSON.stringify(loginResponse.headers)}`);
+    await debugLog(`[AUTH] Login response headers FULL: ${JSON.stringify(loginResponse.headers)}`);
 
     // Check if Set-Cookie headers are present
     const setCookieHeader = loginResponse.headers['set-cookie'];
     if (setCookieHeader) {
-      debugLog(`[AUTH] Set-Cookie headers received: ${Array.isArray(setCookieHeader) ? setCookieHeader.length : 1} cookie(s)`);
+      await debugLog(`[AUTH] Set-Cookie headers received: ${Array.isArray(setCookieHeader) ? setCookieHeader.length : 1} cookie(s)`);
     } else {
-      debugLog(`[AUTH] WARNING: No Set-Cookie headers in login response! Checking cookie jar anyway...`);
+      await debugLog(`[AUTH] WARNING: No Set-Cookie headers in login response! Checking cookie jar anyway...`);
       // We don't return error here, we assume cookies might be in the jar (e.g. from redirects or axios processing)
     }
 
     // Verify cookies were stored in the jar
     const loginCookies = await jar.getCookies(host);
-    debugLog(`[AUTH] Cookies after login: ${loginCookies.map(c => c.key).join(", ")}`);
-    debugLog(`[AUTH] Total cookies stored: ${loginCookies.length}`);
+    await debugLog(`[AUTH] Cookies after login: ${loginCookies.map(c => c.key).join(", ")}`);
+    await debugLog(`[AUTH] Total cookies stored: ${loginCookies.length}`);
 
     // Validate that session cookie was received
     const sessionCookieNames = ["session-id", "sessionid", "plane_session"];
     const sessionCookie = loginCookies.find((c) => sessionCookieNames.includes(c.key));
     if (!sessionCookie) {
-      debugLog(`[AUTH] WARNING: No standard session cookie found (looked for: ${sessionCookieNames.join(", ")})`);
+      await debugLog(`[AUTH] WARNING: No standard session cookie found (looked for: ${sessionCookieNames.join(", ")})`);
       // We don't return error here anymore, we let the verification step decide
     }
 
     // Log full cookie details for debugging
     loginCookies.forEach(c => {
-      debugLog(`[AUTH] Cookie detail - ${c.key}: domain=${c.domain}, path=${c.path}, httpOnly=${c.httpOnly}, secure=${c.secure}`);
+      // Redacted logging of cookie values
+      debugLog(`[AUTH] Cookie detail - ${c.key}: domain=${c.domain}, path=${c.path}, httpOnly=${c.httpOnly}, secure=${c.secure}`).catch(() => {});
     });
 
     // Verify the session works with a test API call
     // Note: Use /api/ endpoint (not /api/v1/) since session cookies work with /api/ endpoints
     try {
       const verifyUrl = `${host}api/users/me/`;
-      debugLog(`[AUTH] Attempting to verify session with: ${verifyUrl}`);
-      debugLog(`[AUTH] Cookies being sent: ${loginCookies.map(c => `${c.key}=${c.value.substring(0, 10)}...`).join(", ")}`);
+      await debugLog(`[AUTH] Attempting to verify session with: ${verifyUrl}`);
+      await debugLog(`[AUTH] Cookies being sent: ${loginCookies.map(c => c.key).join(", ")}`);
 
       const verifyResponse = await instance.get(verifyUrl);
-      debugLog(`[AUTH] Verification response status: ${verifyResponse.status}`);
-      debugLog(`[AUTH] Verification response data: ${JSON.stringify(verifyResponse.data).substring(0, 200)}`);
+      await debugLog(`[AUTH] Verification response status: ${verifyResponse.status}`);
+      // Log only non-sensitive data if possible, or truncate heavily
+      await debugLog(`[AUTH] Verification response data: ${JSON.stringify(verifyResponse.data).substring(0, 50)}...`);
 
       if (verifyResponse.status !== 200) {
-        debugLog(`[AUTH] Session verification failed with status: ${verifyResponse.status}`);
+        await debugLog(`[AUTH] Session verification failed with status: ${verifyResponse.status}`);
         return { success: false, error: 'credentials', message: 'Session verification failed' };
       }
-      debugLog("[AUTH] Session verified successfully");
+      await debugLog("[AUTH] Session verified successfully");
     } catch (verifyError) {
       if (axios.isAxiosError(verifyError)) {
-        debugLog(`[AUTH] Session verification axios error - status: ${verifyError.response?.status}, message: ${verifyError.message}`);
-        debugLog(`[AUTH] Verification error response data: ${JSON.stringify(verifyError.response?.data)}`);
-        debugLog(`[AUTH] Verification error response headers: ${JSON.stringify(verifyError.response?.headers)}`);
+        await debugLog(`[AUTH] Session verification axios error - status: ${verifyError.response?.status}, message: ${verifyError.message}`);
+        // Avoid logging full sensitive data in error responses
+        await debugLog(`[AUTH] Verification error response status: ${verifyError.response?.status}`);
       }
-      debugLog(`[AUTH] Session verification request failed: ${verifyError}`);
+      await debugLog(`[AUTH] Session verification request failed: ${verifyError}`);
       return { success: false, error: 'credentials', message: 'Could not verify session validity' };
     }
 
     isAuthenticated = true;
-    debugLog("[AUTH] Authentication successful");
+    await debugLog("[AUTH] Authentication successful");
     return { success: true };
   } catch (error) {
-    debugLog(`[AUTH] Authentication failed: ${error}`);
+    await debugLog(`[AUTH] Authentication failed: ${error}`);
 
     if (axios.isAxiosError(error)) {
       if (!error.response) {
@@ -210,7 +198,7 @@ export async function authenticateWithPassword(
  * @returns true if authenticated, false otherwise
  */
 export function isSessionAuthenticated(): boolean {
-  debugLog(`[AUTH] isSessionAuthenticated() called - returning: ${isAuthenticated}`);
+  debugLog(`[AUTH] isSessionAuthenticated() called - returning: ${isAuthenticated}`).catch(() => {});
   return isAuthenticated;
 }
 
@@ -233,15 +221,15 @@ export async function resetAuthentication(): Promise<void> {
       if (maybeJar instanceof CookieJar) {
         const jar = maybeJar;
         await jar.removeAllCookies();
-        debugLog("[AUTH] Cookie jar cleared");
+        await debugLog("[AUTH] Cookie jar cleared");
       }
     }
   } catch (error) {
-    debugLog(`[AUTH] Error clearing cookies: ${error}`);
+    await debugLog(`[AUTH] Error clearing cookies: ${error}`);
     // Continue with cleanup even if cookie removal fails
   } finally {
     axiosInstance = null;
     isAuthenticated = false;
-    debugLog("[AUTH] Authentication reset");
+    await debugLog("[AUTH] Authentication reset");
   }
 }

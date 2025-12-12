@@ -1,20 +1,6 @@
 import axios, { AxiosRequestConfig } from "axios";
-import fs from "fs";
-import os from "os";
-import path from "path";
 import { getAxiosInstance, isSessionAuthenticated } from "./auth.js";
-
-const logFile = path.join(os.tmpdir(), "plane-mcp-debug.log");
-function debugLog(message: string) {
-  const timestamp = new Date().toISOString();
-  const logMessage = `[${timestamp}] ${message}\n`;
-  try {
-    fs.appendFileSync(logFile, logMessage);
-  } catch (error) {
-    console.error(`[REQUEST] debugLog write failed: ${error}`);
-  }
-  console.error(message);
-}
+import { debugLog } from "./debug.js";
 
 /**
  * Makes an authenticated request to the Plane API
@@ -48,8 +34,8 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
   // Pages endpoints require session authentication, others use API key
   const requiresSession = isPagesEndpoint;
 
-  debugLog(`[REQUEST] ${method} ${url}`);
-  debugLog(`[REQUEST] Auth mode: ${requiresSession ? 'session (cookies)' : 'api_key'} (prefix: ${apiPrefix})`);
+  await debugLog(`[REQUEST] ${method} ${url}`);
+  await debugLog(`[REQUEST] Auth mode: ${requiresSession ? 'session (cookies)' : 'api_key'} (prefix: ${apiPrefix})`);
 
   try {
     let response;
@@ -66,10 +52,10 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
       const jar = (sessionAxios.defaults as any).jar;
       if (jar) {
         const cookies = await jar.getCookies(url);
-        debugLog(`[REQUEST] Cookies available for ${url}: ${cookies.map((c: any) => c.key).join(", ")}`);
-        debugLog(`[REQUEST] Total cookies: ${cookies.length}`);
+        await debugLog(`[REQUEST] Cookies available for ${url}: ${cookies.map((c: any) => c.key).join(", ")}`);
+        await debugLog(`[REQUEST] Total cookies: ${cookies.length}`);
       } else {
-        debugLog(`[REQUEST] WARNING: No cookie jar found!`);
+        await debugLog(`[REQUEST] WARNING: No cookie jar found!`);
       }
 
       const headers: Record<string, string> = {};
@@ -84,9 +70,9 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
           const csrfCookie = cookies.find((c: any) => ["csrftoken", "csrf", "XSRF-TOKEN"].includes(c.key));
           if (csrfCookie) {
             headers["X-CSRFToken"] = csrfCookie.value;
-            debugLog(`[REQUEST] Adding CSRF token: ${csrfCookie.value.substring(0, 10)}...`);
+            await debugLog(`[REQUEST] CSRF token found`);
           } else {
-            debugLog(`[REQUEST] WARNING: No CSRF token found in cookies!`);
+            await debugLog(`[REQUEST] WARNING: No CSRF token found in cookies!`);
           }
         }
       }
@@ -130,13 +116,19 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
       response = await axios(config);
     }
 
-    debugLog(`[REQUEST] Response status: ${response.status}`);
+    await debugLog(`[REQUEST] Response status: ${response.status}`);
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error)) {
-      debugLog(`[REQUEST] Error: ${error.message}, status: ${error.response?.status}`);
-      debugLog(`[REQUEST] Error response: ${JSON.stringify(error.response?.data)}`);
-      throw new Error(`Request failed: ${error.message} (${error.response?.status}). Response: ${JSON.stringify(error.response?.data)}`);
+      await debugLog(`[REQUEST] Error: ${error.message}, status: ${error.response?.status}`);
+      
+      // Log full error response ONLY if VERBOSE debug mode is enabled
+      if (process.env.PLANE_MCP_DEBUG === 'verbose') {
+         await debugLog(`[REQUEST] Full error response: ${JSON.stringify(error.response?.data)}`);
+      }
+      
+      // Throw sanitized error without response data
+      throw new Error(`Request failed: ${error.message} (${error.response?.status})`);
     }
     throw error;
   }
