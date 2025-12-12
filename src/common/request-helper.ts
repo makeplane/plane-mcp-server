@@ -74,9 +74,21 @@ export async function makePlaneRequest<T>(method: string, path: string, body: an
 
       const headers: Record<string, string> = {};
 
-      // Only add Content-Type for non-GET requests
+      // Get CSRF token from cookies for non-GET requests
       if (method.toUpperCase() !== "GET") {
         headers["Content-Type"] = "application/json";
+
+        const jar = (sessionAxios.defaults as any).jar;
+        if (jar) {
+          const cookies = await jar.getCookies(host);
+          const csrfCookie = cookies.find((c: any) => ["csrftoken", "csrf", "XSRF-TOKEN"].includes(c.key));
+          if (csrfCookie) {
+            headers["X-CSRFToken"] = csrfCookie.value;
+            debugLog(`[REQUEST] Adding CSRF token: ${csrfCookie.value.substring(0, 10)}...`);
+          } else {
+            debugLog(`[REQUEST] WARNING: No CSRF token found in cookies!`);
+          }
+        }
       }
 
       const config: AxiosRequestConfig = {
