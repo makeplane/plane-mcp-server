@@ -7,6 +7,7 @@ import { registerMetadataTools } from "./metadata.js";
 import { registerModuleIssueTools } from "./module-issues.js";
 import { registerModuleTools } from "./modules.js";
 import { registerProjectTools } from "./projects.js";
+import { registerSearchIssueTools } from "./search-issues.js";
 import { registerUserTools } from "./user.js";
 import { registerWorkLogTools } from "./work-log.js";
 
@@ -15,6 +16,7 @@ export const registerTools = (server: McpServer) => {
   registerUserTools(server);
 
   registerProjectTools(server);
+  registerSearchIssueTools(server);
   registerModuleTools(server);
   registerModuleIssueTools(server);
   registerIssueTools(server);
