@@ -3,6 +3,8 @@
 import os
 
 from fastmcp import FastMCP
+from mcp.types import Icon
+
 from key_value.aio.stores.memory import MemoryStore
 from key_value.aio.stores.redis import RedisStore
 
@@ -21,7 +23,9 @@ def get_oauth_mcp():
 
     # Initialize the MCP server
     oauth_mcp = FastMCP(
-        "Plane MCP Server (oauth-http)",
+        "Plane MCP Server",
+        icons=[Icon(src="https://plane.so/favicon.ico", alt="Plane MCP Server")],
+        website_url="https://plane.so",
         auth=PlaneOAuthProvider(
             client_id=os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_ID", ""),
             client_secret=os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_SECRET", ""),
