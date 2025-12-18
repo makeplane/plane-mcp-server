@@ -37,7 +37,7 @@ The server supports three transport methods. **We recommend using `uvx`** as it 
 
 Connect to the hosted Plane MCP server using OAuth authentication.
 
-**URL**: `https://mcp.plane.so/mcp`
+**URL**: `https://mcp.plane.so/http/mcp`
 
 **MCP Client Configuration** (for tools like Claude Desktop without native remote MCP support):
 
@@ -80,6 +80,30 @@ Connect to the hosted Plane MCP server using a Personal Access Token (PAT).
   }
 }
 ```
+
+### 4. SSE Transport (Legacy)
+
+⚠️ **Legacy Transport**: SSE (Server-Sent Events) transport is maintained for backward compatibility. New implementations should use the HTTP transport (sections 2 or 3) instead.
+
+Connect to the hosted Plane MCP server using OAuth authentication via Server-Sent Events.
+
+**URL**: `https://mcp.plane.so/sse`
+
+**MCP Client Configuration** (for tools that support SSE transport):
+
+```json
+{
+  "mcpServers": {
+    "plane": {
+      "command": "npx",
+      "args": ["mcp-remote@latest", "https://mcp.plane.so/sse"]
+    }
+  }
+}
+```
+
+**Note**: OAuth authentication will be handled automatically when connecting to the remote server. This transport is deprecated in favor of the HTTP transport.
+
 
 ## Configuration
 
