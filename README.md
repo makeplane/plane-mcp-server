@@ -174,6 +174,16 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `update_initiative` | Update an initiative with partial data |
 | `delete_initiative` | Delete an initiative by ID |
 
+### Intake Work Items
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_intake_work_items` | List all intake work items in a project with optional pagination |
+| `create_intake_work_item` | Create a new intake work item in a project |
+| `retrieve_intake_work_item` | Retrieve an intake work item by work item ID with optional field expansion |
+| `update_intake_work_item` | Update an intake work item with partial data |
+| `delete_intake_work_item` | Delete an intake work item by work item ID |
+
 ### Work Item Properties
 
 | Tool Name | Description |
@@ -190,7 +200,7 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 |-----------|-------------|
 | `get_me` | Get current authenticated user information |
 
-**Total Tools**: 50+ tools across 7 categories
+**Total Tools**: 55+ tools across 8 categories
 
 ## Development
 
