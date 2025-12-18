@@ -46,7 +46,7 @@ Connect to the hosted Plane MCP server using OAuth authentication.
   "mcpServers": {
     "plane": {
       "command": "npx",
-      "args": ["mcp-remote@0.1.29", "https://mcp.plane.so/mcp"]
+      "args": ["mcp-remote@latest", "https://mcp.plane.so/http/mcp"]
     }
   }
 }
@@ -71,7 +71,7 @@ Connect to the hosted Plane MCP server using a Personal Access Token (PAT).
   "mcpServers": {
     "plane": {
       "command": "npx",
-      "args": ["mcp-remote@0.1.29", "https://mcp.plane.so/api-key/mcp"],
+      "args": ["mcp-remote@latest", "https://mcp.plane.so/http/api-key/mcp"],
       "headers": {
         "Authorization": "Bearer <PAT_TOKEN>",
         "X-Workspace-slug": "<SLUG>"

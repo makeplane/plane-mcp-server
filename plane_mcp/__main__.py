@@ -23,12 +23,13 @@ class ServerMode(Enum):
 
 
 @asynccontextmanager
-async def combined_lifespan(oauth_app, header_app):
+async def combined_lifespan(oauth_app, header_app, sse_app):
     """Combine lifespans from both OAuth and Header MCP apps."""
     # Start both lifespans
     async with oauth_app.lifespan(oauth_app):
         async with header_app.lifespan(header_app):
-            yield
+            async with sse_app.lifespan(sse_app):
+                yield
 
 
 def main() -> None:
@@ -48,20 +49,27 @@ def main() -> None:
         return
 
     if server_mode == ServerMode.HTTP:
-        oauth_app = get_oauth_mcp().http_app()
+        oauth_mcp = get_oauth_mcp("/http")
+        oauth_app = oauth_mcp.http_app()
         header_app = get_header_mcp().http_app()
 
-        oauth_well_known = get_oauth_mcp().auth.get_well_known_routes(mcp_path="/mcp")
+        sse_mcp = get_oauth_mcp()
+        sse_app = sse_mcp.http_app(transport="sse")
+
+        oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
+        sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
 
         app = Starlette(
             routes=[
                 # Well-known routes for OAuth and Header HTTP
                 *oauth_well_known,
+                *sse_well_known,
                 # Mount both MCP servers
-                Mount("/api-key", app=header_app),
-                Mount("/", app=oauth_app),
+                Mount("/http/api-key", app=header_app),
+                Mount("/http", app=oauth_app),
+                Mount("/", app=sse_app),
             ],
-            lifespan=lambda app: combined_lifespan(oauth_app, header_app),
+            lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
         )
 
         app.add_middleware(
@@ -75,7 +83,6 @@ def main() -> None:
         logger.info("Starting HTTP server at URLs: /mcp and /header/mcp")
         uvicorn.run(app, host="0.0.0.0", port=8211, log_level="info")
         return
-
 
 if __name__ == "__main__":
     main()
