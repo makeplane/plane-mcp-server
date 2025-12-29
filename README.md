@@ -1,64 +1,275 @@
 # Plane MCP Server
 
-The Plane MCP Server brings the power of Model Context Protocol (MCP) to Plane, allowing AI agents and developer tools to interact programmatically with your Plane workspace.
+A Model Context Protocol (MCP) server for Plane integration. This server provides tools and resources for interacting with Plane through AI agents.
 
-Whether you're building intelligent assistants, automation scripts, or workflow-driven tools, this server provides a seamless bridge to Plane’s API—so you can create projects, manage issues, assign tasks, and keep your work in sync with AI-powered tools.
+## Features
 
-## What can you do with it?
-This server unlocks all sorts of useful capabilities for anyone working with Plane:
-
-- Spin up projects and work items directly from your AI or app interface.
-
-- Update progress, assign team members, set properties, or add comments—all programmatically.
-
-- Move issues through workflows and update their states on the fly.
-
-- Organize work with labels, modules, and cycles.
-
-- Analyze data about your team’s work across projects.
-
-- Build smart apps that interact naturally with Plane—whether it’s an AI agent logging work, or a bot keeping projects tidy.
-
+* 🔧 **Plane Integration**: Interact with Plane APIs and services
+* 🔌 **Multiple Transports**: Supports stdio, SSE, and streamable HTTP transports
+* 🌐 **Remote & Local**: Works both locally and as a remote service
+* 🛠️ **Extensible**: Easy to add new tools and resources
 
 ## Usage
 
-### Configuration Parameters
+The server supports three transport methods. **We recommend using `uvx`** as it doesn't require installation.
 
-- `PLANE_API_KEY` - Your Plane API token. You can generate one from the Workspace Settings > API Tokens page (`/settings/api-tokens/`) in the Plane app.
-- `PLANE_WORKSPACE_SLUG` - The workspace slug for your Plane instance. The workspace-slug represents the unique workspace identifier for a workspace in Plane. It can be found in the URL.
-- `PLANE_API_HOST_URL` (optional) - The host URL of the Plane API Server. Defaults to https://api.plane.so/
+### 1. Stdio Transport (for local use)
 
-
-### Claude Desktop
-
-You can add Plane to [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) by updating your `claude_desktop_config.json`:
+**MCP Client Configuration** (using uvx - recommended):
 
 ```json
 {
   "mcpServers": {
     "plane": {
-       "command": "npx",
-      "args": [
-        "-y",
-        "@makeplane/plane-mcp-server"
-      ],
+      "command": "uvx",
+      "args": ["plane-mcp-server", "stdio"],
       "env": {
-        "PLANE_API_KEY": "<YOUR_API_KEY>",
-        "PLANE_API_HOST_URL": "<HOST_URL_FOR_SELF_HOSTED>",
-        "PLANE_WORKSPACE_SLUG": "<YOUR_WORKSPACE_SLUG>"
+        "PLANE_API_KEY": "<your-api-key>",
+        "PLANE_WORKSPACE_SLUG": "<your-workspace-slug>",
+        "PLANE_BASE_URL": "https://api.plane.so"
       }
     }
   }
 }
 ```
 
-### VSCode
+### 2. Remote HTTP Transport with OAuth
 
-You can also connect Plane to [VSCode](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server) by editing your `.vscode.json` or `mcp.json` file:
+Connect to the hosted Plane MCP server using OAuth authentication.
+
+**URL**: `https://mcp.plane.so/http/mcp`
+
+**MCP Client Configuration** (for tools like Claude Desktop without native remote MCP support):
 
 ```json
 {
-  "servers": {
+  "mcpServers": {
+    "plane": {
+      "command": "npx",
+      "args": ["mcp-remote@latest", "https://mcp.plane.so/http/mcp"]
+    }
+  }
+}
+```
+
+**Note**: OAuth authentication will be handled automatically when connecting to the remote server.
+
+### 3. Remote HTTP Transport using PAT Token
+
+Connect to the hosted Plane MCP server using a Personal Access Token (PAT).
+
+**URL**: `https://mcp.plane.so/api-key/mcp`
+
+**Headers**:
+- `Authorization: Bearer <PAT_TOKEN>`
+- `X-Workspace-slug: <SLUG>`
+
+**MCP Client Configuration** (for tools like Claude Desktop without native remote MCP support):
+
+```json
+{
+  "mcpServers": {
+    "plane": {
+      "command": "npx",
+      "args": ["mcp-remote@latest", "https://mcp.plane.so/http/api-key/mcp"],
+      "headers": {
+        "Authorization": "Bearer <PAT_TOKEN>",
+        "X-Workspace-slug": "<SLUG>"
+      }
+    }
+  }
+}
+```
+
+### 4. SSE Transport (Legacy)
+
+⚠️ **Legacy Transport**: SSE (Server-Sent Events) transport is maintained for backward compatibility. New implementations should use the HTTP transport (sections 2 or 3) instead.
+
+Connect to the hosted Plane MCP server using OAuth authentication via Server-Sent Events.
+
+**URL**: `https://mcp.plane.so/sse`
+
+**MCP Client Configuration** (for tools that support SSE transport):
+
+```json
+{
+  "mcpServers": {
+    "plane": {
+      "command": "npx",
+      "args": ["mcp-remote@latest", "https://mcp.plane.so/sse"]
+    }
+  }
+}
+```
+
+**Note**: OAuth authentication will be handled automatically when connecting to the remote server. This transport is deprecated in favor of the HTTP transport.
+
+
+## Configuration
+
+### Authentication
+
+The server requires authentication via environment variables:
+
+- `PLANE_BASE_URL`: Base URL for Plane API (default: `https://api.plane.so`) - Optional
+- `PLANE_API_KEY`: API key for authentication (required for stdio transport)
+- `PLANE_WORKSPACE_SLUG`: Workspace slug identifier (required for stdio transport)
+- `PLANE_ACCESS_TOKEN`: Access token for authentication (alternative to API key)
+
+**Example** (for stdio transport):
+```bash
+export PLANE_BASE_URL="https://api.plane.so"
+export PLANE_API_KEY="your-api-key"
+export PLANE_WORKSPACE_SLUG="your-workspace-slug"
+```
+
+**Note**: For remote HTTP transports (OAuth or PAT), authentication is handled via the connection method (OAuth flow or PAT headers) and does not require these environment variables.
+
+## Available Tools
+
+The server provides comprehensive tools for interacting with Plane. All tools use Pydantic models from the Plane SDK for type safety and validation.
+
+### Projects
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_projects` | List all projects in a workspace with optional pagination and filtering |
+| `create_project` | Create a new project with name, identifier, and optional configuration |
+| `retrieve_project` | Retrieve a project by ID |
+| `update_project` | Update a project with partial data |
+| `delete_project` | Delete a project by ID |
+| `get_project_worklog_summary` | Get work log summary for a project |
+| `get_project_members` | Get all members of a project |
+| `get_project_features` | Get features configuration of a project |
+| `update_project_features` | Update features configuration of a project |
+
+### Work Items
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_items` | List all work items in a project with optional filtering and pagination |
+| `create_work_item` | Create a new work item with name, assignees, labels, and other attributes |
+| `retrieve_work_item` | Retrieve a work item by ID with optional field expansion |
+| `retrieve_work_item_by_identifier` | Retrieve a work item by project identifier and issue sequence number |
+| `update_work_item` | Update a work item with partial data |
+| `delete_work_item` | Delete a work item by ID |
+| `search_work_items` | Search work items across a workspace with query string |
+
+### Cycles
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_cycles` | List all cycles in a project |
+| `create_cycle` | Create a new cycle with name, dates, and owner |
+| `retrieve_cycle` | Retrieve a cycle by ID |
+| `update_cycle` | Update a cycle with partial data |
+| `delete_cycle` | Delete a cycle by ID |
+| `list_archived_cycles` | List archived cycles in a project |
+| `add_work_items_to_cycle` | Add work items to a cycle |
+| `remove_work_item_from_cycle` | Remove a work item from a cycle |
+| `list_cycle_work_items` | List work items in a cycle |
+| `transfer_cycle_work_items` | Transfer work items from one cycle to another |
+| `archive_cycle` | Archive a cycle |
+| `unarchive_cycle` | Unarchive a cycle |
+
+### Modules
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_modules` | List all modules in a project |
+| `create_module` | Create a new module with name, dates, status, and members |
+| `retrieve_module` | Retrieve a module by ID |
+| `update_module` | Update a module with partial data |
+| `delete_module` | Delete a module by ID |
+| `list_archived_modules` | List archived modules in a project |
+| `add_work_items_to_module` | Add work items to a module |
+| `remove_work_item_from_module` | Remove a work item from a module |
+| `list_module_work_items` | List work items in a module |
+| `archive_module` | Archive a module |
+| `unarchive_module` | Unarchive a module |
+
+### Initiatives
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_initiatives` | List all initiatives in a workspace |
+| `create_initiative` | Create a new initiative with name, dates, state, and lead |
+| `retrieve_initiative` | Retrieve an initiative by ID |
+| `update_initiative` | Update an initiative with partial data |
+| `delete_initiative` | Delete an initiative by ID |
+
+### Intake Work Items
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_intake_work_items` | List all intake work items in a project with optional pagination |
+| `create_intake_work_item` | Create a new intake work item in a project |
+| `retrieve_intake_work_item` | Retrieve an intake work item by work item ID with optional field expansion |
+| `update_intake_work_item` | Update an intake work item with partial data |
+| `delete_intake_work_item` | Delete an intake work item by work item ID |
+
+### Work Item Properties
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_item_properties` | List work item properties for a work item type |
+| `create_work_item_property` | Create a new work item property with type, settings, and validation rules |
+| `retrieve_work_item_property` | Retrieve a work item property by ID |
+| `update_work_item_property` | Update a work item property with partial data |
+| `delete_work_item_property` | Delete a work item property by ID |
+
+### Users
+
+| Tool Name | Description |
+|-----------|-------------|
+| `get_me` | Get current authenticated user information |
+
+**Total Tools**: 55+ tools across 8 categories
+
+## Development
+
+### Running Tests
+
+```bash
+pytest
+```
+
+### Code Formatting
+
+```bash
+black plane_mcp/
+ruff check plane_mcp/
+```
+
+## License
+
+MIT License - see LICENSE for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Deprecation Notice
+
+⚠️ **The Node.js-based `plane-mcp-server` is deprecated and no longer maintained.**
+
+This repository represents the new Python+FastMCP based implementation of the Plane MCP server. If you were using the previous Node.js version, please migrate to this Python-based version for continued support and updates.
+
+The new implementation offers:
+- Better type safety with Pydantic models
+- Improved performance with FastMCP
+- Enhanced tool coverage
+- Active maintenance and development
+
+For migration assistance, please refer to the configuration examples in this README or open an issue for support.
+
+**Old Node.js Configuration (Deprecated):**
+
+If you were using the previous Node.js-based `@makeplane/plane-mcp-server`, your configuration looked like this:
+
+```json
+{
+  "mcpServers": {
     "plane": {
       "command": "npx",
       "args": [
@@ -73,316 +284,7 @@ You can also connect Plane to [VSCode](https://code.visualstudio.com/docs/copilo
     }
   }
 }
-
 ```
 
-## Tools
+**Please migrate to the new Python-based configuration shown in the Usage section above.**
 
-### Users
-
-- `get_user`
-  - Get the current user's information
-  - No parameters required
-
-### Projects
-
-- `get_projects`
-  - Get all projects for the current user
-  - No parameters required
-
-- `create_project`
-  - Create a new project
-  - Parameters:
-    - `name` (string, required): Project name
-
-### Issue Types
-
-- `list_issue_types`
-    - Get all issue types for a specific project
-    - Parameters:
-      - `project_id` (string, required): UUID of the project
-
-- `get_issue_type`
-  - Get details of a specific issue type
-  - Parameters:
-      - `project_id` (string, required): UUID of the project
-      - `type_id` (string, required): UUID of the issue type
-
-- `create_issue_type`
-  - Create a new issue type in a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_type_data`: Object containing:
-       - `name` (string, required): Name of the issue type
-        - `description` (string, required): Description of the issue type
-
-- `update_issue_type`
-  - Update an existing issue type
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `type_id` (string, required): UUID of the issue type
-    - `issue_type_data` (object): Fields to update on the issue type
-
-- `delete_issue_type`
-  - Delete an issue type
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `type_id`  (string, required): UUID of the issue type
-
-### States
-
-- `list_states`
-  - Get all states for a specific project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-
-- `get_state`
-  - Get details of a specific state
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `state_id` (string, required): UUID of the state
-
-- `create_state`
-  - Create a new state in a project
-   - Parameters:
-     - `project_id` (string, required): UUID of the project
-     - `state_data`: Object containing:
-        - `name` (string, required): Name of the state
-        - `color` (string, required): Color code for the state
-
-- `update_state`
-   - Update an existing state
-   - Parameters:
-      - `project_id` (string, required): UUID of the project
-      - `state_id` (string, required): UUID of the state
-      - `state_data` (object): Fields to update on the state
-
-- `delete_state`
-  - Delete a state
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `state_id` (string, required): UUID of the state
-
-### Labels
-
-- `list_labels`
-  - Get all labels for a specific project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-
-- `get_label`
-  - Get details of a specific label
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `label_id` (string, required): UUID of the label
-
-- `create_label`
-  - Create a new label in a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `label_data`: Object containing:
-      - `name` (string, required): Name of the label
-      - `color` (string, required): Color code for the label
-
-- `update_label`
-  - Update an existing label
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `label_id`  (string, required): UUID of the label
-    - `label_data` (object): Fields to update on the label
-
-- `delete_label`
-  - Delete a label
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `label_id` (string, required): UUID of the label
-
-### Issues
-
-- `get_issue_using_readable_identifier`
-  - Get issue details using readable identifier (e.g., PROJ-123)
-  - Parameters:
-    - `project_identifier` (string, required)
-    - `issue_identifier` (string, required): Issue numbe: Project identifier (e.g., "PROJ") r (e.g., "123")
-
-- `get_issue_comments`
-  - Get all comments for a specific issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_id` (string, required): UUID of the issue
-
-- `add_issue_comment`
-  - Add a comment to an issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_id` (string, required): UUID of the issue
-    - `comment_html` (string, required): HTML content of the comment
-
-- `create_issue`
-  - Create a new issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_data`: Object containing:
-     - `name` (string, required): Title of the issue
-      - `description_html` (string, required): HTML description of the issue
-
-- `update_issue`
-  - Update an existing issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_id` (string, required): UUID of the issue
-    - `issue_data` (object): Fields to update on the issue
-
-### Modules
-
-- `list_modules`
-  - Get all modules for a specific project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-
-- `get_module`
-  - Get details of a specific module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `module_id` (string, required): UUID of the module
-
-- `create_module`
-  - Create a new module in a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `module_data`: Object containing:
-      - `name` (string, required): Name of the module
-
-- `update_module`
-  - Update an existing module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `module_id` (string, required): UUID of the module
-    - `module_data` (object): Fields to update on the module
-
-- `delete_module`
-  - Delete a module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `module_id` (string, required): UUID of the module
-
-### Module Issues
-
-- `list_module_issues`
-  - Get all issues for a specific module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `module_id` (string, required): UUID of the module
-
-- `add_module_issues`
-  - Add issues to a module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `module_id` (string, required): UUID of the module
-    - `issues` (string[], required): Array of issue UUIDs to add
-
-- `delete_module_issue`
-  - Remove an issue from a module
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `module_id` (string, required): UUID of the module
-    - `issue_id` (string, required): UUID of the issue to remove
-
-### Cycles
-
-- `list_cycles`
-  - Get all cycles for a specific project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-
-- `get_cycle`
-  - Get details of a specific cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `cycle_id` (string, required): UUID of the cycle
-
-- `create_cycle`
-  - Create a new cycle in a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `cycle_data`: Object containing:
-     - `name` (string, required): Name of the cycle
-      - `start_date` (string, required): Start date (YYYY-MM-DD)
-      - `end_date` (string, required)
-: End date (YYYY-MM-DD)
-- `update_cycle`
-  - Update an existing cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `cycle_id` (string, required): UUID of the cycle
-    - `cycle_data` (object): Fields to update on the cycle
-
-- `delete_cycle`
-  - Delete a cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `cycle_id` (string, required): UUID of the cycle
-
-### Cycle Issues
-
-- `list_cycle_issues`
-  - Get all issues for a specific cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `cycle_id` (string, required): UUID of the cycle
-
-- `add_cycle_issues`
-  - Add issues to a cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `cycle_id` (string, required): UUID of the cycle
-    - `issues` (string[], required): Array of issue UUIDs to add
-
-- `delete_cycle_issue`
-  - Remove an issue from a cycle
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `cycle_id` (string, required): UUID of the cycle
-    - `issue_id` (string, required): UUID of the issue to remove
-
-### Work Logs
-
-- `get_issue_worklogs`
-  - Get all worklogs for a specific issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_id` (string, required): UUID of the issue
-
-- `get_total_worklogs`
-  - Get total logged time for a project
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-
-- `create_worklog`
-  - Create a new worklog for an issue
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_id` (string, required): UUID of the issue
-    - `worklog_data`: Object containing:
-      - `description` (string, required): Description of the work done
-      - `duration` (integer, required): Duration in minutes
-
-- `update_worklog`
-  - Update an existing worklog
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_id` (string, required): UUID of the issue
-    - `worklog_id` (string, required): UUID of the worklog
-    - `worklog_data` (object): Fields to update on the worklog
-
-- `delete_worklog`
-  - Delete a worklog
-  - Parameters:
-    - `project_id` (string, required): UUID of the project
-    - `issue_id` (string, required): UUID of the issue
-    - `worklog_id` (string, required): UUID of the worklog
-
-
-## License
-
-This MCP server is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the LICENSE file in the project repository.
