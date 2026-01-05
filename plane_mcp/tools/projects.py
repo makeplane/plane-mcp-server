@@ -28,20 +28,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         fields: str | None = None,
         order_by: str | None = None,
     ) -> list[Project]:
-        """
-        List all projects in a workspace.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            cursor: Pagination cursor for getting next set of results
-            per_page: Number of results per page (1-100)
-            expand: Comma-separated list of related fields to expand in response
-            fields: Comma-separated list of fields to include in response
-            order_by: Field to order results by. Prefix with '-' for descending order
-
-        Returns:
-            List of Project objects
-        """
+        """List all projects in a workspace."""
         client, workspace_slug = get_plane_client_context()
 
         params = PaginatedQueryParams(
@@ -81,34 +68,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         is_issue_type_enabled: bool | None = None,
     ) -> Project:
-        """
-        Create a new project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            name: Project name
-            identifier: Project identifier (e.g., "MP" for "My Project")
-            description: Project description
-            project_lead: UUID of the project lead user
-            default_assignee: UUID of the default assignee user
-            emoji: Emoji for the project
-            cover_image: Cover image URL or asset ID
-            module_view: Enable module view
-            cycle_view: Enable cycle view
-            issue_views_view: Enable issue views view
-            page_view: Enable page view
-            intake_view: Enable intake view
-            guest_view_all_features: Allow guests to view all features
-            archive_in: Days until auto-archive
-            close_in: Days until auto-close
-            timezone: Project timezone
-            external_source: External system source name
-            external_id: External system identifier
-            is_issue_type_enabled: Enable issue types
-
-        Returns:
-            Created Project object
-        """
+        """Create a new project."""
         client, workspace_slug = get_plane_client_context()
 
         data = CreateProject(
@@ -137,16 +97,7 @@ def register_project_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def retrieve_project(project_id: str) -> Project:
-        """
-        Retrieve a project by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-
-        Returns:
-            Project object
-        """
+        """Retrieve a project by ID."""
         client, workspace_slug = get_plane_client_context()
         return client.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id)
 
@@ -176,38 +127,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         default_state: str | None = None,
         estimate: str | None = None,
     ) -> Project:
-        """
-        Update a project by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            name: Project name
-            description: Project description
-            project_lead: UUID of the project lead user
-            default_assignee: UUID of the default assignee user
-            identifier: Project identifier
-            emoji: Emoji for the project
-            cover_image: Cover image URL or asset ID
-            module_view: Enable module view
-            cycle_view: Enable cycle view
-            issue_views_view: Enable issue views view
-            page_view: Enable page view
-            intake_view: Enable intake view
-            guest_view_all_features: Allow guests to view all features
-            archive_in: Days until auto-archive
-            close_in: Days until auto-close
-            timezone: Project timezone
-            external_source: External system source name
-            external_id: External system identifier
-            is_issue_type_enabled: Enable issue types
-            is_time_tracking_enabled: Enable time tracking
-            default_state: UUID of the default state
-            estimate: Estimate configuration
-
-        Returns:
-            Updated Project object
-        """
+        """Update a project by ID."""
         client, workspace_slug = get_plane_client_context()
 
         data = UpdateProject(
@@ -241,28 +161,13 @@ def register_project_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def delete_project(project_id: str) -> None:
-        """
-        Delete a project by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-        """
+        """Delete a project by ID."""
         client, workspace_slug = get_plane_client_context()
         client.projects.delete(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
     def get_project_worklog_summary(project_id: str) -> list[ProjectWorklogSummary]:
-        """
-        Get work log summary for a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-
-        Returns:
-            List of ProjectWorklogSummary objects containing work item IDs and durations
-        """
+        """Get work log summary for a project."""
         client, workspace_slug = get_plane_client_context()
         return client.projects.get_worklog_summary(
             workspace_slug=workspace_slug, project_id=project_id
@@ -272,17 +177,7 @@ def register_project_tools(mcp: FastMCP) -> None:
     def get_project_members(
         project_id: str, params: dict[str, Any] | None = None
     ) -> list[UserLite]:
-        """
-        Get all members of a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of UserLite objects representing project members
-        """
+        """Get all members of a project."""
         client, workspace_slug = get_plane_client_context()
         return client.projects.get_members(
             workspace_slug=workspace_slug, project_id=project_id, params=params
@@ -290,16 +185,7 @@ def register_project_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def get_project_features(project_id: str) -> ProjectFeature:
-        """
-        Get features of a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-
-        Returns:
-            ProjectFeature object containing enabled/disabled features
-        """
+        """Get features of a project."""
         client, workspace_slug = get_plane_client_context()
         return client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
 
@@ -314,23 +200,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         intakes: bool | None = None,
         work_item_types: bool | None = None,
     ) -> ProjectFeature:
-        """
-        Update features of a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            epics: Enable/disable epics feature
-            modules: Enable/disable modules feature
-            cycles: Enable/disable cycles feature
-            views: Enable/disable views feature
-            pages: Enable/disable pages feature
-            intakes: Enable/disable intakes feature
-            work_item_types: Enable/disable work item types feature
-
-        Returns:
-            Updated ProjectFeature object
-        """
+        """Update features of a project."""
         client, workspace_slug = get_plane_client_context()
 
         data = ProjectFeature(

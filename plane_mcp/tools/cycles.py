@@ -25,17 +25,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         project_id: str,
         params: dict[str, Any] | None = None,
     ) -> list[Cycle]:
-        """
-        List all cycles in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of Cycle objects
-        """
+        """List all cycles in a project."""
         client, workspace_slug = get_plane_client_context()
         response: PaginatedCycleResponse = client.cycles.list(
             workspace_slug=workspace_slug, project_id=project_id, params=params
@@ -54,24 +44,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         timezone: str | None = None,
     ) -> Cycle:
-        """
-        Create a new cycle.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            name: Cycle name
-            owned_by: UUID of the user who owns the cycle
-            description: Cycle description
-            start_date: Cycle start date (ISO 8601 format)
-            end_date: Cycle end date (ISO 8601 format)
-            external_source: External system source name
-            external_id: External system identifier
-            timezone: Cycle timezone
-
-        Returns:
-            Created Cycle object
-        """
+        """Create a new cycle."""
         client, workspace_slug = get_plane_client_context()
 
         data = CreateCycle(
@@ -90,17 +63,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def retrieve_cycle(project_id: str, cycle_id: str) -> Cycle:
-        """
-        Retrieve a cycle by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-
-        Returns:
-            Cycle object
-        """
+        """Retrieve a cycle by ID."""
         client, workspace_slug = get_plane_client_context()
         return client.cycles.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id
@@ -119,25 +82,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         timezone: str | None = None,
     ) -> Cycle:
-        """
-        Update a cycle by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-            name: Cycle name
-            description: Cycle description
-            start_date: Cycle start date (ISO 8601 format)
-            end_date: Cycle end date (ISO 8601 format)
-            owned_by: UUID of the user who owns the cycle
-            external_source: External system source name
-            external_id: External system identifier
-            timezone: Cycle timezone
-
-        Returns:
-            Updated Cycle object
-        """
+        """Update a cycle by ID."""
         client, workspace_slug = get_plane_client_context()
 
         data = UpdateCycle(
@@ -157,14 +102,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def delete_cycle(project_id: str, cycle_id: str) -> None:
-        """
-        Delete a cycle by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-        """
+        """Delete a cycle by ID."""
         client, workspace_slug = get_plane_client_context()
         client.cycles.delete(
             workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id
@@ -175,17 +113,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         project_id: str,
         params: dict[str, Any] | None = None,
     ) -> list[Cycle]:
-        """
-        List archived cycles in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of archived Cycle objects
-        """
+        """List archived cycles in a project."""
         client, workspace_slug = get_plane_client_context()
         response: PaginatedArchivedCycleResponse = client.cycles.list_archived(
             workspace_slug=workspace_slug, project_id=project_id, params=params
@@ -198,15 +126,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         cycle_id: str,
         issue_ids: list[str],
     ) -> None:
-        """
-        Add work items to a cycle.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-            issue_ids: List of work item IDs to add to the cycle
-        """
+        """Add work items to a cycle."""
         client, workspace_slug = get_plane_client_context()
         client.cycles.add_work_items(
             workspace_slug=workspace_slug,
@@ -221,15 +141,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         cycle_id: str,
         work_item_id: str,
     ) -> None:
-        """
-        Remove a work item from a cycle.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-            work_item_id: UUID of the work item to remove
-        """
+        """Remove a work item from a cycle."""
         client, workspace_slug = get_plane_client_context()
         client.cycles.remove_work_item(
             workspace_slug=workspace_slug,
@@ -244,18 +156,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         cycle_id: str,
         params: dict[str, Any] | None = None,
     ) -> list[WorkItem]:
-        """
-        List work items in a cycle.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of WorkItem objects in the cycle
-        """
+        """List work items in a cycle."""
         client, workspace_slug = get_plane_client_context()
         response: PaginatedCycleWorkItemResponse = client.cycles.list_work_items(
             workspace_slug=workspace_slug,
@@ -271,15 +172,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         cycle_id: str,
         new_cycle_id: str,
     ) -> None:
-        """
-        Transfer work items from one cycle to another.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the source cycle
-            new_cycle_id: UUID of the target cycle to transfer issues to
-        """
+        """Transfer work items from one cycle to another."""
         client, workspace_slug = get_plane_client_context()
 
         data = TransferCycleWorkItemsRequest(new_cycle_id=new_cycle_id)
@@ -293,17 +186,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def archive_cycle(project_id: str, cycle_id: str) -> bool:
-        """
-        Archive a cycle.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-
-        Returns:
-            True if the cycle was archived successfully
-        """
+        """Archive a cycle."""
         client, workspace_slug = get_plane_client_context()
         return client.cycles.archive(
             workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id
@@ -311,17 +194,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def unarchive_cycle(project_id: str, cycle_id: str) -> bool:
-        """
-        Unarchive a cycle.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-
-        Returns:
-            True if the cycle was unarchived successfully
-        """
+        """Unarchive a cycle."""
         client, workspace_slug = get_plane_client_context()
         return client.cycles.unarchive(
             workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id

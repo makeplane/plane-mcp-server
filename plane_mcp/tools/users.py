@@ -11,11 +11,6 @@ def register_user_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def get_me() -> UserLite:
-        """
-        Get current user information.
-
-        Returns:
-            UserLite object containing current user information
-        """
+        """Get current user information."""
         client, workspace_slug = get_plane_client_context()
         return client.users.get_me()

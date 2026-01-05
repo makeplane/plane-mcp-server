@@ -29,18 +29,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         type_id: str,
         params: dict[str, Any] | None = None,
     ) -> list[WorkItemProperty]:
-        """
-        List work item properties for a work item type.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            type_id: UUID of the work item type
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of WorkItemProperty objects
-        """
+        """List work item properties for a work item type."""
         client, workspace_slug = get_plane_client_context()
         return client.work_item_properties.list(
             workspace_slug=workspace_slug,
@@ -67,32 +56,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         options: list[dict] | None = None,
     ) -> WorkItemProperty:
-        """
-        Create a new work item property.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            type_id: UUID of the work item type
-            display_name: Display name for the property
-            property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN, OPTION, RELATION, URL, EMAIL, FILE)
-            relation_type: Relation type (ISSUE, USER) - required for RELATION properties
-            description: Property description
-            is_required: Whether the property is required
-            default_value: Default value(s) for the property
-            settings: Settings dictionary - required for TEXT and DATETIME properties
-                     For TEXT: {"display_format": "single-line"|"multi-line"|"readonly"}
-                     For DATETIME: {"display_format": "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
-            is_active: Whether the property is active
-            is_multi: Whether the property supports multiple values
-            validation_rules: Validation rules dictionary
-            external_source: External system source name
-            external_id: External system identifier
-            options: List of option dictionaries for OPTION properties
-
-        Returns:
-            Created WorkItemProperty object
-        """
+        """Create a new work item property. Property types: TEXT, DATETIME, DECIMAL, BOOLEAN, OPTION, RELATION, URL, EMAIL, FILE."""
         client, workspace_slug = get_plane_client_context()
 
         # Convert settings dict to appropriate settings object if needed
@@ -134,18 +98,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         type_id: str,
         work_item_property_id: str,
     ) -> WorkItemProperty:
-        """
-        Retrieve a work item property by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            type_id: UUID of the work item type
-            work_item_property_id: UUID of the property
-
-        Returns:
-            WorkItemProperty object
-        """
+        """Retrieve a work item property by ID."""
         client, workspace_slug = get_plane_client_context()
         return client.work_item_properties.retrieve(
             workspace_slug=workspace_slug,
@@ -172,32 +125,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         external_source: str | None = None,
         external_id: str | None = None,
     ) -> WorkItemProperty:
-        """
-        Update a work item property by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            type_id: UUID of the work item type
-            work_item_property_id: UUID of the property
-            display_name: Display name for the property
-            property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN, OPTION, RELATION, URL, EMAIL, FILE)
-            relation_type: Relation type (ISSUE, USER) - required when updating to RELATION
-            description: Property description
-            is_required: Whether the property is required
-            default_value: Default value(s) for the property
-            settings: Settings dictionary - required when updating to TEXT or DATETIME
-                     For TEXT: {"display_format": "single-line"|"multi-line"|"readonly"}
-                     For DATETIME: {"display_format": "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
-            is_active: Whether the property is active
-            is_multi: Whether the property supports multiple values
-            validation_rules: Validation rules dictionary
-            external_source: External system source name
-            external_id: External system identifier
-
-        Returns:
-            Updated WorkItemProperty object
-        """
+        """Update a work item property by ID."""
         client, workspace_slug = get_plane_client_context()
 
         # Convert settings dict to appropriate settings object if needed
@@ -242,15 +170,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         type_id: str,
         work_item_property_id: str,
     ) -> None:
-        """
-        Delete a work item property by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            type_id: UUID of the work item type
-            work_item_property_id: UUID of the property
-        """
+        """Delete a work item property by ID."""
         client, workspace_slug = get_plane_client_context()
         client.work_item_properties.delete(
             workspace_slug=workspace_slug,
