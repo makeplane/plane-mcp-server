@@ -6,6 +6,8 @@ from fastmcp import FastMCP
 from plane.models.enums import PropertyType, RelationType
 from plane.models.work_item_properties import (
     CreateWorkItemProperty,
+    CreateWorkItemPropertyOption,
+    PropertySettings,
     UpdateWorkItemProperty,
     WorkItemProperty,
 )
@@ -15,9 +17,6 @@ from plane.models.work_item_property_configurations import (
 )
 
 from plane_mcp.client import get_plane_client_context
-
-# Type alias for settings
-PropertySettings = TextAttributeSettings | DateAttributeSettings | dict | None
 
 
 def register_work_item_property_tools(mcp: FastMCP) -> None:
@@ -54,8 +53,8 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         project_id: str,
         type_id: str,
         display_name: str,
-        property_type: PropertyType | str,
-        relation_type: RelationType | str | None = None,
+        property_type: str,
+        relation_type: str | None = None,
         description: str | None = None,
         is_required: bool | None = None,
         default_value: list[str] | None = None,
@@ -95,23 +94,31 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Convert string to PropertyType enum
+        validated_property_type = PropertyType(property_type)
+
+        # Convert string to RelationType enum if provided
+        validated_relation_type: RelationType | None = None
+        if relation_type:
+            validated_relation_type = RelationType(relation_type)
+
         # Convert settings dict to appropriate settings object if needed
         processed_settings: PropertySettings = None
         if settings:
-            prop_type = (
-                property_type.value if isinstance(property_type, PropertyType) else property_type
-            )
-            if prop_type == "TEXT" and isinstance(settings, dict):
+            if property_type == "TEXT":
                 processed_settings = TextAttributeSettings(**settings)
-            elif prop_type == "DATETIME" and isinstance(settings, dict):
+            elif property_type == "DATETIME":
                 processed_settings = DateAttributeSettings(**settings)
-            else:
-                processed_settings = settings
+
+        # Convert options dicts to CreateWorkItemPropertyOption objects
+        processed_options: list[CreateWorkItemPropertyOption] | None = None
+        if options:
+            processed_options = [CreateWorkItemPropertyOption(**opt) for opt in options]
 
         data = CreateWorkItemProperty(
             display_name=display_name,
-            property_type=property_type,
-            relation_type=relation_type,
+            property_type=validated_property_type,
+            relation_type=validated_relation_type,
             description=description,
             is_required=is_required,
             default_value=default_value,
@@ -121,7 +128,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             validation_rules=validation_rules,
             external_source=external_source,
             external_id=external_id,
-            options=options,
+            options=processed_options,
         )
 
         return client.work_item_properties.create(
@@ -160,8 +167,8 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         type_id: str,
         work_item_property_id: str,
         display_name: str | None = None,
-        property_type: PropertyType | str | None = None,
-        relation_type: RelationType | str | None = None,
+        property_type: str | None = None,
+        relation_type: str | None = None,
         description: str | None = None,
         is_required: bool | None = None,
         default_value: list[str] | None = None,
@@ -200,23 +207,28 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Convert string to PropertyType enum if provided
+        validated_property_type: PropertyType | None = None
+        if property_type:
+            validated_property_type = PropertyType(property_type)
+
+        # Convert string to RelationType enum if provided
+        validated_relation_type: RelationType | None = None
+        if relation_type:
+            validated_relation_type = RelationType(relation_type)
+
         # Convert settings dict to appropriate settings object if needed
         processed_settings: PropertySettings = None
         if settings and property_type:
-            prop_type = (
-                property_type.value if isinstance(property_type, PropertyType) else property_type
-            )
-            if prop_type == "TEXT" and isinstance(settings, dict):
+            if property_type == "TEXT":
                 processed_settings = TextAttributeSettings(**settings)
-            elif prop_type == "DATETIME" and isinstance(settings, dict):
+            elif property_type == "DATETIME":
                 processed_settings = DateAttributeSettings(**settings)
-            else:
-                processed_settings = settings
 
         data = UpdateWorkItemProperty(
             display_name=display_name,
-            property_type=property_type,
-            relation_type=relation_type,
+            property_type=validated_property_type,
+            relation_type=validated_relation_type,
             description=description,
             is_required=is_required,
             default_value=default_value,

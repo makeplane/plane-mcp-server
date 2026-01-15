@@ -1,6 +1,6 @@
 """Module-related tools for Plane MCP Server."""
 
-from typing import Any
+from typing import Any, get_args
 
 from fastmcp import FastMCP
 from plane.models.enums import ModuleStatusEnum
@@ -49,7 +49,7 @@ def register_module_tools(mcp: FastMCP) -> None:
         description: str | None = None,
         start_date: str | None = None,
         target_date: str | None = None,
-        status: ModuleStatusEnum | str | None = None,
+        status: str | None = None,
         lead: str | None = None,
         members: list[str] | None = None,
         external_source: str | None = None,
@@ -76,12 +76,17 @@ def register_module_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate status against allowed literal values
+        validated_status: ModuleStatusEnum | None = (
+            status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
+        )
+
         data = CreateModule(
             name=name,
             description=description,
             start_date=start_date,
             target_date=target_date,
-            status=status,
+            status=validated_status,
             lead=lead,
             members=members,
             external_source=external_source,
@@ -118,7 +123,7 @@ def register_module_tools(mcp: FastMCP) -> None:
         description: str | None = None,
         start_date: str | None = None,
         target_date: str | None = None,
-        status: ModuleStatusEnum | str | None = None,
+        status: str | None = None,
         lead: str | None = None,
         members: list[str] | None = None,
         external_source: str | None = None,
@@ -146,12 +151,17 @@ def register_module_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate status against allowed literal values
+        validated_status: ModuleStatusEnum | None = (
+            status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
+        )
+
         data = UpdateModule(
             name=name,
             description=description,
             start_date=start_date,
             target_date=target_date,
-            status=status,
+            status=validated_status,
             lead=lead,
             members=members,
             external_source=external_source,
