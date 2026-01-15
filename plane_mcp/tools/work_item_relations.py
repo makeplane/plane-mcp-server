@@ -1,6 +1,9 @@
 """Work item relation-related tools for Plane MCP Server."""
 
+from typing import get_args
+
 from fastmcp import FastMCP
+from plane.models.enums import WorkItemRelationTypeEnum
 from plane.models.work_items import (
     CreateWorkItemRelation,
     RemoveWorkItemRelation,
@@ -62,8 +65,16 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate relation_type against allowed literal values
+        if relation_type not in get_args(WorkItemRelationTypeEnum):
+            raise ValueError(
+                f"Invalid relation_type '{relation_type}'. "
+                f"Must be one of: {get_args(WorkItemRelationTypeEnum)}"
+            )
+        validated_relation_type: WorkItemRelationTypeEnum = relation_type  # type: ignore[assignment]
+
         data = CreateWorkItemRelation(
-            relation_type=relation_type,
+            relation_type=validated_relation_type,
             issues=issues,
         )
 

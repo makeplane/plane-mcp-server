@@ -14,8 +14,6 @@ def register_page_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def retrieve_workspace_page(
         page_id: str,
-        expand: str | None = None,
-        fields: str | None = None,
     ) -> Page:
         """
         Retrieve a workspace page by ID.
@@ -30,24 +28,15 @@ def register_page_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
-        params = {}
-        if expand:
-            params["expand"] = expand
-        if fields:
-            params["fields"] = fields
-
         return client.pages.retrieve_workspace_page(
             workspace_slug=workspace_slug,
             page_id=page_id,
-            params=params if params else None,
         )
 
     @mcp.tool()
     def retrieve_project_page(
         project_id: str,
         page_id: str,
-        expand: str | None = None,
-        fields: str | None = None,
     ) -> Page:
         """
         Retrieve a project page by ID.
@@ -63,17 +52,10 @@ def register_page_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
-        params = {}
-        if expand:
-            params["expand"] = expand
-        if fields:
-            params["fields"] = fields
-
         return client.pages.retrieve_project_page(
             workspace_slug=workspace_slug,
             project_id=project_id,
             page_id=page_id,
-            params=params if params else None,
         )
 
     @mcp.tool()

@@ -1,8 +1,9 @@
 """State-related tools for Plane MCP Server."""
 
-from typing import Any
+from typing import Any, get_args
 
 from fastmcp import FastMCP
+from plane.models.enums import GroupEnum
 from plane.models.states import (
     CreateState,
     PaginatedStateResponse,
@@ -70,12 +71,17 @@ def register_state_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate group against allowed literal values
+        validated_group: GroupEnum | None = (
+            group if group in get_args(GroupEnum) else None  # type: ignore[assignment]
+        )
+
         data = CreateState(
             name=name,
             color=color,
             description=description,
             sequence=sequence,
-            group=group,
+            group=validated_group,
             is_triage=is_triage,
             default=default,
             external_source=external_source,
@@ -138,12 +144,17 @@ def register_state_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate group against allowed literal values
+        validated_group: GroupEnum | None = (
+            group if group in get_args(GroupEnum) else None  # type: ignore[assignment]
+        )
+
         data = UpdateState(
             name=name,
             color=color,
             description=description,
             sequence=sequence,
-            group=group,
+            group=validated_group,
             is_triage=is_triage,
             default=default,
             external_source=external_source,

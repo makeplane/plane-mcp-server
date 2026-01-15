@@ -1,8 +1,9 @@
 """Work item comment-related tools for Plane MCP Server."""
 
-from typing import Any
+from typing import Any, get_args
 
 from fastmcp import FastMCP
+from plane.models.enums import AccessEnum
 from plane.models.work_items import (
     CreateWorkItemComment,
     PaginatedWorkItemCommentResponse,
@@ -94,10 +95,15 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate access against allowed literal values
+        validated_access: AccessEnum | None = (
+            access if access in get_args(AccessEnum) else None  # type: ignore[assignment]
+        )
+
         data = CreateWorkItemComment(
             comment_html=comment_html,
             comment_json=comment_json,
-            access=access,
+            access=validated_access,
             external_source=external_source,
             external_id=external_id,
         )
@@ -138,10 +144,15 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate access against allowed literal values
+        validated_access: AccessEnum | None = (
+            access if access in get_args(AccessEnum) else None  # type: ignore[assignment]
+        )
+
         data = UpdateWorkItemComment(
             comment_html=comment_html,
             comment_json=comment_json,
-            access=access,
+            access=validated_access,
             external_source=external_source,
             external_id=external_id,
         )

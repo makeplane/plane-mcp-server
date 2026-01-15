@@ -57,14 +57,22 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
-        data = WorkspaceFeature(
-            project_grouping=project_grouping,
-            initiatives=initiatives,
-            teams=teams,
-            customers=customers,
-            wiki=wiki,
-            pi=pi,
-        )
+        # Build data dict with only non-None values
+        feature_data: dict[str, bool] = {}
+        if project_grouping is not None:
+            feature_data["project_grouping"] = project_grouping
+        if initiatives is not None:
+            feature_data["initiatives"] = initiatives
+        if teams is not None:
+            feature_data["teams"] = teams
+        if customers is not None:
+            feature_data["customers"] = customers
+        if wiki is not None:
+            feature_data["wiki"] = wiki
+        if pi is not None:
+            feature_data["pi"] = pi
+
+        data = WorkspaceFeature(**feature_data)
 
         return client.workspaces.update_features(
             workspace_slug=workspace_slug, data=data

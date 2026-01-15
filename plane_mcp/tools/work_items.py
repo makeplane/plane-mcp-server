@@ -1,5 +1,7 @@
 """Work item-related tools for Plane MCP Server."""
 
+from typing import get_args
+
 from fastmcp import FastMCP
 from plane.models.enums import PriorityEnum
 from plane.models.query_params import RetrieveQueryParams, WorkItemQueryParams
@@ -76,7 +78,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         point: int | None = None,
         description_html: str | None = None,
         description_stripped: str | None = None,
-        priority: PriorityEnum | str | None = None,
+        priority: str | None = None,
         start_date: str | None = None,
         target_date: str | None = None,
         sort_order: float | None = None,
@@ -118,6 +120,11 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate priority against allowed literal values
+        validated_priority: PriorityEnum | None = (
+            priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
+        )
+
         data = CreateWorkItem(
             name=name,
             assignees=assignees,
@@ -126,7 +133,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             point=point,
             description_html=description_html,
             description_stripped=description_stripped,
-            priority=priority,
+            priority=validated_priority,
             start_date=start_date,
             target_date=target_date,
             sort_order=sort_order,
@@ -240,7 +247,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         point: int | None = None,
         description_html: str | None = None,
         description_stripped: str | None = None,
-        priority: PriorityEnum | str | None = None,
+        priority: str | None = None,
         start_date: str | None = None,
         target_date: str | None = None,
         sort_order: float | None = None,
@@ -283,6 +290,11 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate priority against allowed literal values
+        validated_priority: PriorityEnum | None = (
+            priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
+        )
+
         data = UpdateWorkItem(
             name=name,
             assignees=assignees,
@@ -291,7 +303,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             point=point,
             description_html=description_html,
             description_stripped=description_stripped,
-            priority=priority,
+            priority=validated_priority,
             start_date=start_date,
             target_date=target_date,
             sort_order=sort_order,
