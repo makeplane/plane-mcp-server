@@ -37,7 +37,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
             - finish_before: Work items that finish before this item
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_relations.list(
+        return client.work_items.relations.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -67,7 +67,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
             issues=issues,
         )
 
-        client.work_item_relations.create(
+        client.work_items.relations.create(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -92,7 +92,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
 
         data = RemoveWorkItemRelation(related_issue=related_issue)
 
-        client.work_item_relations.delete(
+        client.work_items.relations.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,

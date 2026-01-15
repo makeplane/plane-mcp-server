@@ -29,7 +29,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
             List of WorkItemWorkLog objects
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_logs.list(
+        return client.work_items.work_logs.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -63,7 +63,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         if description is not None:
             data["description"] = description
 
-        return client.work_logs.create(
+        return client.work_items.work_logs.create(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -99,7 +99,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         if description is not None:
             data["description"] = description
 
-        return client.work_logs.update(
+        return client.work_items.work_logs.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -122,7 +122,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
             work_log_id: UUID of the work log
         """
         client, workspace_slug = get_plane_client_context()
-        client.work_logs.delete(
+        client.work_items.work_logs.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,

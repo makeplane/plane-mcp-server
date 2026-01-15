@@ -34,7 +34,7 @@ def register_work_item_link_tools(mcp: FastMCP) -> None:
             List of WorkItemLink objects
         """
         client, workspace_slug = get_plane_client_context()
-        response: PaginatedWorkItemLinkResponse = client.work_item_links.list(
+        response: PaginatedWorkItemLinkResponse = client.work_items.links.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -60,7 +60,7 @@ def register_work_item_link_tools(mcp: FastMCP) -> None:
             WorkItemLink object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_links.retrieve(
+        return client.work_items.links.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -88,7 +88,7 @@ def register_work_item_link_tools(mcp: FastMCP) -> None:
 
         data = CreateWorkItemLink(url=url)
 
-        return client.work_item_links.create(
+        return client.work_items.links.create(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -118,7 +118,7 @@ def register_work_item_link_tools(mcp: FastMCP) -> None:
 
         data = UpdateWorkItemLink(url=url)
 
-        return client.work_item_links.update(
+        return client.work_items.links.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -141,7 +141,7 @@ def register_work_item_link_tools(mcp: FastMCP) -> None:
             link_id: UUID of the link
         """
         client, workspace_slug = get_plane_client_context()
-        client.work_item_links.delete(
+        client.work_items.links.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,

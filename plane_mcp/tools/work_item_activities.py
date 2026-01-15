@@ -32,7 +32,7 @@ def register_work_item_activity_tools(mcp: FastMCP) -> None:
             List of WorkItemActivity objects
         """
         client, workspace_slug = get_plane_client_context()
-        response: PaginatedWorkItemActivityResponse = client.work_item_activities.list(
+        response: PaginatedWorkItemActivityResponse = client.work_items.activities.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -58,7 +58,7 @@ def register_work_item_activity_tools(mcp: FastMCP) -> None:
             WorkItemActivity object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_activities.retrieve(
+        return client.work_items.activities.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,

@@ -34,7 +34,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
             List of WorkItemComment objects
         """
         client, workspace_slug = get_plane_client_context()
-        response: PaginatedWorkItemCommentResponse = client.work_item_comments.list(
+        response: PaginatedWorkItemCommentResponse = client.work_items.comments.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -60,7 +60,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
             WorkItemComment object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_comments.retrieve(
+        return client.work_items.comments.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -102,7 +102,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.work_item_comments.create(
+        return client.work_items.comments.create(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -146,7 +146,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.work_item_comments.update(
+        return client.work_items.comments.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
@@ -169,7 +169,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
             comment_id: UUID of the comment
         """
         client, workspace_slug = get_plane_client_context()
-        client.work_item_comments.delete(
+        client.work_items.comments.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
