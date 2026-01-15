@@ -34,11 +34,11 @@ def register_intake_tools(mcp: FastMCP) -> None:
             List of IntakeWorkItem objects
         """
         client, workspace_slug = get_plane_client_context()
-        
+
         query_params = None
         if params:
             query_params = PaginatedQueryParams(**params)
-        
+
         response: PaginatedIntakeWorkItemResponse = client.intake.list(
             workspace_slug=workspace_slug, project_id=project_id, params=query_params
         )
@@ -88,11 +88,11 @@ def register_intake_tools(mcp: FastMCP) -> None:
             IntakeWorkItem object
         """
         client, workspace_slug = get_plane_client_context()
-        
+
         query_params = None
         if params:
             query_params = RetrieveQueryParams(**params)
-        
+
         return client.intake.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -145,4 +145,3 @@ def register_intake_tools(mcp: FastMCP) -> None:
         client.intake.delete(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
-
