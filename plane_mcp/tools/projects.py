@@ -1,8 +1,9 @@
 """Project-related tools for Plane MCP Server."""
 
-from typing import Any
+from typing import Any, get_args
 
 from fastmcp import FastMCP
+from plane.models.enums import TimezoneEnum
 from plane.models.projects import (
     CreateProject,
     PaginatedProjectResponse,
@@ -111,6 +112,11 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate timezone against allowed literal values
+        validated_timezone: TimezoneEnum | None = (
+            timezone if timezone in get_args(TimezoneEnum) else None  # type: ignore[assignment]
+        )
+
         data = CreateProject(
             name=name,
             identifier=identifier,
@@ -127,7 +133,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             guest_view_all_features=guest_view_all_features,
             archive_in=archive_in,
             close_in=close_in,
-            timezone=timezone,
+            timezone=validated_timezone,
             external_source=external_source,
             external_id=external_id,
             is_issue_type_enabled=is_issue_type_enabled,
@@ -210,6 +216,11 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Validate timezone against allowed literal values
+        validated_timezone: TimezoneEnum | None = (
+            timezone if timezone in get_args(TimezoneEnum) else None  # type: ignore[assignment]
+        )
+
         data = UpdateProject(
             name=name,
             description=description,
@@ -226,7 +237,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             guest_view_all_features=guest_view_all_features,
             archive_in=archive_in,
             close_in=close_in,
-            timezone=timezone,
+            timezone=validated_timezone,
             external_source=external_source,
             external_id=external_id,
             is_issue_type_enabled=is_issue_type_enabled,
