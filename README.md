@@ -324,14 +324,118 @@ This server unlocks all sorts of useful capabilities for anyone working with Pla
   - Parameters:
     - `project_id` (string, required): UUID of the project 
     - `issue_id` (string, required): UUID of the issue 
-    - `worklog_id` (string, required): UUID of the worklog 
+    - `worklog_id` (string, required): UUID of the worklog
+
+### Pages (Session Authentication Required)
+
+**Note:** Pages API tools require session authentication. Use `plane_login` first with your email and password.
+
+- `plane_login`
+  - Authenticate with Plane using email and password
+  - Parameters:
+    - `email` (string, required): Your Plane account email
+    - `password` (string, required): Your Plane account password
+    - `api_host_url` (string, optional): Plane API URL (defaults to https://api.plane.so/)
+
+- `list_pages`
+  - List all pages in a project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+
+- `get_page`
+  - Get details of a specific page
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page
+
+- `create_page`
+  - Create a new page
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `name` (string, required): Page name
+    - `description` (string, optional): Page description
+    - `access` (integer, optional): Access level (0=public, 1=private)
+
+- `update_page`
+  - Update a page's properties
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page
+    - `name` (string, optional): New page name
+    - `description` (string, optional): New description
+    - `access` (integer, optional): New access level
+
+- `delete_page`
+  - Delete a page permanently
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page
+
+- `lock_page` / `unlock_page`
+  - Lock or unlock a page for editing
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page
+
+- `favorite_page` / `unfavorite_page`
+  - Add or remove page from favorites
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page
+
+- `archive_page` / `unarchive_page`
+  - Archive or restore a page
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page
+
+- `duplicate_page`
+  - Create a copy of a page
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page to duplicate
+
+- `get_page_description` / `update_page_description`
+  - Get or update page HTML content
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page
+    - `description_html` (string, required for update): HTML content
+
+- `get_page_versions` / `get_page_version`
+  - Get page version history
+  - Parameters:
+    - `project_id` (string, required): UUID of the project
+    - `page_id` (string, required): UUID of the page
+    - `version_id` (string, required for specific version): UUID of the version
+
+- `get_pages_summary`
+  - Get pages statistics for a project
+  - Parameters:
+    - `project_id` (string, required): UUID of the project 
 
 
 ## Configuration Parameters
 
+### For API Key Authentication (Most Tools)
 - `PLANE_API_KEY` - Your Plane API token. You can generate one from the Workspace Settings > API Tokens page (`/settings/api-tokens/`) in the Plane app. 
 - `PLANE_WORKSPACE_SLUG` - The workspace slug for your Plane instance. The workspace-slug represents the unique workspace identifier for a workspace in Plane. It can be found in the URL.
 - `PLANE_API_HOST_URL` (optional) - The host URL of the Plane API Server. Defaults to https://api.plane.so/
+
+### For Session Authentication (Pages API Only)
+Pages API tools require session authentication using email/password instead of API key. Use the `plane_login` tool before accessing Pages tools.
+
+**Environment variables for Pages authentication:**
+- `PLANE_EMAIL` (optional) - Your Plane account email for session authentication
+- `PLANE_PASSWORD` (optional) - Your Plane account password for session authentication
+
+**Note:** You can either:
+1. Set these environment variables in your MCP client configuration, OR
+2. Call `plane_login` tool manually with email/password when needed
+
+**Authentication methods by feature:**
+- **Projects, Issues, Modules, Cycles, Labels, States, Work Logs**: API Key (PLANE_API_KEY)
+- **Pages**: Session Auth (email/password via `plane_login` tool)
 
 ## Usage
 
@@ -339,6 +443,7 @@ This server unlocks all sorts of useful capabilities for anyone working with Pla
 
 You can add Plane to [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) by updating your `claude_desktop_config.json`:
 
+**For standard API key authentication (Projects, Issues, etc.):**
 ```json
 {
   "mcpServers": {
@@ -358,10 +463,35 @@ You can add Plane to [Claude Desktop](https://modelcontextprotocol.io/quickstart
 }
 ```
 
+**To also use Pages API (with session authentication):**
+```json
+{
+  "mcpServers": {
+    "plane": {
+       "command": "npx",
+      "args": [
+        "-y",
+        "@makeplane/plane-mcp-server"
+      ],
+      "env": {
+        "PLANE_API_KEY": "<YOUR_API_KEY>",
+        "PLANE_API_HOST_URL": "<HOST_URL_FOR_SELF_HOSTED>",
+        "PLANE_WORKSPACE_SLUG": "<YOUR_WORKSPACE_SLUG>",
+        "PLANE_EMAIL": "<YOUR_EMAIL>",
+        "PLANE_PASSWORD": "<YOUR_PASSWORD>"
+      }
+    }
+  }
+}
+```
+
+**Note:** If you don't set `PLANE_EMAIL` and `PLANE_PASSWORD`, you can still use Pages tools by calling `plane_login` manually in your conversation.
+
 ### VSCode
 
 You can also connect Plane to [VSCode](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server) by editing your `.vscode.json` or `mcp.json` file:
 
+**For standard API key authentication:**
 ```json
 {
   "servers": {
@@ -379,7 +509,28 @@ You can also connect Plane to [VSCode](https://code.visualstudio.com/docs/copilo
     }
   }
 }
+```
 
+**To also use Pages API (with session authentication):**
+```json
+{
+  "servers": {
+    "plane": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@makeplane/plane-mcp-server"
+      ],
+      "env": {
+        "PLANE_API_KEY": "<YOUR_API_KEY>",
+        "PLANE_API_HOST_URL": "<HOST_URL_FOR_SELF_HOSTED>",
+        "PLANE_WORKSPACE_SLUG": "<YOUR_WORKSPACE_SLUG>",
+        "PLANE_EMAIL": "<YOUR_EMAIL>",
+        "PLANE_PASSWORD": "<YOUR_PASSWORD>"
+      }
+    }
+  }
+}
 ```
 
 ## License

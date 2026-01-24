@@ -17,6 +17,8 @@ export interface AuthResult {
 
 let axiosInstance: AxiosInstance | null = null;
 let isAuthenticated = false;
+let authenticationTime: number | null = null;
+const SESSION_TIMEOUT_MS = 3600000; // 1 hour
 
 debugLog(`[AUTH] Module loaded - PID: ${process.pid}`).catch(() => {});
 
@@ -28,7 +30,11 @@ export function getAxiosInstance(): AxiosInstance {
   if (!axiosInstance) {
     debugLog("[AUTH] Creating new axios instance with cookie jar").catch(() => {});
     const jar = new CookieJar();
-    axiosInstance = wrapper(axios.create({ jar, withCredentials: true }));
+    axiosInstance = wrapper(axios.create({
+      jar,
+      withCredentials: true,
+      timeout: 30000 // 30 second timeout
+    }));
   } else {
     debugLog("[AUTH] Reusing existing axios instance").catch(() => {});
   }
@@ -64,9 +70,21 @@ export async function authenticateWithPassword(
     await debugLog(`[AUTH] Host URL: ${host}`);
 
     // Step 1: Get CSRF token (stored in cookie jar automatically)
-    const csrfResponse = await instance.get(`${host}auth/get-csrf-token/`);
+    // Use explicit path to ensure we capture path-scoped cookies
+    const csrfUrl = `${host}auth/get-csrf-token/`;
+    const csrfResponse = await instance.get(csrfUrl, {
+      headers: {
+        "Referer": host.includes('api.plane.so') ? 'https://app.plane.so/' : host,
+        "Origin": host.includes('api.plane.so') ? 'https://app.plane.so' : host.replace(/\/$/, ''),
+      }
+    });
     await debugLog(`[AUTH] CSRF response status: ${csrfResponse.status}`);
-    await debugLog(`[AUTH] CSRF response headers: ${JSON.stringify(csrfResponse.headers)}`);
+    
+    // Only log headers if verbose debug is enabled to avoid leaking config details
+    if (process.env.PLANE_MCP_DEBUG === 'verbose') {
+      await debugLog(`[AUTH] CSRF response headers: ${JSON.stringify(csrfResponse.headers)}`);
+    }
+    
     await debugLog("[AUTH] CSRF token requested");
 
     // Step 2: Extract CSRF token from cookie jar for the request header
@@ -76,7 +94,8 @@ export async function authenticateWithPassword(
       return { success: false, error: "cookies", message: "Cookie jar not available for session authentication" };
     }
     const jar = maybeJar;
-    const cookies = await jar.getCookies(host);
+    // Check cookies on the specific CSRF URL to ensure we get path-scoped cookies
+    const cookies = await jar.getCookies(csrfUrl);
     await debugLog(`[AUTH] Cookies after CSRF request: ${cookies.map(c => c.key).join(", ")}`);
 
     const csrfCookie = cookies.find((c) => ["csrftoken", "csrf", "XSRF-TOKEN"].includes(c.key));
@@ -104,9 +123,12 @@ export async function authenticateWithPassword(
         headers: {
           "X-CSRFToken": csrfCookie.value,
           "Content-Type": "application/x-www-form-urlencoded",
+          // Referer and Origin headers are required for cloud instances to return cookies
+          "Referer": host.includes('api.plane.so') ? 'https://app.plane.so/' : host,
+          "Origin": host.includes('api.plane.so') ? 'https://app.plane.so' : host.replace(/\/$/, ''),
         },
         maxRedirects: 0, // Don't follow redirects, we just need the cookies
-        validateStatus: (status) => status >= 200 && status < 400, // Accept redirects as success
+        validateStatus: (status) => (status >= 200 && status < 300) || status === 302, // Accept 2xx and 302 (redirect) as success
       }
     );
 
@@ -115,8 +137,10 @@ export async function authenticateWithPassword(
     const headerNames = Object.keys(loginResponse.headers ?? {});
     await debugLog(`[AUTH] Login response headers present: ${headerNames.join(", ")}`);
 
-    // Log ALL headers for debugging
-    await debugLog(`[AUTH] Login response headers FULL: ${JSON.stringify(loginResponse.headers)}`);
+    // Log ALL headers for debugging ONLY if verbose
+    if (process.env.PLANE_MCP_DEBUG === 'verbose') {
+      await debugLog(`[AUTH] Login response headers FULL: ${JSON.stringify(loginResponse.headers)}`);
+    }
 
     // Check if Set-Cookie headers are present
     const setCookieHeader = loginResponse.headers['set-cookie'];
@@ -124,7 +148,6 @@ export async function authenticateWithPassword(
       await debugLog(`[AUTH] Set-Cookie headers received: ${Array.isArray(setCookieHeader) ? setCookieHeader.length : 1} cookie(s)`);
     } else {
       await debugLog(`[AUTH] WARNING: No Set-Cookie headers in login response! Checking cookie jar anyway...`);
-      // We don't return error here, we assume cookies might be in the jar (e.g. from redirects or axios processing)
     }
 
     // Verify cookies were stored in the jar
@@ -137,17 +160,16 @@ export async function authenticateWithPassword(
     const sessionCookie = loginCookies.find((c) => sessionCookieNames.includes(c.key));
     if (!sessionCookie) {
       await debugLog(`[AUTH] WARNING: No standard session cookie found (looked for: ${sessionCookieNames.join(", ")})`);
-      // We don't return error here anymore, we let the verification step decide
     }
 
-    // Log full cookie details for debugging
-    loginCookies.forEach(c => {
-      // Redacted logging of cookie values
-      debugLog(`[AUTH] Cookie detail - ${c.key}: domain=${c.domain}, path=${c.path}, httpOnly=${c.httpOnly}, secure=${c.secure}`).catch(() => {});
-    });
+    // Log full cookie details for debugging - gated
+    if (process.env.PLANE_MCP_DEBUG === 'verbose') {
+      loginCookies.forEach(c => {
+        debugLog(`[AUTH] Cookie detail - ${c.key}: domain=${c.domain}, path=${c.path}, httpOnly=${c.httpOnly}, secure=${c.secure}`).catch(() => {});
+      });
+    }
 
     // Verify the session works with a test API call
-    // Note: Use /api/ endpoint (not /api/v1/) since session cookies work with /api/ endpoints
     try {
       const verifyUrl = `${host}api/users/me/`;
       await debugLog(`[AUTH] Attempting to verify session with: ${verifyUrl}`);
@@ -174,9 +196,14 @@ export async function authenticateWithPassword(
     }
 
     isAuthenticated = true;
+    authenticationTime = Date.now();
     await debugLog("[AUTH] Authentication successful");
     return { success: true };
   } catch (error) {
+    // Reset auth state on failure to avoid stale state
+    isAuthenticated = false;
+    authenticationTime = null;
+    
     await debugLog(`[AUTH] Authentication failed: ${error}`);
 
     if (axios.isAxiosError(error)) {
@@ -198,6 +225,19 @@ export async function authenticateWithPassword(
  * @returns true if authenticated, false otherwise
  */
 export function isSessionAuthenticated(): boolean {
+  if (!isAuthenticated || !authenticationTime) {
+    debugLog(`[AUTH] isSessionAuthenticated() - not authenticated`).catch(() => {});
+    return false;
+  }
+
+  const isStale = Date.now() - authenticationTime > SESSION_TIMEOUT_MS;
+  if (isStale) {
+    debugLog(`[AUTH] Session expired, resetting authentication`).catch(() => {});
+    isAuthenticated = false;
+    authenticationTime = null;
+    return false;
+  }
+  
   debugLog(`[AUTH] isSessionAuthenticated() called - returning: ${isAuthenticated}`).catch(() => {});
   return isAuthenticated;
 }
@@ -230,6 +270,93 @@ export async function resetAuthentication(): Promise<void> {
   } finally {
     axiosInstance = null;
     isAuthenticated = false;
+    authenticationTime = null;
     await debugLog("[AUTH] Authentication reset");
+  }
+}
+
+/**
+ * Import cookies from browser session for cloud SSO authentication
+ *
+ * This function allows users to import their browser cookies when password
+ * authentication doesn't work (e.g., for SSO-created accounts).
+ *
+ * Steps for users:
+ * 1. Install a cookie export extension (e.g., "EditThisCookie", "Cookie-Editor")
+ * 2. Visit your Plane instance in the browser
+ * 3. Export cookies as JSON
+ * 4. Pass the JSON string to this function
+ *
+ * @param cookiesJson - JSON string containing exported cookies
+ * @param hostUrl - Plane server URL
+ * @returns Import result with success status
+ */
+export async function importCookies(
+  cookiesJson: string,
+  hostUrl: string
+): Promise<{success: boolean; message?: string; cookiesImported?: number}> {
+  try {
+    const instance = getAxiosInstance();
+    const host = hostUrl.endsWith("/") ? hostUrl : `${hostUrl}/`;
+    
+    await debugLog("[AUTH] Importing cookies from JSON...");
+    
+    // Parse cookies JSON
+    let cookies;
+    try {
+      cookies = JSON.parse(cookiesJson);
+    } catch (parseError) {
+      return { success: false, message: "Invalid JSON format" };
+    }
+    
+    // Handle both array and object formats
+    const cookieArray = Array.isArray(cookies) ? cookies : [cookies];
+    
+    const maybeJar = (instance.defaults as Record<string, unknown>).jar;
+    if (!(maybeJar instanceof CookieJar)) {
+      return { success: false, message: "Cookie jar not available" };
+    }
+    const jar = maybeJar;
+    
+    let imported = 0;
+    for (const cookie of cookieArray) {
+      try {
+        // Handle different cookie export formats
+        const cookieStr = cookie.name && cookie.value
+          ? `${cookie.name}=${cookie.value}; Domain=${cookie.domain || new URL(host).hostname}; Path=${cookie.path || '/'}; ${cookie.secure ? 'Secure;' : ''} ${cookie.httpOnly ? 'HttpOnly;' : ''}`
+          : cookie;
+        
+        await jar.setCookie(cookieStr, host);
+        imported++;
+      } catch (cookieError) {
+        await debugLog(`[AUTH] Failed to import cookie: ${cookieError}`);
+      }
+    }
+    
+    await debugLog(`[AUTH] Imported ${imported} cookies`);
+    
+    if (imported === 0) {
+      return { success: false, message: "No valid cookies found in JSON" };
+    }
+    
+    // Verify the session works
+    try {
+      const verifyUrl = `${host}api/users/me/`;
+      const verifyResponse = await instance.get(verifyUrl);
+      
+      if (verifyResponse.status === 200) {
+        isAuthenticated = true;
+        authenticationTime = Date.now();
+        await debugLog("[AUTH] Session verified with imported cookies");
+        return { success: true, cookiesImported: imported };
+      } else {
+        return { success: false, message: "Session verification failed - cookies may be invalid or expired" };
+      }
+    } catch (verifyError) {
+      return { success: false, message: "Could not verify session with imported cookies" };
+    }
+  } catch (error) {
+    await debugLog(`[AUTH] Cookie import failed: ${error}`);
+    return { success: false, message: String(error) };
   }
 }
