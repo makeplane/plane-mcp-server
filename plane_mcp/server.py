@@ -11,7 +11,7 @@ from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
 from plane_mcp.tools import register_tools
 
 
-def get_oauth_mcp(base_path: str = '/'):
+def get_oauth_mcp(base_path: str = "/"):
     redis_host = os.getenv("REDIS_HOST")
     redis_port = os.getenv("REDIS_PORT")
 
