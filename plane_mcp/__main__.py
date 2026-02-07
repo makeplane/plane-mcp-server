@@ -5,15 +5,27 @@ import sys
 from contextlib import asynccontextmanager
 from enum import Enum
 
-import uvicorn
-from fastmcp.utilities.logging import get_logger
-from starlette.applications import Starlette
-from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Mount
+# Configure logging BEFORE importing FastMCP to prevent Rich handler setup
+from plane_mcp.logging import (
+    configure_logging,
+    get_log_level,
+    get_uvicorn_log_config,
+)
 
-from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
+configure_logging()
 
-logger = get_logger(__name__)
+import logging  # noqa: E402
+
+import uvicorn  # noqa: E402
+from starlette.applications import Starlette  # noqa: E402
+from starlette.middleware.cors import CORSMiddleware  # noqa: E402
+from starlette.routing import Mount  # noqa: E402
+
+from plane_mcp.logging import _get_log_format  # noqa: E402
+from plane_mcp.middleware import StructuredLoggingMiddleware  # noqa: E402
+from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 class ServerMode(Enum):
@@ -72,6 +84,13 @@ def main() -> None:
             lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
         )
 
+        # Use structured logging middleware for JSON, uvicorn access log for Rich
+        log_format = _get_log_format()
+        use_json_logging = log_format == "json"
+
+        if use_json_logging:
+            app.add_middleware(StructuredLoggingMiddleware)
+
         app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
@@ -81,7 +100,14 @@ def main() -> None:
         )
 
         logger.info("Starting HTTP server at URLs: /mcp and /header/mcp")
-        uvicorn.run(app, host="0.0.0.0", port=8211, log_level="info")
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8211,
+            log_level=get_log_level().lower(),
+            log_config=get_uvicorn_log_config(),
+            access_log=not use_json_logging,  # Use uvicorn access log for Rich/text mode
+        )
         return
 
 

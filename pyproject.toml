@@ -16,6 +16,7 @@ dependencies = [
     "plane-sdk==0.2.2",
     "py-key-value-aio[redis]==0.3.0",
     "mcp==1.24.0",
+    "python-json-logger>=2.0.0",
 ]
 
 [project.optional-dependencies]
