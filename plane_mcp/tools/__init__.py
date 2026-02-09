@@ -3,6 +3,7 @@
 from fastmcp import FastMCP
 
 from plane_mcp.tools.cycles import register_cycle_tools
+from plane_mcp.tools.epics import register_epic_tools
 from plane_mcp.tools.initiatives import register_initiative_tools
 from plane_mcp.tools.intake import register_intake_tools
 from plane_mcp.tools.labels import register_label_tools
@@ -42,3 +43,4 @@ def register_tools(mcp: FastMCP) -> None:
     register_work_item_type_tools(mcp)
     register_state_tools(mcp)
     register_workspace_tools(mcp)
+    register_epic_tools(mcp)
