@@ -54,12 +54,20 @@ async def run_integration_test():
     Full integration test:
     1. Create a project
     2. Create work item 1
-    3. Create work item 2
-    4. Update work item 2 with work item 1 as parent
-    5. Delete work items
-    6. Delete project
-    """
-    config = get_config()
+    3. Create work item 2 
+    4. Update work item 2 with work item 1 as parent 
+    5. Create epic with work item 1 as the underlying work item 
+    6. Update work item 2 to be under the epic 
+    7. List all epics 
+    8. Create a milestone and associate it with the project and work items
+    9. Update the milestone to change its name and description
+    10. List all milestones in the project
+    11. Delete the milestone
+    12. Delete the epic
+    13. Delete work items 
+    14. Delete project 
+    """ 
+    config = get_config() 
     unique_id = uuid.uuid4().hex[:6]
 
     transport = StreamableHttpTransport(
@@ -162,6 +170,49 @@ async def run_integration_test():
         )
         epics = extract_result(epics_result)
         print(f"Epics in project: {[e['id'] for e in epics]}")
+
+        # 8. Create a milestone and associate it with the project and work items
+        print("Creating milestone...")
+        milestone_result = await client.call_tool(
+            "create_milestone",
+            {
+                "project_id": project_id,
+                "name": f"Milestone {unique_id}",
+                "description": "Integration test milestone",   
+                "associated_work_item_ids": [epic_id, work_item_1_id, work_item_2_id],
+            },
+        )
+        milestone = extract_result(milestone_result)
+        milestone_id = milestone["id"]
+
+        print("List work items associated with milestone...")
+
+        milestone_details_result = await client.call_tool(
+            "list_milestone_work_items",
+            {
+                "project_id": project_id,
+                "milestone_id": milestone_id,
+            },
+        )
+
+        milestone_work_items = extract_result(milestone_details_result)
+        print(f"Work items associated with milestone: {[wi['id'] for wi in milestone_work_items]}")
+
+        print(f"Created milestone: {milestone_id}")
+        
+        # 9. Update the milestone to change its name and description
+        print("Updating milestone...")
+        await client.call_tool(
+            "update_milestone", 
+            { 
+                "project_id": project_id, 
+                "milestone_id": milestone_id, 
+                "name": f"Updated Milestone {unique_id}", 
+                "description": "Updated description for integration test milestone" 
+            },
+        ) 
+
+        print("Updated milestone")
 
         # 8. Delete work items
         print("Deleting work items...")
