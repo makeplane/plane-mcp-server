@@ -13,11 +13,12 @@ RUN apt-get update && apt-get install -y \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy dependency files and application code
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml ./
+COPY uv.lock* ./
 COPY plane_mcp/ ./plane_mcp/
 
-# Install the package and dependencies using uv with locked versions
-RUN uv sync --frozen --no-cache --no-dev
+# Install the package and dependencies using uv
+RUN uv pip install --system --no-cache .
 
 # Expose port for HTTP transports (SSE, streamable-http, http)
 EXPOSE 8211
