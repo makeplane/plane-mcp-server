@@ -90,6 +90,7 @@ class PlaneOAuthProviderSettings(BaseSettings):
     allowed_client_redirect_uris: list[str] | None = None
     jwt_signing_key: str | None = None
     plane_base_url: str | None = None
+    plane_internal_base_url: str | None = None  # Internal URL for server-to-server calls
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -146,7 +147,9 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                 logger.info(f"Plane API response status: {response.status_code}")
                 if response.status_code != 200:
                     logger.info(
-                        f"Plane token verification failed: {response.status_code} - {response.text[:200]}"
+                        "Plane token verification failed: %s - %s",
+                        response.status_code,
+                        response.text[:200],
                     )
                     return None
 
@@ -178,7 +181,7 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                     token=token,
                     client_id=user.id or "unknown",
                     scopes=["read", "write"],  # Plane doesn't expose scopes in user endpoint
-                    expires_at=expires_at,  # Plane tokens don't typically expire
+                    expires_at=expires_at,
                     claims={
                         "auth_method": "oauth",
                         "sub": user.id or "unknown",
@@ -246,6 +249,7 @@ class PlaneOAuthProvider(OAuthProxy):
         jwt_signing_key: str | bytes | NotSetT = NotSet,
         require_authorization_consent: bool = True,
         plane_base_url: str | NotSetT = NotSet,
+        plane_internal_base_url: str | NotSetT = NotSet,
     ):
         """Initialize Plane OAuth provider.
 
@@ -299,6 +303,7 @@ class PlaneOAuthProvider(OAuthProxy):
                     "allowed_client_redirect_uris": allowed_client_redirect_uris,
                     "jwt_signing_key": jwt_signing_key,
                     "plane_base_url": plane_base_url,
+                    "plane_internal_base_url": plane_internal_base_url,
                 }.items()
                 if v is not NotSet
             }
@@ -322,12 +327,17 @@ class PlaneOAuthProvider(OAuthProxy):
         plane_base_url_final = settings.plane_base_url or os.getenv(
             "PLANE_BASE_URL", DEFAULT_PLANE_BASE_URL
         )
+        # Internal URL for server-to-server calls (token exchange, API verification)
+        # Falls back to external URL if not set
+        plane_internal_url = settings.plane_internal_base_url or os.getenv(
+            "PLANE_INTERNAL_BASE_URL", plane_base_url_final
+        )
 
-        # Create Plane token verifier
+        # Create Plane token verifier (uses internal URL for server-to-server calls)
         token_verifier = PlaneOAuthTokenVerifier(
             required_scopes=required_scopes_final,
             timeout_seconds=timeout_seconds_final,
-            plane_base_url=plane_base_url_final,
+            plane_base_url=plane_internal_url,
         )
 
         # Extract secret string from SecretStr
@@ -336,9 +346,11 @@ class PlaneOAuthProvider(OAuthProxy):
         )
 
         # Initialize OAuth proxy with Plane endpoints
+        # Authorization: external URL (user's browser)
+        # Token exchange: internal URL (server-to-server)
         super().__init__(
-            upstream_authorization_endpoint=(f"{plane_base_url_final}/auth/o/authorize-app/"),
-            upstream_token_endpoint=f"{plane_base_url_final}/auth/o/token/",
+            upstream_authorization_endpoint=f"{plane_base_url_final}/auth/o/authorize-app/",
+            upstream_token_endpoint=f"{plane_internal_url}/auth/o/token/",
             upstream_client_id=settings.client_id,
             upstream_client_secret=client_secret_str,
             token_verifier=token_verifier,
