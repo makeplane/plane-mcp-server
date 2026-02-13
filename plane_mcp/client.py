@@ -28,7 +28,8 @@ def get_plane_client_context() -> PlaneClientContext:
     3. OAuth access token
 
     Environment variables:
-    - PLANE_BASE_URL: Base URL for Plane API (default: https://api.plane.so)
+    - PLANE_INTERNAL_BASE_URL: Internal URL for Plane API (preferred for server-to-server calls)
+    - PLANE_BASE_URL: Base URL for Plane API (fallback, default: https://api.plane.so)
 
     Returns:
         PlaneClientContext containing configured PlaneClient instance and workspace slug
@@ -36,7 +37,9 @@ def get_plane_client_context() -> PlaneClientContext:
     Raises:
         ConfigurationError: If access token is not available or workspace slug is missing
     """
-    base_url = os.getenv("PLANE_BASE_URL", "https://api.plane.so")
+    base_url = os.getenv("PLANE_INTERNAL_BASE_URL") or os.getenv(
+        "PLANE_BASE_URL", "https://api.plane.so"
+    )
     workspace_slug = os.getenv("PLANE_WORKSPACE_SLUG", "")
 
     api_key = os.getenv("PLANE_API_KEY", "")
