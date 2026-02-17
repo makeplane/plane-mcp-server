@@ -7,12 +7,18 @@ from plane.models.work_items import (
     CreateWorkItem,
     PaginatedWorkItemResponse,
     UpdateWorkItem,
-    WorkItem,
     WorkItemDetail,
     WorkItemSearch,
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.models import (
+    AssigneeSummary,
+    LabelSummary,
+    WorkItemFull,
+    WorkItemSummary,
+    strip_html,
+)
 
 
 def register_work_item_tools(mcp: FastMCP) -> None:
@@ -23,36 +29,29 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         project_id: str,
         cursor: str | None = None,
         per_page: int | None = None,
-        expand: str | None = None,
-        fields: str | None = None,
         order_by: str | None = None,
         external_id: str | None = None,
         external_source: str | None = None,
-    ) -> list[WorkItem]:
+    ) -> list[WorkItemSummary]:
         """
         List all work items in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cursor: Pagination cursor for getting next set of results
             per_page: Number of results per page (1-100)
-            expand: Comma-separated list of related fields to expand in response
-            fields: Comma-separated list of fields to include in response
             order_by: Field to order results by. Prefix with '-' for descending order
             external_id: External system identifier for filtering or lookup
             external_source: External system source name for filtering or lookup
 
         Returns:
-            List of WorkItem objects
+            List of WorkItemSummary objects (no description HTML — use retrieve_work_item for full detail).
         """
         client, workspace_slug = get_plane_client_context()
 
         params = WorkItemQueryParams(
             cursor=cursor,
             per_page=per_page,
-            expand=expand,
-            fields=fields,
             order_by=order_by,
             external_id=external_id,
             external_source=external_source,
@@ -64,7 +63,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             params=params,
         )
 
-        return response.results
+        return [_to_work_item_summary(item).slim() for item in response.results]
 
     @mcp.tool()
     def create_work_item(
@@ -87,12 +86,11 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         state: str | None = None,
         estimate_point: str | None = None,
         type: str | None = None,
-    ) -> WorkItem:
+    ) -> WorkItemSummary:
         """
         Create a new work item.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             name: Work item name (required)
             assignees: List of user IDs to assign to the work item
@@ -114,7 +112,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type: Work item type identifier
 
         Returns:
-            Created WorkItem object
+            Created WorkItemSummary object
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -139,9 +137,10 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type=type,
         )
 
-        return client.work_items.create(
+        item = client.work_items.create(
             workspace_slug=workspace_slug, project_id=project_id, data=data
         )
+        return _to_work_item_summary(item).slim()
 
     @mcp.tool()
     def retrieve_work_item(
@@ -152,12 +151,11 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         external_source: str | None = None,
         order_by: str | None = None,
-    ) -> WorkItemDetail:
+    ) -> WorkItemFull:
         """
         Retrieve a work item by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             work_item_id: UUID of the work item
             expand: Comma-separated fields to expand (e.g., "assignees,labels,state")
@@ -167,7 +165,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             order_by: Field to order results by (typically not used for single item retrieval)
 
         Returns:
-            WorkItemDetail object with expanded relationships
+            WorkItemFull with plain-text description and expanded assignees/labels.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -179,12 +177,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             order_by=order_by,
         )
 
-        return client.work_items.retrieve(
+        detail: WorkItemDetail = client.work_items.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
             params=params,
         )
+        return _to_work_item_full(detail).slim()
 
     @mcp.tool()
     def retrieve_work_item_by_identifier(
@@ -195,12 +194,11 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         external_source: str | None = None,
         order_by: str | None = None,
-    ) -> WorkItemDetail:
+    ) -> WorkItemFull:
         """
         Retrieve a work item by project identifier and issue sequence number.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_identifier: Project identifier string (e.g., "MP" for "My Project")
             issue_identifier: Issue sequence number (e.g., 1, 2, 3)
             expand: Comma-separated fields to expand (e.g., "assignees,labels,state")
@@ -210,7 +208,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             order_by: Field to order results by (typically not used for single item retrieval)
 
         Returns:
-            WorkItemDetail object with expanded relationships
+            WorkItemFull with plain-text description and expanded assignees/labels.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -222,12 +220,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             order_by=order_by,
         )
 
-        return client.work_items.retrieve_by_identifier(
+        detail: WorkItemDetail = client.work_items.retrieve_by_identifier(
             workspace_slug=workspace_slug,
             project_identifier=project_identifier,
             issue_identifier=issue_identifier,
             params=params,
         )
+        return _to_work_item_full(detail).slim()
 
     @mcp.tool()
     def update_work_item(
@@ -251,12 +250,11 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         state: str | None = None,
         estimate_point: str | None = None,
         type: str | None = None,
-    ) -> WorkItem:
+    ) -> WorkItemSummary:
         """
         Update a work item by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             work_item_id: UUID of the work item
             name: Work item name
@@ -279,7 +277,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type: Work item type identifier
 
         Returns:
-            Updated WorkItem object
+            Updated WorkItemSummary object
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -304,12 +302,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type=type,
         )
 
-        return client.work_items.update(
+        item = client.work_items.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
             data=data,
         )
+        return _to_work_item_summary(item).slim()
 
     @mcp.tool()
     def delete_work_item(project_id: str, work_item_id: str) -> None:
@@ -362,3 +361,50 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         )
 
         return client.work_items.search(workspace_slug=workspace_slug, query=query, params=params)
+
+
+def _enum_str(v) -> str | None:
+    if v is None:
+        return None
+    return v.value if hasattr(v, "value") else str(v)
+
+
+def _to_work_item_summary(item) -> WorkItemSummary:
+    assignees = getattr(item, "assignees", None) or []
+    labels = getattr(item, "labels", None) or []
+    assignee_ids = [a if isinstance(a, str) else a.id for a in assignees if a]
+    label_ids = [lb if isinstance(lb, str) else lb.id for lb in labels if lb]
+    return WorkItemSummary(
+        id=item.id,
+        sequence_id=item.sequence_id,
+        name=item.name,
+        priority=_enum_str(item.priority),
+        state=item.state if isinstance(item.state, str) else getattr(item.state, "id", None),
+        assignees=[a for a in assignee_ids if a],
+        labels=[lb for lb in label_ids if lb],
+    )
+
+
+def _to_work_item_full(detail: WorkItemDetail) -> WorkItemFull:
+    assignees = [
+        AssigneeSummary(id=a.id, display_name=a.display_name)
+        for a in (detail.assignees or [])
+    ]
+    labels = [
+        LabelSummary(id=lb.id, name=lb.name, color=lb.color)
+        for lb in (detail.labels or [])
+    ]
+    state = detail.state if isinstance(detail.state, str) else getattr(detail.state, "id", None)
+    return WorkItemFull(
+        id=detail.id,
+        sequence_id=detail.sequence_id,
+        name=detail.name,
+        description=strip_html(detail.description_html),
+        priority=_enum_str(detail.priority),
+        state=state,
+        assignees=assignees,
+        labels=labels,
+        parent=detail.parent,
+        start_date=detail.start_date,
+        target_date=detail.target_date,
+    )

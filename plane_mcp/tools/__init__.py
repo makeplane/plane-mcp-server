@@ -12,6 +12,7 @@ from plane_mcp.tools.initiatives import register_initiative_tools
 from plane_mcp.tools.intake import register_intake_tools
 from plane_mcp.tools.modules import register_module_tools
 from plane_mcp.tools.projects import register_project_tools
+from plane_mcp.tools.states import register_state_tools
 from plane_mcp.tools.users import register_user_tools
 from plane_mcp.tools.work_item_properties import register_work_item_property_tools
 from plane_mcp.tools.work_items import register_work_item_tools
@@ -20,6 +21,7 @@ from plane_mcp.tools.work_items import register_work_item_tools
 _TOOL_GROUPS: dict[str, Callable[[FastMCP], None]] = {
     "projects": register_project_tools,
     "work_items": register_work_item_tools,
+    "states": register_state_tools,
     "cycles": register_cycle_tools,
     "users": register_user_tools,
     "modules": register_module_tools,
@@ -40,7 +42,7 @@ def register_tools(mcp: FastMCP) -> None:
     - Exclusion mode (prefix with !): Register all except specified groups
       Example: PLANE_TOOLS=!cycles,!modules,!initiatives
 
-    Available tool groups: projects, work_items, cycles, users, modules,
+    Available tool groups: projects, work_items, states, cycles, users, modules,
     initiatives, intake, work_item_properties
     """
     tools_config = os.getenv("PLANE_TOOLS", "").strip()

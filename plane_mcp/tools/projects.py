@@ -6,7 +6,6 @@ from fastmcp import FastMCP
 from plane.models.projects import (
     CreateProject,
     PaginatedProjectResponse,
-    Project,
     ProjectFeature,
     ProjectWorklogSummary,
     UpdateProject,
@@ -15,6 +14,7 @@ from plane.models.query_params import PaginatedQueryParams
 from plane.models.users import UserLite
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.models import ProjectSummary
 
 
 def register_project_tools(mcp: FastMCP) -> None:
@@ -24,31 +24,24 @@ def register_project_tools(mcp: FastMCP) -> None:
     def list_projects(
         cursor: str | None = None,
         per_page: int | None = None,
-        expand: str | None = None,
-        fields: str | None = None,
         order_by: str | None = None,
-    ) -> list[Project]:
+    ) -> list[ProjectSummary]:
         """
         List all projects in a workspace.
 
         Args:
-            workspace_slug: The workspace slug identifier
             cursor: Pagination cursor for getting next set of results
             per_page: Number of results per page (1-100)
-            expand: Comma-separated list of related fields to expand in response
-            fields: Comma-separated list of fields to include in response
             order_by: Field to order results by. Prefix with '-' for descending order
 
         Returns:
-            List of Project objects
+            List of ProjectSummary objects with id, name, identifier, description, timezone, etc.
         """
         client, workspace_slug = get_plane_client_context()
 
         params = PaginatedQueryParams(
             cursor=cursor,
             per_page=per_page,
-            expand=expand,
-            fields=fields,
             order_by=order_by,
         )
 
@@ -57,7 +50,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             params=params,
         )
 
-        return response.results
+        return [_to_project_summary(p).slim() for p in response.results]
 
     @mcp.tool()
     def create_project(
@@ -80,12 +73,11 @@ def register_project_tools(mcp: FastMCP) -> None:
         external_source: str | None = None,
         external_id: str | None = None,
         is_issue_type_enabled: bool | None = None,
-    ) -> Project:
+    ) -> ProjectSummary:
         """
         Create a new project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             name: Project name
             identifier: Project identifier (e.g., "MP" for "My Project")
             description: Project description
@@ -107,7 +99,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             is_issue_type_enabled: Enable issue types
 
         Returns:
-            Created Project object
+            Created ProjectSummary object
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -133,22 +125,23 @@ def register_project_tools(mcp: FastMCP) -> None:
             is_issue_type_enabled=is_issue_type_enabled,
         )
 
-        return client.projects.create(workspace_slug=workspace_slug, data=data)
+        p = client.projects.create(workspace_slug=workspace_slug, data=data)
+        return _to_project_summary(p).slim()
 
     @mcp.tool()
-    def retrieve_project(project_id: str) -> Project:
+    def retrieve_project(project_id: str) -> ProjectSummary:
         """
         Retrieve a project by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
 
         Returns:
-            Project object
+            ProjectSummary object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id)
+        p = client.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id)
+        return _to_project_summary(p).slim()
 
     @mcp.tool()
     def update_project(
@@ -175,12 +168,11 @@ def register_project_tools(mcp: FastMCP) -> None:
         is_time_tracking_enabled: bool | None = None,
         default_state: str | None = None,
         estimate: str | None = None,
-    ) -> Project:
+    ) -> ProjectSummary:
         """
         Update a project by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             name: Project name
             description: Project description
@@ -206,7 +198,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             estimate: Estimate configuration
 
         Returns:
-            Updated Project object
+            Updated ProjectSummary object
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -235,9 +227,10 @@ def register_project_tools(mcp: FastMCP) -> None:
             estimate=estimate,
         )
 
-        return client.projects.update(
+        p = client.projects.update(
             workspace_slug=workspace_slug, project_id=project_id, data=data
         )
+        return _to_project_summary(p).slim()
 
     @mcp.tool()
     def delete_project(project_id: str) -> None:
@@ -346,3 +339,11 @@ def register_project_tools(mcp: FastMCP) -> None:
         return client.projects.update_features(
             workspace_slug=workspace_slug, project_id=project_id, data=data
         )
+
+
+def _to_project_summary(p) -> ProjectSummary:
+    return ProjectSummary(
+        id=p.id,
+        name=p.name,
+        identifier=p.identifier,
+    )

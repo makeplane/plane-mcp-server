@@ -52,6 +52,11 @@ dmypy.json
 # Environment variables
 .env
 .env.local
+.mcp.json
 
 # Ignore cursor AI rules
 .cursor/rules/codacy.mdc
+
+# Personal / local files
+token-use.md
+.claude/settings.local.json

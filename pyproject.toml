@@ -12,9 +12,9 @@ authors = [
 keywords = ["mcp", "plane", "fastmcp", "ai", "automation"]
 
 dependencies = [
-    "fastmcp==2.14.1",
+    "fastmcp==2.14.5",
     "plane-sdk==0.2.2",
-    "py-key-value-aio[redis]==0.3.0",
+    "py-key-value-aio[redis]>=0.4.0,<0.5.0",
     "mcp==1.24.0",
 ]
 
@@ -48,3 +48,6 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = []
+
+[tool.uv.sources]
+fastmcp = { git = "https://github.com/jlowin/fastmcp.git", rev = "v3.0.0rc2" }
