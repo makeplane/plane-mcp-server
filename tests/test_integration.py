@@ -56,8 +56,12 @@ async def run_integration_test():
     2. Create work item 1
     3. Create work item 2
     4. Update work item 2 with work item 1 as parent
-    5. Delete work items
-    6. Delete project
+    5. Create epic
+    6. Update work item 2 to be under the epic
+    7. List epics in project
+    8. Delete epic
+    9. Delete work items
+    10. Delete project
     """
     config = get_config()
     unique_id = uuid.uuid4().hex[:6]
@@ -123,7 +127,51 @@ async def run_integration_test():
         )
         print(f"Set work item 1 as parent of work item 2")
 
-        # 5. Delete work items
+        # 5. Create epic
+        print("Creating epic...")
+        epic_result = await client.call_tool(
+            "create_epic",
+            {
+                "project_id": project_id,
+                "name": f"Epic {unique_id}",
+            },
+        )
+        epic = extract_result(epic_result)
+        epic_id = epic["id"]
+        print(f"Created epic: {epic_id}")
+
+        # 6. Update work item 2 to be under the epic
+        print("Setting epic as parent of work item 2...")
+        await client.call_tool(
+            "update_work_item",
+            {
+                "project_id": project_id,
+                "work_item_id": work_item_2_id,
+                "parent": epic_id,
+            },
+        )
+        print("Set epic as parent of work item 2")
+
+        # 7. List epics in project
+        print("Listing epics in project...")
+        epics_result = await client.call_tool(
+            "list_epics",
+            {
+                "project_id": project_id,
+            },
+        )
+        epics = extract_result(epics_result)
+        print(f"Epics in project: {[e['id'] for e in epics]}")
+
+        # 8. Delete epic
+        print("Deleting epic...")
+        await client.call_tool(
+            "delete_epic",
+            {"project_id": project_id, "epic_id": epic_id},
+        )
+        print("Deleted epic")
+
+        # 9. Delete work items
         print(f"Deleting work items...")
         await client.call_tool(
             "delete_work_item",
@@ -137,7 +185,7 @@ async def run_integration_test():
         )
         print(f"Deleted work item 1")
 
-        # 6. Delete project
+        # 10. Delete project
         print(f"Deleting project...")
         await client.call_tool("delete_project", {"project_id": project_id})
         print(f"Deleted project")
@@ -246,6 +294,12 @@ EXPECTED_TOOLS = [
     "retrieve_initiative",
     "update_initiative",
     "delete_initiative",
+    # Epic tools
+    "list_epics",
+    "create_epic",
+    "retrieve_epic",
+    "update_epic",
+    "delete_epic",
     # Intake tools
     "list_intake_work_items",
     "create_intake_work_item",
