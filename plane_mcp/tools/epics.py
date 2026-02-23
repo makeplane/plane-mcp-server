@@ -125,9 +125,10 @@ def register_epic_tools(mcp: FastMCP) -> None:
         if epic_type is None:
             raise ValueError("No work item type with is_epic=True found in the project")
 
-        validated_priority: PriorityEnum | None = (
-            priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
-        )
+        valid_priorities = get_args(PriorityEnum)
+        if priority is not None and priority not in valid_priorities:
+            raise ValueError(f"Invalid priority '{priority}'. Must be one of: {valid_priorities}")
+        validated_priority: PriorityEnum | None = priority  # type: ignore[assignment]
 
         data = CreateWorkItem(
             name=name,

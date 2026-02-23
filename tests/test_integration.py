@@ -161,7 +161,9 @@ async def run_integration_test():
             },
         )
         epics = extract_result(epics_result)
-        print(f"Epics in project: {[e['id'] for e in epics]}")
+        epic_ids = {e["id"] for e in epics}
+        print(f"Epics in project: {list(epic_ids)}")
+        assert epic_id in epic_ids, "Created epic not found in list_epics results"
 
         # 8. Delete epic
         print("Deleting epic...")
