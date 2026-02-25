@@ -42,6 +42,19 @@ def get_oauth_mcp(base_path: str = "/"):
             plane_internal_base_url=os.getenv("PLANE_INTERNAL_BASE_URL", ""),
             client_storage=client_storage,
             required_scopes=["read", "write"],
+            allowed_client_redirect_uris=[
+                # Localhost only for http (dynamic ports from MCP clients)
+                "http://localhost:*",
+                "http://localhost:*/*",
+                "http://127.0.0.1:*",
+                "http://127.0.0.1:*/*",
+                # Known MCP client custom protocol schemes
+                "cursor://*",
+                "vscode://*",
+                "vscode-insiders://*",
+                "windsurf://*",
+                "claude://*",
+            ],
         ),
     )
     register_tools(oauth_mcp)
