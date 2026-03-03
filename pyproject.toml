@@ -1,6 +1,6 @@
 [project]
 name = "plane-mcp-server"
-version = "0.2.3"
+version = "0.2.4"
 description = "A Model Context Protocol server for Plane integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,7 +13,7 @@ keywords = ["mcp", "plane", "fastmcp", "ai", "automation"]
 
 dependencies = [
     "fastmcp==2.14.1",
-    "plane-sdk==0.2.2",
+    "plane-sdk==0.2.6",
     "py-key-value-aio[redis]==0.3.0",
     "mcp==1.24.0",
 ]

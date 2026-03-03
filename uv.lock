@@ -924,7 +924,7 @@ wheels = [
 
 [[package]]
 name = "plane-mcp-server"
-version = "0.2.1"
+version = "0.2.4"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
@@ -945,7 +945,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "fastmcp", specifier = "==2.14.1" },
     { name = "mcp", specifier = "==1.24.0" },
-    { name = "plane-sdk", specifier = "==0.2.2" },
+    { name = "plane-sdk", specifier = "==0.2.6" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = "==0.3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
@@ -954,15 +954,15 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "plane-sdk"
-version = "0.2.2"
+version = "0.2.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/44/ee/ac7c0e4eea10b4324bb2b91fd7ef0bd690dc0d7c75ad63d0133975917c6e/plane_sdk-0.2.2.tar.gz", hash = "sha256:257e0068d91d56479909fc3c543c4d56668e76c69fd0561f352f420305662348", size = 45060, upload-time = "2025-11-29T10:00:30.222Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/2e/3ab01274ec22912725cddbb4cdeacf95c7ff673328702ad1fbb371f52062/plane_sdk-0.2.6.tar.gz", hash = "sha256:17be008d94e398c8cd1ba10686a767906b313aae5382e2f3cf0e3066074ee0af", size = 47581, upload-time = "2026-02-10T16:53:52.433Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/a1/7deeb618fa1b7f90bfa89ec5ec93e5d50c9958cfbd5336c5bd7823f8b15a/plane_sdk-0.2.2-py3-none-any.whl", hash = "sha256:94765d29d870e40cc2bc8a067f2b917cf3ab4b6dbc249914900f0366b8996e4f", size = 65759, upload-time = "2025-11-29T10:00:28.845Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/24/c185e629c1a97c46b9869ea80abe9b47080f625556426c9621e0a32bb4b0/plane_sdk-0.2.6-py3-none-any.whl", hash = "sha256:41bc019db35ba5a5834d7b072ef102721f3e274162253e5d0da1831a52c3a1a4", size = 70967, upload-time = "2026-02-10T16:53:51.098Z" },
 ]
 
 [[package]]
