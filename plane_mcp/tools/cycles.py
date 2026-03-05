@@ -1,5 +1,6 @@
 """Cycle-related tools for Plane MCP Server."""
 
+import json
 from typing import Any
 
 from fastmcp import FastMCP
@@ -207,6 +208,9 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             cycle_id: UUID of the cycle
             issue_ids: List of work item IDs to add to the cycle
         """
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(issue_ids, str):
+            issue_ids = json.loads(issue_ids)
         client, workspace_slug = get_plane_client_context()
         client.cycles.add_work_items(
             workspace_slug=workspace_slug,

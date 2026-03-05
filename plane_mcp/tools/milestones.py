@@ -1,5 +1,6 @@
 """Milestone-related tools for Plane MCP Server."""
 
+import json
 from typing import Any
 
 from fastmcp import FastMCP
@@ -157,6 +158,9 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             milestone_id: UUID of the milestone
             issue_ids: List of work item IDs to add to the milestone
         """
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(issue_ids, str):
+            issue_ids = json.loads(issue_ids)
         client, workspace_slug = get_plane_client_context()
         client.milestones.add_work_items(
             workspace_slug=workspace_slug,
@@ -179,6 +183,9 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             milestone_id: UUID of the milestone
             issue_ids: List of work item IDs to remove from the milestone
         """
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(issue_ids, str):
+            issue_ids = json.loads(issue_ids)
         client, workspace_slug = get_plane_client_context()
         client.milestones.remove_work_items(
             workspace_slug=workspace_slug,
