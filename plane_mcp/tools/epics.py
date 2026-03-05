@@ -1,4 +1,5 @@
 """Epic-related tools for Plane MCP Server."""
+import json
 from typing import get_args
 
 from fastmcp import FastMCP
@@ -18,7 +19,9 @@ from plane_mcp.client import get_plane_client_context
 def register_epic_tools(mcp: FastMCP) -> None:
     """Register all epic-related tools with the MCP server."""
 
-    def _get_epic_work_item_type(client: PlaneClient, workspace_slug: str, project_id: str) -> WorkItemType | None:
+    def _get_epic_work_item_type(
+        client: PlaneClient, workspace_slug: str, project_id: str
+    ) -> WorkItemType | None:
         """Helper function to get the work item type ID for epics."""
         response = client.work_item_types.list(
             workspace_slug=workspace_slug,
@@ -122,6 +125,22 @@ def register_epic_tools(mcp: FastMCP) -> None:
         if epic_type is None:
             raise ValueError("No work item type with is_epic=True found in the project")
 
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(assignees, str):
+            try:
+                assignees = json.loads(assignees)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"assignees must be a JSON array string or a list, got: {assignees!r}"
+                ) from e
+        if isinstance(labels, str):
+            try:
+                labels = json.loads(labels)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"labels must be a JSON array string or a list, got: {labels!r}"
+                ) from e
+
         data = CreateWorkItem(
             name=name,
             assignees=assignees,
@@ -204,6 +223,22 @@ def register_epic_tools(mcp: FastMCP) -> None:
         if priority is not None and priority not in valid_priorities:
             raise ValueError(f"Invalid priority '{priority}'. Must be one of: {valid_priorities}")
         validated_priority: PriorityEnum | None = priority  # type: ignore[assignment]
+
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(assignees, str):
+            try:
+                assignees = json.loads(assignees)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"assignees must be a JSON array string or a list, got: {assignees!r}"
+                ) from e
+        if isinstance(labels, str):
+            try:
+                labels = json.loads(labels)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"labels must be a JSON array string or a list, got: {labels!r}"
+                ) from e
 
         data = UpdateWorkItem(
             name=name,

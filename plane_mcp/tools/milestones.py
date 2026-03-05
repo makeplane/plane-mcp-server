@@ -160,7 +160,12 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         """
         # Some MCP clients serialize list parameters as JSON strings; handle both cases
         if isinstance(issue_ids, str):
-            issue_ids = json.loads(issue_ids)
+            try:
+                issue_ids = json.loads(issue_ids)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"issue_ids must be a JSON array string or a list, got: {issue_ids!r}"
+                ) from e
         client, workspace_slug = get_plane_client_context()
         client.milestones.add_work_items(
             workspace_slug=workspace_slug,
@@ -185,7 +190,12 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         """
         # Some MCP clients serialize list parameters as JSON strings; handle both cases
         if isinstance(issue_ids, str):
-            issue_ids = json.loads(issue_ids)
+            try:
+                issue_ids = json.loads(issue_ids)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"issue_ids must be a JSON array string or a list, got: {issue_ids!r}"
+                ) from e
         client, workspace_slug = get_plane_client_context()
         client.milestones.remove_work_items(
             workspace_slug=workspace_slug,

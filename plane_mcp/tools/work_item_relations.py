@@ -1,5 +1,6 @@
 """Work item relation-related tools for Plane MCP Server."""
 
+import json
 from typing import get_args
 
 from fastmcp import FastMCP
@@ -72,6 +73,15 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
                 f"Must be one of: {get_args(WorkItemRelationTypeEnum)}"
             )
         validated_relation_type: WorkItemRelationTypeEnum = relation_type  # type: ignore[assignment]
+
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(issues, str):
+            try:
+                issues = json.loads(issues)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"issues must be a JSON array string or a list, got: {issues!r}"
+                ) from e
 
         data = CreateWorkItemRelation(
             relation_type=validated_relation_type,
