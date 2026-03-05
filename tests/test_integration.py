@@ -44,7 +44,7 @@ def extract_result(result):
         if hasattr(content, "text"):
             try:
                 return json.loads(content.text)
-            except:
+            except Exception:
                 return {"raw": content.text}
     return {}
 

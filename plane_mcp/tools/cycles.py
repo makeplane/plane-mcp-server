@@ -216,6 +216,8 @@ def register_cycle_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"issue_ids must be a JSON array string or a list, got: {issue_ids!r}"
                 ) from e
+        if not isinstance(issue_ids, list) or any(not isinstance(i, str) for i in issue_ids):
+            raise ValueError("issue_ids must be a list[str] or a JSON array string of strings")
         client, workspace_slug = get_plane_client_context()
         client.cycles.add_work_items(
             workspace_slug=workspace_slug,

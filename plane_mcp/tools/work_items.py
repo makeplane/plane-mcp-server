@@ -141,6 +141,14 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"labels must be a JSON array string or a list, got: {labels!r}"
                 ) from e
+        if assignees is not None and (
+            not isinstance(assignees, list) or any(not isinstance(i, str) for i in assignees)
+        ):
+            raise ValueError("assignees must be a list[str] or a JSON array string of strings")
+        if labels is not None and (
+            not isinstance(labels, list) or any(not isinstance(i, str) for i in labels)
+        ):
+            raise ValueError("labels must be a list[str] or a JSON array string of strings")
 
         data = CreateWorkItem(
             name=name,
@@ -327,6 +335,14 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"labels must be a JSON array string or a list, got: {labels!r}"
                 ) from e
+        if assignees is not None and (
+            not isinstance(assignees, list) or any(not isinstance(i, str) for i in assignees)
+        ):
+            raise ValueError("assignees must be a list[str] or a JSON array string of strings")
+        if labels is not None and (
+            not isinstance(labels, list) or any(not isinstance(i, str) for i in labels)
+        ):
+            raise ValueError("labels must be a list[str] or a JSON array string of strings")
 
         data = UpdateWorkItem(
             name=name,

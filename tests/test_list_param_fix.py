@@ -421,3 +421,41 @@ def test_update_work_item_type_project_ids_json_string(mock_ctx):
 
     call_kwargs = mock_client.work_item_types.update.call_args
     assert call_kwargs.kwargs["data"].project_ids == ISSUE_IDS
+
+
+@patch("plane_mcp.tools.epics.get_plane_client_context")
+def test_create_epic_labels_json_string(mock_ctx):
+    """create_epic should parse labels when passed as a JSON-encoded string."""
+    mock_client = MagicMock()
+    mock_epic_type = MagicMock()
+    mock_epic_type.id = "epic-type-uuid"
+    mock_epic_type.is_epic = True
+    mock_client.work_item_types.list.return_value = [mock_epic_type]
+    mock_client.work_items.create.return_value = MagicMock(id="epic-work-item-id")
+    mock_client.epics.retrieve.return_value = MagicMock()
+    mock_ctx.return_value = (mock_client, "test-workspace")
+
+    mcp = FastMCP("test")
+    register_epic_tools(mcp)
+    tool_fn = mcp._tool_manager._tools["create_epic"].fn
+    tool_fn(project_id="proj-1", name="Epic 1", labels=json.dumps(ISSUE_IDS))
+
+    call_kwargs = mock_client.work_items.create.call_args
+    assert call_kwargs.kwargs["data"].labels == ISSUE_IDS
+
+
+@patch("plane_mcp.tools.epics.get_plane_client_context")
+def test_update_epic_labels_json_string(mock_ctx):
+    """update_epic should parse labels when passed as a JSON-encoded string."""
+    mock_client = MagicMock()
+    mock_client.work_items.update.return_value = MagicMock(id="epic-work-item-id")
+    mock_client.epics.retrieve.return_value = MagicMock()
+    mock_ctx.return_value = (mock_client, "test-workspace")
+
+    mcp = FastMCP("test")
+    register_epic_tools(mcp)
+    tool_fn = mcp._tool_manager._tools["update_epic"].fn
+    tool_fn(project_id="proj-1", epic_id="epic-1", labels=json.dumps(ISSUE_IDS))
+
+    call_kwargs = mock_client.work_items.update.call_args
+    assert call_kwargs.kwargs["data"].labels == ISSUE_IDS

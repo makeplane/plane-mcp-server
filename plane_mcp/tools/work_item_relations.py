@@ -82,6 +82,8 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"issues must be a JSON array string or a list, got: {issues!r}"
                 ) from e
+        if not isinstance(issues, list) or any(not isinstance(i, str) for i in issues):
+            raise ValueError("issues must be a list[str] or a JSON array string of strings")
 
         data = CreateWorkItemRelation(
             relation_type=validated_relation_type,

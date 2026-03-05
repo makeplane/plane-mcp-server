@@ -126,6 +126,11 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"default_value must be a JSON array string or a list, got: {default_value!r}"
                 ) from e
+        if default_value is not None and (
+            not isinstance(default_value, list)
+            or any(not isinstance(i, str) for i in default_value)
+        ):
+            raise ValueError("default_value must be a list[str] or a JSON array string of strings")
 
         data = CreateWorkItemProperty(
             display_name=display_name,
@@ -247,6 +252,11 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"default_value must be a JSON array string or a list, got: {default_value!r}"
                 ) from e
+        if default_value is not None and (
+            not isinstance(default_value, list)
+            or any(not isinstance(i, str) for i in default_value)
+        ):
+            raise ValueError("default_value must be a list[str] or a JSON array string of strings")
 
         data = UpdateWorkItemProperty(
             display_name=display_name,

@@ -90,6 +90,10 @@ def register_module_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"members must be a JSON array string or a list, got: {members!r}"
                 ) from e
+        if members is not None and (
+            not isinstance(members, list) or any(not isinstance(i, str) for i in members)
+        ):
+            raise ValueError("members must be a list[str] or a JSON array string of strings")
 
         data = CreateModule(
             name=name,
@@ -174,6 +178,10 @@ def register_module_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"members must be a JSON array string or a list, got: {members!r}"
                 ) from e
+        if members is not None and (
+            not isinstance(members, list) or any(not isinstance(i, str) for i in members)
+        ):
+            raise ValueError("members must be a list[str] or a JSON array string of strings")
 
         data = UpdateModule(
             name=name,
@@ -251,6 +259,8 @@ def register_module_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"issue_ids must be a JSON array string or a list, got: {issue_ids!r}"
                 ) from e
+        if not isinstance(issue_ids, list) or any(not isinstance(i, str) for i in issue_ids):
+            raise ValueError("issue_ids must be a list[str] or a JSON array string of strings")
         client, workspace_slug = get_plane_client_context()
         client.modules.add_work_items(
             workspace_slug=workspace_slug,

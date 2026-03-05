@@ -73,6 +73,10 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"project_ids must be a JSON array string or a list, got: {project_ids!r}"
                 ) from e
+        if project_ids is not None and (
+            not isinstance(project_ids, list) or any(not isinstance(i, str) for i in project_ids)
+        ):
+            raise ValueError("project_ids must be a list[str] or a JSON array string of strings")
 
         data = CreateWorkItemType(
             name=name,
@@ -149,6 +153,10 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     f"project_ids must be a JSON array string or a list, got: {project_ids!r}"
                 ) from e
+        if project_ids is not None and (
+            not isinstance(project_ids, list) or any(not isinstance(i, str) for i in project_ids)
+        ):
+            raise ValueError("project_ids must be a list[str] or a JSON array string of strings")
 
         data = UpdateWorkItemType(
             name=name,
