@@ -13,6 +13,7 @@ from plane.models.milestones import (
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.utils import deserialize_list_param
 
 
 def register_milestone_tools(mcp: FastMCP) -> None:
@@ -158,6 +159,10 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             issue_ids: List of work item IDs to add to the milestone
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        issue_ids = deserialize_list_param(issue_ids)
+
         client.milestones.add_work_items(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -180,6 +185,10 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             issue_ids: List of work item IDs to remove from the milestone
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        issue_ids = deserialize_list_param(issue_ids)
+
         client.milestones.remove_work_items(
             workspace_slug=workspace_slug,
             project_id=project_id,

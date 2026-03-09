@@ -17,6 +17,7 @@ from plane.models.work_item_property_configurations import (
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.utils import deserialize_list_param
 
 
 def register_work_item_property_tools(mcp: FastMCP) -> None:
@@ -114,6 +115,10 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         processed_options: list[CreateWorkItemPropertyOption] | None = None
         if options:
             processed_options = [CreateWorkItemPropertyOption(**opt) for opt in options]
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        default_value = deserialize_list_param(default_value)
+        options = deserialize_list_param(options)
 
         data = CreateWorkItemProperty(
             display_name=display_name,
@@ -224,6 +229,9 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
                 processed_settings = TextAttributeSettings(**settings)
             elif property_type == "DATETIME":
                 processed_settings = DateAttributeSettings(**settings)
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        default_value = deserialize_list_param(default_value)
 
         data = UpdateWorkItemProperty(
             display_name=display_name,

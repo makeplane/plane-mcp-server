@@ -11,6 +11,7 @@ from plane.models.work_items import (
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.utils import deserialize_list_param
 
 
 def register_work_item_relation_tools(mcp: FastMCP) -> None:
@@ -72,6 +73,9 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
                 f"Must be one of: {get_args(WorkItemRelationTypeEnum)}"
             )
         validated_relation_type: WorkItemRelationTypeEnum = relation_type  # type: ignore[assignment]
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        issues = deserialize_list_param(issues)
 
         data = CreateWorkItemRelation(
             relation_type=validated_relation_type,

@@ -15,6 +15,7 @@ from plane.models.work_items import (
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.utils import deserialize_list_param
 
 
 def register_work_item_tools(mcp: FastMCP) -> None:
@@ -119,6 +120,10 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             Created WorkItem object
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        assignees = deserialize_list_param(assignees)
+        labels = deserialize_list_param(labels)
 
         # Validate priority against allowed literal values
         validated_priority: PriorityEnum | None = (
@@ -289,6 +294,10 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             Updated WorkItem object
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        assignees = deserialize_list_param(assignees)
+        labels = deserialize_list_param(labels)
 
         # Validate priority against allowed literal values
         validated_priority: PriorityEnum | None = (

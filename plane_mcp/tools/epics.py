@@ -13,6 +13,7 @@ from plane.models.work_items import (
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.utils import deserialize_list_param
 
 
 def register_epic_tools(mcp: FastMCP) -> None:
@@ -112,6 +113,10 @@ def register_epic_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        assignees = deserialize_list_param(assignees)
+        labels = deserialize_list_param(labels)
+
         # Validate priority against allowed literal values
         validated_priority: PriorityEnum | None = (
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
@@ -198,6 +203,10 @@ def register_epic_tools(mcp: FastMCP) -> None:
             Updated Epic object
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        assignees = deserialize_list_param(assignees)
+        labels = deserialize_list_param(labels)
 
         # Validate priority against allowed literal values
         valid_priorities = get_args(PriorityEnum)

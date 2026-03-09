@@ -15,6 +15,7 @@ from plane.models.cycles import (
 from plane.models.work_items import WorkItem
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.utils import deserialize_list_param
 
 
 def register_cycle_tools(mcp: FastMCP) -> None:
@@ -208,6 +209,10 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             issue_ids: List of work item IDs to add to the cycle
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        issue_ids = deserialize_list_param(issue_ids)
+
         client.cycles.add_work_items(
             workspace_slug=workspace_slug,
             project_id=project_id,

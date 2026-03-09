@@ -10,6 +10,7 @@ from plane.models.work_item_types import (
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.utils import deserialize_list_param
 
 
 def register_work_item_type_tools(mcp: FastMCP) -> None:
@@ -63,6 +64,9 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             Created WorkItemType object
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        project_ids = deserialize_list_param(project_ids)
 
         data = CreateWorkItemType(
             name=name,
@@ -130,6 +134,9 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             Updated WorkItemType object
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        project_ids = deserialize_list_param(project_ids)
 
         data = UpdateWorkItemType(
             name=name,

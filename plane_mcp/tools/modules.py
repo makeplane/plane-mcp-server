@@ -15,6 +15,7 @@ from plane.models.modules import (
 from plane.models.work_items import WorkItem
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.utils import deserialize_list_param
 
 
 def register_module_tools(mcp: FastMCP) -> None:
@@ -80,6 +81,9 @@ def register_module_tools(mcp: FastMCP) -> None:
         validated_status: ModuleStatusEnum | None = (
             status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
         )
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        members = deserialize_list_param(members)
 
         data = CreateModule(
             name=name,
@@ -156,6 +160,9 @@ def register_module_tools(mcp: FastMCP) -> None:
             status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
         )
 
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        members = deserialize_list_param(members)
+
         data = UpdateModule(
             name=name,
             description=description,
@@ -225,6 +232,10 @@ def register_module_tools(mcp: FastMCP) -> None:
             issue_ids: List of work item IDs to add to the module
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Deserialize list params that FastMCP may have JSON-encoded as strings
+        issue_ids = deserialize_list_param(issue_ids)
+
         client.modules.add_work_items(
             workspace_slug=workspace_slug,
             project_id=project_id,
