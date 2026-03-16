@@ -125,6 +125,62 @@ export PLANE_WORKSPACE_SLUG="your-workspace-slug"
 
 **Note**: For remote HTTP transports (OAuth or PAT), authentication is handled via the connection method (OAuth flow or PAT headers) and does not require these environment variables.
 
+### Restricting Loaded Tools (`PLANE_MCP_MODULES`)
+
+By default the server registers **all 109 tools**. If you want to reduce the
+number of tools exposed to the AI (e.g. to stay within a client's tool limit or
+to keep the context focused), set the `PLANE_MCP_MODULES` environment variable
+to a comma-separated list of module names.
+
+| Value | Behaviour |
+|-------|-----------|
+| `all` (default) | Every module is loaded — all 109 tools |
+| `projects,work_items,...` | Only the listed modules are loaded |
+
+**Available module names:**
+
+| Module | # Tools | Description |
+|--------|---------|-------------|
+| `projects` | 9 | Project CRUD + members, features, worklog summary |
+| `work_items` | 7 | Issue CRUD + search |
+| `states` | 5 | Workflow state CRUD |
+| `labels` | 5 | Label CRUD |
+| `epics` | 5 | Epic CRUD |
+| `cycles` | 12 | Cycle CRUD + archive/transfer/work-item management |
+| `modules` | 11 | Module CRUD + archive/work-item management |
+| `milestones` | 8 | Milestone CRUD + work-item management |
+| `work_item_comments` | 5 | Comment CRUD on issues |
+| `work_item_links` | 5 | External link CRUD on issues |
+| `work_item_relations` | 3 | Issue relation management (blocks, duplicates…) |
+| `work_item_types` | 5 | Custom issue type CRUD |
+| `work_item_properties` | 5 | Custom property CRUD |
+| `work_item_activities` | 2 | Read-only activity/audit log |
+| `work_logs` | 4 | Time-tracking log CRUD |
+| `initiatives` | 5 | Initiative CRUD (Enterprise feature) |
+| `intake` | 5 | Intake/triage issue CRUD |
+| `pages` | 4 | Workspace and project page management |
+| `users` | 1 | Current user info |
+| `workspaces` | 3 | Workspace members and feature flags |
+
+**Minimal set example** (~30 tools, stdio config):
+
+```json
+{
+  "mcpServers": {
+    "plane": {
+      "command": "uvx",
+      "args": ["plane-mcp-server", "stdio"],
+      "env": {
+        "PLANE_API_KEY": "<your-api-key>",
+        "PLANE_WORKSPACE_SLUG": "<your-workspace-slug>",
+        "PLANE_BASE_URL": "https://api.plane.so",
+        "PLANE_MCP_MODULES": "projects,work_items,states,labels,users,workspaces,epics"
+      }
+    }
+  }
+}
+```
+
 ## Available Tools
 
 The server provides comprehensive tools for interacting with Plane. All tools use Pydantic models from the Plane SDK for type safety and validation.
