@@ -44,7 +44,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         name: str,
         color: str,
         description: str | None = None,
-        sequence: int | None = None,
+        sequence: float | None = None,
         group: str | None = None,
         is_triage: bool | None = None,
         default: bool | None = None,
@@ -88,9 +88,7 @@ def register_state_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.states.create(
-            workspace_slug=workspace_slug, project_id=project_id, data=data
-        )
+        return client.states.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
     def retrieve_state(project_id: str, state_id: str) -> State:
@@ -116,7 +114,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         name: str | None = None,
         color: str | None = None,
         description: str | None = None,
-        sequence: int | None = None,
+        sequence: float | None = None,
         group: str | None = None,
         is_triage: bool | None = None,
         default: bool | None = None,
