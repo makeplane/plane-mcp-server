@@ -1,5 +1,6 @@
 """Work item-related tools for Plane MCP Server."""
 
+import json
 from typing import get_args
 
 from fastmcp import FastMCP
@@ -124,6 +125,30 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         validated_priority: PriorityEnum | None = (
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
+
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(assignees, str):
+            try:
+                assignees = json.loads(assignees)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"assignees must be a JSON array string or a list, got: {assignees!r}"
+                ) from e
+        if isinstance(labels, str):
+            try:
+                labels = json.loads(labels)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"labels must be a JSON array string or a list, got: {labels!r}"
+                ) from e
+        if assignees is not None and (
+            not isinstance(assignees, list) or any(not isinstance(i, str) for i in assignees)
+        ):
+            raise ValueError("assignees must be a list[str] or a JSON array string of strings")
+        if labels is not None and (
+            not isinstance(labels, list) or any(not isinstance(i, str) for i in labels)
+        ):
+            raise ValueError("labels must be a list[str] or a JSON array string of strings")
 
         data = CreateWorkItem(
             name=name,
@@ -294,6 +319,30 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         validated_priority: PriorityEnum | None = (
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
+
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(assignees, str):
+            try:
+                assignees = json.loads(assignees)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"assignees must be a JSON array string or a list, got: {assignees!r}"
+                ) from e
+        if isinstance(labels, str):
+            try:
+                labels = json.loads(labels)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"labels must be a JSON array string or a list, got: {labels!r}"
+                ) from e
+        if assignees is not None and (
+            not isinstance(assignees, list) or any(not isinstance(i, str) for i in assignees)
+        ):
+            raise ValueError("assignees must be a list[str] or a JSON array string of strings")
+        if labels is not None and (
+            not isinstance(labels, list) or any(not isinstance(i, str) for i in labels)
+        ):
+            raise ValueError("labels must be a list[str] or a JSON array string of strings")
 
         data = UpdateWorkItem(
             name=name,

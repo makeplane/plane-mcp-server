@@ -1,5 +1,6 @@
 """Module-related tools for Plane MCP Server."""
 
+import json
 from typing import Any, get_args
 
 from fastmcp import FastMCP
@@ -81,6 +82,19 @@ def register_module_tools(mcp: FastMCP) -> None:
             status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
         )
 
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(members, str):
+            try:
+                members = json.loads(members)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"members must be a JSON array string or a list, got: {members!r}"
+                ) from e
+        if members is not None and (
+            not isinstance(members, list) or any(not isinstance(i, str) for i in members)
+        ):
+            raise ValueError("members must be a list[str] or a JSON array string of strings")
+
         data = CreateModule(
             name=name,
             description=description,
@@ -156,6 +170,19 @@ def register_module_tools(mcp: FastMCP) -> None:
             status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
         )
 
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(members, str):
+            try:
+                members = json.loads(members)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"members must be a JSON array string or a list, got: {members!r}"
+                ) from e
+        if members is not None and (
+            not isinstance(members, list) or any(not isinstance(i, str) for i in members)
+        ):
+            raise ValueError("members must be a list[str] or a JSON array string of strings")
+
         data = UpdateModule(
             name=name,
             description=description,
@@ -224,6 +251,16 @@ def register_module_tools(mcp: FastMCP) -> None:
             module_id: UUID of the module
             issue_ids: List of work item IDs to add to the module
         """
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(issue_ids, str):
+            try:
+                issue_ids = json.loads(issue_ids)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"issue_ids must be a JSON array string or a list, got: {issue_ids!r}"
+                ) from e
+        if not isinstance(issue_ids, list) or any(not isinstance(i, str) for i in issue_ids):
+            raise ValueError("issue_ids must be a list[str] or a JSON array string of strings")
         client, workspace_slug = get_plane_client_context()
         client.modules.add_work_items(
             workspace_slug=workspace_slug,

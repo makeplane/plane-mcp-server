@@ -1,5 +1,6 @@
 """Work item type-related tools for Plane MCP Server."""
 
+import json
 from typing import Any
 
 from fastmcp import FastMCP
@@ -63,6 +64,19 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             Created WorkItemType object
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(project_ids, str):
+            try:
+                project_ids = json.loads(project_ids)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"project_ids must be a JSON array string or a list, got: {project_ids!r}"
+                ) from e
+        if project_ids is not None and (
+            not isinstance(project_ids, list) or any(not isinstance(i, str) for i in project_ids)
+        ):
+            raise ValueError("project_ids must be a list[str] or a JSON array string of strings")
 
         data = CreateWorkItemType(
             name=name,
@@ -130,6 +144,19 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             Updated WorkItemType object
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Some MCP clients serialize list parameters as JSON strings; handle both cases
+        if isinstance(project_ids, str):
+            try:
+                project_ids = json.loads(project_ids)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"project_ids must be a JSON array string or a list, got: {project_ids!r}"
+                ) from e
+        if project_ids is not None and (
+            not isinstance(project_ids, list) or any(not isinstance(i, str) for i in project_ids)
+        ):
+            raise ValueError("project_ids must be a list[str] or a JSON array string of strings")
 
         data = UpdateWorkItemType(
             name=name,
