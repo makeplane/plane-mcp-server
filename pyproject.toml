@@ -12,10 +12,10 @@ authors = [
 keywords = ["mcp", "plane", "fastmcp", "ai", "automation"]
 
 dependencies = [
-    "fastmcp==2.14.1",
+    "fastmcp==2.14.4",
     "plane-sdk==0.2.7",
     "py-key-value-aio[redis]==0.3.0",
-    "mcp==1.24.0",
+    "mcp==1.26.0",
 ]
 
 [project.optional-dependencies]

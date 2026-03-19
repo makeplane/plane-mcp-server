@@ -50,8 +50,8 @@ def main() -> None:
 
     if server_mode == ServerMode.HTTP:
         oauth_mcp = get_oauth_mcp("/http")
-        oauth_app = oauth_mcp.http_app()
-        header_app = get_header_mcp().http_app()
+        oauth_app = oauth_mcp.http_app(stateless_http=True)
+        header_app = get_header_mcp().http_app(stateless_http=True)
 
         sse_mcp = get_oauth_mcp()
         sse_app = sse_mcp.http_app(transport="sse")
