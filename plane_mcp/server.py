@@ -3,6 +3,7 @@
 import os
 
 from fastmcp import FastMCP
+from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
 from key_value.aio.stores.memory import MemoryStore
 from key_value.aio.stores.redis import RedisStore
 from mcp.types import Icon
@@ -57,6 +58,7 @@ def get_oauth_mcp(base_path: str = "/"):
             ],
         ),
     )
+    oauth_mcp.add_middleware(StructuredLoggingMiddleware(include_payloads=True))
     register_tools(oauth_mcp)
     return oauth_mcp
 
@@ -68,6 +70,7 @@ def get_header_mcp():
             required_scopes=["read", "write"],
         ),
     )
+    header_mcp.add_middleware(StructuredLoggingMiddleware(include_payloads=True))
     register_tools(header_mcp)
     return header_mcp
 
@@ -76,5 +79,6 @@ def get_stdio_mcp():
     stdio_mcp = FastMCP(
         "Plane MCP Server (stdio)",
     )
+    stdio_mcp.add_middleware(StructuredLoggingMiddleware(include_payloads=True))
     register_tools(stdio_mcp)
     return stdio_mcp
