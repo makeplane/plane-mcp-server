@@ -1,19 +1,57 @@
 """Main entry point for the Plane MCP Server."""
 
+import json
+import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from enum import Enum
 
 import uvicorn
-from fastmcp.utilities.logging import get_logger
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
 from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
 
-logger = get_logger(__name__)
+
+class JSONFormatter(logging.Formatter):
+    """JSON log formatter for structured logging (Datadog, ELK, etc.)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[1]:
+            log_entry["error"] = {
+                "type": type(record.exc_info[1]).__name__,
+                "message": str(record.exc_info[1]),
+            }
+        return json.dumps(log_entry)
+
+
+def configure_json_logging():
+    """Replace FastMCP's Rich handlers with a JSON formatter on the fastmcp logger."""
+    fastmcp_logger = logging.getLogger("fastmcp")
+
+    # Remove all existing handlers (Rich)
+    for handler in fastmcp_logger.handlers[:]:
+        fastmcp_logger.removeHandler(handler)
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(JSONFormatter())
+    fastmcp_logger.addHandler(handler)
+    fastmcp_logger.setLevel(logging.INFO)
+    fastmcp_logger.propagate = False
+
+
+configure_json_logging()
+
+logger = logging.getLogger("fastmcp.plane_mcp")
 
 
 class ServerMode(Enum):
@@ -80,8 +118,23 @@ def main() -> None:
             allow_headers=["*"],
         )
 
+        # Configure uvicorn loggers to use JSON formatting too
+        for uv_logger_name in ("uvicorn", "uvicorn.error"):
+            uv_logger = logging.getLogger(uv_logger_name)
+            for h in uv_logger.handlers[:]:
+                uv_logger.removeHandler(h)
+            uv_handler = logging.StreamHandler(sys.stderr)
+            uv_handler.setFormatter(JSONFormatter())
+            uv_logger.addHandler(uv_handler)
+
         logger.info("Starting HTTP server at URLs: /mcp and /header/mcp")
-        uvicorn.run(app, host="0.0.0.0", port=8211, log_level="info")
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8211,
+            log_level="info",
+            access_log=False,
+        )
         return
 
 
