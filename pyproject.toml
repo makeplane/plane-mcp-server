@@ -13,7 +13,7 @@ keywords = ["mcp", "plane", "fastmcp", "ai", "automation"]
 
 dependencies = [
     "fastmcp==2.14.4",
-    "plane-sdk==0.2.7",
+    "plane-sdk==0.2.8",
     "py-key-value-aio[redis]==0.3.0",
     "mcp==1.26.0",
 ]
