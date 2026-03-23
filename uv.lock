@@ -54,14 +54,14 @@ wheels = [
 
 [[package]]
 name = "authlib"
-version = "1.6.7"
+version = "1.6.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/49/dc/ed1681bf1339dd6ea1ce56136bad4baabc6f7ad466e375810702b0237047/authlib-1.6.7.tar.gz", hash = "sha256:dbf10100011d1e1b34048c9d120e83f13b35d69a826ae762b93d2fb5aafc337b", size = 164950, upload-time = "2026-02-06T14:04:14.171Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/af/98/00d3dd826d46959ad8e32af2dbb2398868fd9fd0683c26e56d0789bd0e68/authlib-1.6.9.tar.gz", hash = "sha256:d8f2421e7e5980cc1ddb4e32d3f5fa659cfaf60d8eaf3281ebed192e4ab74f04", size = 165134, upload-time = "2026-03-02T07:44:01.998Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/00/3ed12264094ec91f534fae429945efbaa9f8c666f3aa7061cc3b2a26a0cd/authlib-1.6.7-py2.py3-none-any.whl", hash = "sha256:c637340d9a02789d2efa1d003a7437d10d3e565237bcb5fcbc6c134c7b95bab0", size = 244115, upload-time = "2026-02-06T14:04:12.141Z" },
+    { url = "https://files.pythonhosted.org/packages/53/23/b65f568ed0c22f1efacb744d2db1a33c8068f384b8c9b482b52ebdbc3ef6/authlib-1.6.9-py2.py3-none-any.whl", hash = "sha256:f08b4c14e08f0861dc18a32357b33fbcfd2ea86cfe3fe149484b4d764c4a0ac3", size = 244197, upload-time = "2026-03-02T07:44:00.307Z" },
 ]
 
 [[package]]
@@ -978,7 +978,7 @@ wheels = [
 
 [[package]]
 name = "plane-mcp-server"
-version = "0.2.6"
+version = "0.2.8"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
@@ -999,7 +999,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "fastmcp", specifier = "==2.14.4" },
     { name = "mcp", specifier = "==1.26.0" },
-    { name = "plane-sdk", specifier = "==0.2.7" },
+    { name = "plane-sdk", specifier = "==0.2.8" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = "==0.3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
@@ -1008,15 +1008,15 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "plane-sdk"
-version = "0.2.7"
+version = "0.2.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/03/1c/9e3ccc3d12243b0a350cf41562182e1f8f175d003ca451bd0a0f546d19de/plane_sdk-0.2.7.tar.gz", hash = "sha256:535e7b363d18bd26a71d2a0b2de2e95753ea51cbd9ddb741d597b66c503d784a", size = 47605, upload-time = "2026-03-18T11:03:46.805Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/9f/1fae3f1f189e959a1d9daa5c32433b20fdd1f0f3952e577d60b4443f1b07/plane_sdk-0.2.8.tar.gz", hash = "sha256:a8c48abf057aca248fb6913fe6e7263db32c16b5eac328d2d8b9d9be2a3ea2db", size = 47656, upload-time = "2026-03-23T10:53:54.798Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/df/ff6e4d9687c629d6e4a78407ddacbc89a780f526a794c7c2f1785dd5dc8a/plane_sdk-0.2.7-py3-none-any.whl", hash = "sha256:e763b9395b04741a3535ca812268d0d6ac276ecc1d0313256e6407bcf308eb6a", size = 70968, upload-time = "2026-03-18T11:03:45.635Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/3c/d308c7036239c03b6acf88dd9bcf1326b41a1f7f0d8a0e4bbfdd266e6e0e/plane_sdk-0.2.8-py3-none-any.whl", hash = "sha256:3a9290b4e70a21e69c21b28f203dfc71af4e3f9aab63faa1a8a3062eb1c01e7b", size = 71013, upload-time = "2026-03-23T10:53:53.583Z" },
 ]
 
 [[package]]
