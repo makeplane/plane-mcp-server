@@ -103,9 +103,7 @@ def register_state_tools(mcp: FastMCP) -> None:
             State object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.states.retrieve(
-            workspace_slug=workspace_slug, project_id=project_id, state_id=state_id
-        )
+        return client.states.retrieve(workspace_slug=workspace_slug, project_id=project_id, state_id=state_id)
 
     @mcp.tool()
     def update_state(
@@ -176,6 +174,4 @@ def register_state_tools(mcp: FastMCP) -> None:
             state_id: UUID of the state
         """
         client, workspace_slug = get_plane_client_context()
-        client.states.delete(
-            workspace_slug=workspace_slug, project_id=project_id, state_id=state_id
-        )
+        client.states.delete(workspace_slug=workspace_slug, project_id=project_id, state_id=state_id)

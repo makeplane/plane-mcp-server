@@ -125,9 +125,7 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify Plane OAuth token by calling Plane API."""
-        logger.info(
-            f"verify_token called with token (first 20 chars): {token[:20] if token else 'None'}..."
-        )
+        logger.info(f"verify_token called with token (first 20 chars): {token[:20] if token else 'None'}...")
         try:
             # Build the user endpoint URL
             base_url = self.plane_base_url.rstrip("/")
@@ -311,22 +309,15 @@ class PlaneOAuthProvider(OAuthProxy):
 
         # Validate required settings
         if not settings.client_id:
-            raise ValueError(
-                "client_id is required - set via parameter or PLANE_OAUTH_PROVIDER_CLIENT_ID"
-            )
+            raise ValueError("client_id is required - set via parameter or PLANE_OAUTH_PROVIDER_CLIENT_ID")
         if not settings.client_secret:
-            raise ValueError(
-                "client_secret is required - set via parameter or "
-                "PLANE_OAUTH_PROVIDER_CLIENT_SECRET"
-            )
+            raise ValueError("client_secret is required - set via parameter or PLANE_OAUTH_PROVIDER_CLIENT_SECRET")
 
         # Apply defaults
         timeout_seconds_final = settings.timeout_seconds or 10
         required_scopes_final = settings.required_scopes or []
         allowed_client_redirect_uris_final = settings.allowed_client_redirect_uris
-        plane_base_url_final = settings.plane_base_url or os.getenv(
-            "PLANE_BASE_URL", DEFAULT_PLANE_BASE_URL
-        )
+        plane_base_url_final = settings.plane_base_url or os.getenv("PLANE_BASE_URL", DEFAULT_PLANE_BASE_URL)
         # Internal URL for server-to-server calls (token exchange, API verification)
         # Falls back to external URL if not set
         plane_internal_url = settings.plane_internal_base_url or os.getenv(
@@ -341,9 +332,7 @@ class PlaneOAuthProvider(OAuthProxy):
         )
 
         # Extract secret string from SecretStr
-        client_secret_str = (
-            settings.client_secret.get_secret_value() if settings.client_secret else ""
-        )
+        client_secret_str = settings.client_secret.get_secret_value() if settings.client_secret else ""
 
         # Initialize OAuth proxy with Plane endpoints
         # Authorization: external URL (user's browser)
@@ -356,8 +345,7 @@ class PlaneOAuthProvider(OAuthProxy):
             token_verifier=token_verifier,
             base_url=settings.base_url,
             redirect_path=settings.redirect_path,
-            issuer_url=settings.issuer_url
-            or settings.base_url,  # Default to base_url if not specified
+            issuer_url=settings.issuer_url or settings.base_url,  # Default to base_url if not specified
             allowed_client_redirect_uris=allowed_client_redirect_uris_final,
             client_storage=client_storage,
             jwt_signing_key=settings.jwt_signing_key,

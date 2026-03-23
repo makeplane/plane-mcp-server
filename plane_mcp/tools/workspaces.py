@@ -74,6 +74,4 @@ def register_workspace_tools(mcp: FastMCP) -> None:
 
         data = WorkspaceFeature(**feature_data)
 
-        return client.workspaces.update_features(
-            workspace_slug=workspace_slug, data=data
-        )
+        return client.workspaces.update_features(workspace_slug=workspace_slug, data=data)

@@ -68,8 +68,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
         # Validate relation_type against allowed literal values
         if relation_type not in get_args(WorkItemRelationTypeEnum):
             raise ValueError(
-                f"Invalid relation_type '{relation_type}'. "
-                f"Must be one of: {get_args(WorkItemRelationTypeEnum)}"
+                f"Invalid relation_type '{relation_type}'. " f"Must be one of: {get_args(WorkItemRelationTypeEnum)}"
             )
         validated_relation_type: WorkItemRelationTypeEnum = relation_type  # type: ignore[assignment]
 

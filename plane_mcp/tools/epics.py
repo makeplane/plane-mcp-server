@@ -1,4 +1,5 @@
 """Epic-related tools for Plane MCP Server."""
+
 from typing import get_args
 
 from fastmcp import FastMCP
@@ -22,7 +23,8 @@ def register_epic_tools(mcp: FastMCP) -> None:
         """Helper function to get the work item type ID for epics."""
         response = client.work_item_types.list(
             workspace_slug=workspace_slug,
-            project_id=project_id,)
+            project_id=project_id,
+        )
 
         for work_item_type in response:
             if work_item_type.is_epic:
@@ -61,7 +63,6 @@ def register_epic_tools(mcp: FastMCP) -> None:
         )
 
         return response.results
-    
 
     @mcp.tool()
     def create_epic(
@@ -142,16 +143,14 @@ def register_epic_tools(mcp: FastMCP) -> None:
             estimate_point=estimate_point,
         )
 
-        work_item = client.work_items.create(
-            workspace_slug=workspace_slug, project_id=project_id, data=data
-        )
+        work_item = client.work_items.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
         return client.epics.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
             epic_id=work_item.id,
         )
-    
+
     @mcp.tool()
     def update_epic(
         project_id: str,
@@ -220,7 +219,7 @@ def register_epic_tools(mcp: FastMCP) -> None:
             external_source=external_source,
             external_id=external_id,
             state=state,
-            estimate_point=estimate_point
+            estimate_point=estimate_point,
         )
 
         work_item = client.work_items.update(
@@ -234,12 +233,12 @@ def register_epic_tools(mcp: FastMCP) -> None:
             workspace_slug=workspace_slug,
             project_id=project_id,
             epic_id=work_item.id,
-        )   
+        )
 
     @mcp.tool()
     def retrieve_epic(
         project_id: str,
-        epic_id: str,        
+        epic_id: str,
     ) -> Epic:
         """
         Retrieve an epic by ID.
@@ -261,11 +260,11 @@ def register_epic_tools(mcp: FastMCP) -> None:
             epic_id=epic_id,
             params=params,
         )
-    
+
     @mcp.tool()
     def delete_epic(
         project_id: str,
-        epic_id: str,        
+        epic_id: str,
     ) -> None:
         """
         Delete an epic by ID.

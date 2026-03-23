@@ -74,14 +74,16 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project
             type_id: UUID of the work item type
             display_name: Display name for the property
-            property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN, OPTION, RELATION, URL, EMAIL, FILE)
+            property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN,
+                OPTION, RELATION, URL, EMAIL, FILE)
             relation_type: Relation type (ISSUE, USER) - required for RELATION properties
             description: Property description
             is_required: Whether the property is required
             default_value: Default value(s) for the property
             settings: Settings dictionary - required for TEXT and DATETIME properties
                      For TEXT: {"display_format": "single-line"|"multi-line"|"readonly"}
-                     For DATETIME: {"display_format": "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
+                     For DATETIME: {"display_format":
+                     "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
             is_active: Whether the property is active
             is_multi: Whether the property supports multiple values
             validation_rules: Validation rules dictionary
@@ -188,14 +190,16 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             type_id: UUID of the work item type
             work_item_property_id: UUID of the property
             display_name: Display name for the property
-            property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN, OPTION, RELATION, URL, EMAIL, FILE)
+            property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN,
+                OPTION, RELATION, URL, EMAIL, FILE)
             relation_type: Relation type (ISSUE, USER) - required when updating to RELATION
             description: Property description
             is_required: Whether the property is required
             default_value: Default value(s) for the property
             settings: Settings dictionary - required when updating to TEXT or DATETIME
                      For TEXT: {"display_format": "single-line"|"multi-line"|"readonly"}
-                     For DATETIME: {"display_format": "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
+                     For DATETIME: {"display_format":
+                     "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
             is_active: Whether the property is active
             is_multi: Whether the property supports multiple values
             validation_rules: Validation rules dictionary

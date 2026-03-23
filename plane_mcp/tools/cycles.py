@@ -102,9 +102,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             Cycle object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.cycles.retrieve(
-            workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id
-        )
+        return client.cycles.retrieve(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
 
     @mcp.tool()
     def update_cycle(
@@ -151,9 +149,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             timezone=timezone,
         )
 
-        return client.cycles.update(
-            workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id, data=data
-        )
+        return client.cycles.update(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id, data=data)
 
     @mcp.tool()
     def delete_cycle(project_id: str, cycle_id: str) -> None:
@@ -166,9 +162,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             cycle_id: UUID of the cycle
         """
         client, workspace_slug = get_plane_client_context()
-        client.cycles.delete(
-            workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id
-        )
+        client.cycles.delete(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
 
     @mcp.tool()
     def list_archived_cycles(
@@ -305,9 +299,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             True if the cycle was archived successfully
         """
         client, workspace_slug = get_plane_client_context()
-        return client.cycles.archive(
-            workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id
-        )
+        return client.cycles.archive(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
 
     @mcp.tool()
     def unarchive_cycle(project_id: str, cycle_id: str) -> bool:
@@ -323,6 +315,4 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             True if the cycle was unarchived successfully
         """
         client, workspace_slug = get_plane_client_context()
-        return client.cycles.unarchive(
-            workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id
-        )
+        return client.cycles.unarchive(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
