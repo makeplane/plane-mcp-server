@@ -16,9 +16,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # Install in editable mode so volume-mounted source changes take effect on restart
-    command: >
-      sh -c "uv pip install --system -e '.[dev]' && python -m plane_mcp http"
+    # Override entrypoint to install in editable mode before starting the server
+    # (command would be appended to the Dockerfile ENTRYPOINT, causing arg parse errors)
+    entrypoint: ["sh", "-c", "uv pip install --system -e '.[dev]' && python -m plane_mcp http"]
     ports:
       - "8211:8211"
     volumes:
