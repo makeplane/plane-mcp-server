@@ -25,8 +25,7 @@ def get_oauth_mcp(base_path: str = "/"):
         client_storage = RedisStore(host=redis_host, port=int(redis_port))
     else:
         logger.warning(
-            "Using in-memory storage - tokens will be lost on restart! "
-            "Set REDIS_HOST and REDIS_PORT for production."
+            "Using in-memory storage - tokens will be lost on restart! " "Set REDIS_HOST and REDIS_PORT for production."
         )
         client_storage = MemoryStore()
 

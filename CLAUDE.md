@@ -27,10 +27,10 @@ pytest tests/test_integration.py::test_full_integration -v
 # Run tests with env vars from file
 export $(cat .env.test.local | xargs) && pytest tests/ -v
 
-# Format code (line length: 100)
-black plane_mcp/
+# Format code (line length: 120)
+ruff format plane_mcp/
 
-# Lint (rules: E, F, I, UP, B; line length: 100)
+# Lint (rules: E, F, I, UP, B; line length: 120)
 ruff check plane_mcp/
 ```
 

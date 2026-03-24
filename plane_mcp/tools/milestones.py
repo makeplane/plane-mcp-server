@@ -69,9 +69,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.milestones.create(
-            workspace_slug=workspace_slug, project_id=project_id, data=data
-        )
+        return client.milestones.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
     def retrieve_milestone(project_id: str, milestone_id: str) -> Milestone:
@@ -139,9 +137,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             milestone_id: UUID of the milestone
         """
         client, workspace_slug = get_plane_client_context()
-        client.milestones.delete(
-            workspace_slug=workspace_slug, project_id=project_id, milestone_id=milestone_id
-        )
+        client.milestones.delete(workspace_slug=workspace_slug, project_id=project_id, milestone_id=milestone_id)
 
     @mcp.tool()
     def add_work_items_to_milestone(

@@ -37,9 +37,7 @@ def get_plane_client_context() -> PlaneClientContext:
     Raises:
         ConfigurationError: If access token is not available or workspace slug is missing
     """
-    base_url = os.getenv("PLANE_INTERNAL_BASE_URL") or os.getenv(
-        "PLANE_BASE_URL", "https://api.plane.so"
-    )
+    base_url = os.getenv("PLANE_INTERNAL_BASE_URL") or os.getenv("PLANE_BASE_URL", "https://api.plane.so")
     workspace_slug = os.getenv("PLANE_WORKSPACE_SLUG", "")
 
     api_key = os.getenv("PLANE_API_KEY", "")

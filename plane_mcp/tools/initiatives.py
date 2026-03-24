@@ -32,9 +32,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
             List of Initiative objects
         """
         client, workspace_slug = get_plane_client_context()
-        response: PaginatedInitiativeResponse = client.initiatives.list(
-            workspace_slug=workspace_slug, params=params
-        )
+        response: PaginatedInitiativeResponse = client.initiatives.list(workspace_slug=workspace_slug, params=params)
         return response.results
 
     @mcp.tool()
@@ -90,9 +88,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
             Initiative object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.initiatives.retrieve(
-            workspace_slug=workspace_slug, initiative_id=initiative_id
-        )
+        return client.initiatives.retrieve(workspace_slug=workspace_slug, initiative_id=initiative_id)
 
     @mcp.tool()
     def update_initiative(
@@ -134,9 +130,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
             lead=lead,
         )
 
-        return client.initiatives.update(
-            workspace_slug=workspace_slug, initiative_id=initiative_id, data=data
-        )
+        return client.initiatives.update(workspace_slug=workspace_slug, initiative_id=initiative_id, data=data)
 
     @mcp.tool()
     def delete_initiative(initiative_id: str) -> None:

@@ -16,12 +16,13 @@ dependencies = [
     "plane-sdk==0.2.8",
     "py-key-value-aio[redis]==0.3.0",
     "mcp==1.26.0",
+    "PyJWT>=2.12.0",
+    "authlib>=1.6.9",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
-    "black>=23.0.0",
     "ruff>=0.1.0",
 ]
 
@@ -36,17 +37,16 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["plane_mcp*"]
 
-[tool.black]
-line-length = 100
-target-version = ["py310"]
-
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

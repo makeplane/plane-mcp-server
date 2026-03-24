@@ -64,9 +64,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
 
         intake_data = CreateIntakeWorkItem(**data)
 
-        return client.intake.create(
-            workspace_slug=workspace_slug, project_id=project_id, data=intake_data
-        )
+        return client.intake.create(workspace_slug=workspace_slug, project_id=project_id, data=intake_data)
 
     @mcp.tool()
     def retrieve_intake_work_item(
@@ -142,6 +140,4 @@ def register_intake_tools(mcp: FastMCP) -> None:
                 IntakeWorkItem response, not the intake work item ID)
         """
         client, workspace_slug = get_plane_client_context()
-        client.intake.delete(
-            workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
-        )
+        client.intake.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
