@@ -87,27 +87,44 @@ def main() -> None:
         return
 
     if server_mode == ServerMode.HTTP:
-        oauth_mcp = get_oauth_mcp("/http")
-        oauth_app = oauth_mcp.http_app(stateless_http=True)
+        oauth_enabled = bool(
+            os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_ID") and os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_SECRET")
+        )
+
+        if oauth_enabled:
+            logger.info("OAuth credentials found — enabling OAuth and SSE endpoints")
+        else:
+            logger.warning(
+                "PLANE_OAUTH_PROVIDER_CLIENT_ID / CLIENT_SECRET not set — "
+                "OAuth and SSE endpoints disabled. Only header API-key endpoint will be available."
+            )
+
         header_app = get_header_mcp().http_app(stateless_http=True)
+        routes = [Mount("/http/api-key", app=header_app)]
 
-        sse_mcp = get_oauth_mcp()
-        sse_app = sse_mcp.http_app(transport="sse")
-
-        oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
-        sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
-
-        app = Starlette(
-            routes=[
-                # Well-known routes for OAuth and Header HTTP
-                *oauth_well_known,
-                *sse_well_known,
-                # Mount both MCP servers
+        if oauth_enabled:
+            oauth_mcp = get_oauth_mcp("/http")
+            oauth_app = oauth_mcp.http_app(stateless_http=True)
+            sse_mcp = get_oauth_mcp()
+            sse_app = sse_mcp.http_app(transport="sse")
+            routes = [
+                *oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp"),
+                *sse_mcp.auth.get_well_known_routes(mcp_path="/sse"),
                 Mount("/http/api-key", app=header_app),
                 Mount("/http", app=oauth_app),
                 Mount("/", app=sse_app),
-            ],
-            lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
+            ]
+
+        async def _lifespan(app):
+            if oauth_enabled:
+                async with combined_lifespan(oauth_app, header_app, sse_app):
+                    yield
+            else:
+                yield
+
+        app = Starlette(
+            routes=routes,
+            lifespan=_lifespan,
         )
 
         app.add_middleware(
