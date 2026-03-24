@@ -228,10 +228,10 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 
 ## Self-Hosting
 
-Use the production compose setup in the `deploy/` folder. It pulls the published image — no build required.
+Use the production compose setup in the `deployments/` folder. It pulls the published image — no build required.
 
 ```bash
-cd deploy
+cd deployments
 # edit variables.env with your values
 docker compose up -d
 ```

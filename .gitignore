@@ -54,7 +54,7 @@ dmypy.json
 .env.local
 .env.test.local
 .env.docker.local
-deploy/variables.env.local
+deployments/variables.env.local
 
 # Ignore cursor AI rules
 .cursor/rules/codacy.mdc
