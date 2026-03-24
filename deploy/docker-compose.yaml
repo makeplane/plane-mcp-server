@@ -1,0 +1,37 @@
+# Plane MCP Server — Production Deployment
+#
+# Setup:
+#   cp variables.env.example variables.env   # copy the template
+#   # edit variables.env with your values
+#   docker compose up -d
+
+name: plane-mcp
+
+services:
+  mcp:
+    image: makeplane/plane-mcp-server:${APP_RELEASE_VERSION:-latest}
+    restart: always
+    ports:
+      - "8211:8211"
+    env_file:
+      - variables.env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:

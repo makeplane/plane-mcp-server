@@ -226,18 +226,84 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 
 **Total Tools**: 55+ tools across 8 categories
 
-## Development
+## Self-Hosting
+
+Use the production compose setup in the `deploy/` folder. It pulls the published image — no build required.
+
+```bash
+cd deploy
+# edit variables.env with your values
+docker compose up -d
+```
+
+The server will be available at:
+- `http://localhost:8211/mcp` — OAuth endpoint
+- `http://localhost:8211/http/api-key/mcp` — PAT / header API key endpoint
+
+To pin a specific version, set `APP_RELEASE_VERSION` in `variables.env`:
+```
+APP_RELEASE_VERSION=v0.2.8
+```
+
+---
+
+## Local Development
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose
+- [uv](https://docs.astral.sh/uv/) (for running outside Docker)
+
+### Running with Docker Compose (recommended)
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/makeplane/plane-mcp-server.git
+cd plane-mcp-server
+
+# 2. Create your local env file
+cp .env.docker .env
+# Edit .env and fill in PLANE_OAUTH_PROVIDER_* values
+
+# 3. Start the server and Redis
+docker compose up --build
+```
+
+The server starts in HTTP mode at `http://localhost:8211`.
+Source code is mounted into the container — changes to `plane_mcp/` take effect on container restart (`docker compose restart mcp`).
+
+### Running without Docker
+
+```bash
+# Install dependencies
+uv pip install -e ".[dev]"
+
+# Stdio mode (simplest — no Redis or OAuth needed)
+export PLANE_API_KEY=your-api-key
+export PLANE_WORKSPACE_SLUG=your-workspace-slug
+python -m plane_mcp stdio
+
+# HTTP mode
+export PLANE_OAUTH_PROVIDER_CLIENT_ID=...
+export PLANE_OAUTH_PROVIDER_CLIENT_SECRET=...
+export PLANE_OAUTH_PROVIDER_BASE_URL=http://localhost:8211
+python -m plane_mcp http
+```
 
 ### Running Tests
 
 ```bash
-pytest
+# Copy and fill in test env
+cp .env.test .env.test.local
+# Edit .env.test.local with your Plane API key and workspace slug
+
+export $(cat .env.test.local | xargs) && pytest tests/ -v
 ```
 
-### Code Formatting
+### Code Formatting & Linting
 
 ```bash
-black plane_mcp/
+ruff format plane_mcp/
 ruff check plane_mcp/
 ```
 
