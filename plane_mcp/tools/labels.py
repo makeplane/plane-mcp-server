@@ -76,9 +76,7 @@ def register_label_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.labels.create(
-            workspace_slug=workspace_slug, project_id=project_id, data=data
-        )
+        return client.labels.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
     def retrieve_label(project_id: str, label_id: str) -> Label:
@@ -93,9 +91,7 @@ def register_label_tools(mcp: FastMCP) -> None:
             Label object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.labels.retrieve(
-            workspace_slug=workspace_slug, project_id=project_id, label_id=label_id
-        )
+        return client.labels.retrieve(workspace_slug=workspace_slug, project_id=project_id, label_id=label_id)
 
     @mcp.tool()
     def update_label(
@@ -155,6 +151,4 @@ def register_label_tools(mcp: FastMCP) -> None:
             label_id: UUID of the label
         """
         client, workspace_slug = get_plane_client_context()
-        client.labels.delete(
-            workspace_slug=workspace_slug, project_id=project_id, label_id=label_id
-        )
+        client.labels.delete(workspace_slug=workspace_slug, project_id=project_id, label_id=label_id)

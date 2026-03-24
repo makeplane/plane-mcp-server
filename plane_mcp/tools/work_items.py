@@ -254,9 +254,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type=type,
         )
 
-        return client.work_items.create(
-            workspace_slug=workspace_slug, project_id=project_id, data=data
-        )
+        return client.work_items.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
     def retrieve_work_item(
@@ -442,9 +440,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item
         """
         client, workspace_slug = get_plane_client_context()
-        client.work_items.delete(
-            workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
-        )
+        client.work_items.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
 
     @mcp.tool()
     def search_work_items(

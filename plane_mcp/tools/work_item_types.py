@@ -31,9 +31,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             List of WorkItemType objects
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_types.list(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
+        return client.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id, params=params)
 
     @mcp.tool()
     def create_work_item_type(
@@ -74,9 +72,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.work_item_types.create(
-            workspace_slug=workspace_slug, project_id=project_id, data=data
-        )
+        return client.work_item_types.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
     def retrieve_work_item_type(

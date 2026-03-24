@@ -246,9 +246,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             estimate=estimate,
         )
 
-        return client.projects.update(
-            workspace_slug=workspace_slug, project_id=project_id, data=data
-        )
+        return client.projects.update(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
     def delete_project(project_id: str) -> None:
@@ -275,14 +273,10 @@ def register_project_tools(mcp: FastMCP) -> None:
             List of ProjectWorklogSummary objects containing work item IDs and durations
         """
         client, workspace_slug = get_plane_client_context()
-        return client.projects.get_worklog_summary(
-            workspace_slug=workspace_slug, project_id=project_id
-        )
+        return client.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def get_project_members(
-        project_id: str, params: dict[str, Any] | None = None
-    ) -> list[UserLite]:
+    def get_project_members(project_id: str, params: dict[str, Any] | None = None) -> list[UserLite]:
         """
         Get all members of a project.
 
@@ -295,9 +289,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             List of UserLite objects representing project members
         """
         client, workspace_slug = get_plane_client_context()
-        return client.projects.get_members(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
+        return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id, params=params)
 
     @mcp.tool()
     def get_project_features(project_id: str) -> ProjectFeature:
@@ -354,6 +346,4 @@ def register_project_tools(mcp: FastMCP) -> None:
             work_item_types=work_item_types,
         )
 
-        return client.projects.update_features(
-            workspace_slug=workspace_slug, project_id=project_id, data=data
-        )
+        return client.projects.update_features(workspace_slug=workspace_slug, project_id=project_id, data=data)
