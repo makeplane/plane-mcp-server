@@ -33,7 +33,7 @@ docker compose logs -f mcp
 | Service | Port | Description |
 |---------|------|-------------|
 | `mcp` | `8211` | Plane MCP Server (HTTP mode) |
-| `redis` | — | Token storage for OAuth (internal only) |
+| `valkey` | — | Token storage for OAuth (internal only) |
 
 ### Endpoints
 
@@ -79,9 +79,9 @@ docker compose up -d
 docker compose logs mcp
 ```
 
-**Redis connection issues?**
+**Valkey connection issues?**
 ```bash
-docker compose exec redis redis-cli ping
+docker compose exec valkey valkey-cli ping
 ```
 
 **Reset and start fresh:**

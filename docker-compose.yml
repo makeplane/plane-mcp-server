@@ -27,20 +27,18 @@ services:
     env_file:
       - .env
     environment:
-      # Redis is wired automatically via the redis service below
-      REDIS_HOST: redis
+      # Valkey is wired automatically via the valkey service below
+      REDIS_HOST: valkey
       REDIS_PORT: "6379"
     depends_on:
-      redis:
+      valkey:
         condition: service_healthy
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+  valkey:
+    image: valkey/valkey:8-alpine
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5

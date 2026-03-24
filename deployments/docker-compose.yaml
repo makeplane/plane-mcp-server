@@ -16,22 +16,22 @@ services:
     env_file:
       - variables.env
     environment:
-      REDIS_HOST: redis
+      REDIS_HOST: valkey
       REDIS_PORT: "6379"
     depends_on:
-      redis:
+      valkey:
         condition: service_healthy
 
-  redis:
-    image: redis:7-alpine
+  valkey:
+    image: valkey/valkey:8-alpine
     restart: always
     volumes:
-      - redis-data:/data
+      - valkey-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
 
 volumes:
-  redis-data:
+  valkey-data:
