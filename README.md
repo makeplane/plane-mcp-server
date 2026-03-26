@@ -241,7 +241,7 @@ The server will be available at:
 - `http://localhost:8211/http/api-key/mcp` — PAT / header API key endpoint
 
 To pin a specific version, set `APP_RELEASE_VERSION` in `variables.env`:
-```
+```env
 APP_RELEASE_VERSION=v0.2.8
 ```
 

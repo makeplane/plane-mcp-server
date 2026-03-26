@@ -1,7 +1,6 @@
 # Plane MCP Server — Production Deployment
 #
 # Setup:
-#   cp variables.env.example variables.env   # copy the template
 #   # edit variables.env with your values
 #   docker compose up -d
 
