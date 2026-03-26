@@ -237,7 +237,7 @@ docker compose up -d
 ```
 
 The server will be available at:
-- `http://localhost:8211/mcp` — OAuth endpoint
+- `http://localhost:8211/http/mcp` — OAuth endpoint
 - `http://localhost:8211/http/api-key/mcp` — PAT / header API key endpoint
 
 To pin a specific version, set `APP_RELEASE_VERSION` in `variables.env`:
