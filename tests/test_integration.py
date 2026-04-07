@@ -1,3 +1,5 @@
+import pytest
+
 """
 Simple integration test for Plane MCP Server.
 
@@ -244,6 +246,10 @@ async def run_integration_test():
         print("Integration test passed!")
 
 
+@pytest.mark.skipif(
+    not os.getenv("PLANE_TEST_API_KEY") or not os.getenv("PLANE_TEST_WORKSPACE_SLUG"),
+    reason="Missing PLANE_TEST_API_KEY or PLANE_TEST_WORKSPACE_SLUG"
+)
 def test_full_integration():
     """Pytest entry point - runs the async integration test."""
     asyncio.run(run_integration_test())
@@ -404,6 +410,10 @@ async def run_tools_availability_test():
         print("Tools availability test passed!")
 
 
+@pytest.mark.skipif(
+    not os.getenv("PLANE_TEST_API_KEY") or not os.getenv("PLANE_TEST_WORKSPACE_SLUG"),
+    reason="Missing PLANE_TEST_API_KEY or PLANE_TEST_WORKSPACE_SLUG"
+)
 def test_tools_availability():
     """Pytest entry point - verifies all expected tools are registered."""
     asyncio.run(run_tools_availability_test())
