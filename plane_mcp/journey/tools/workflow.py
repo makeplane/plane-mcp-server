@@ -1,13 +1,10 @@
 """Workflow tools for Journey Endpoint."""
 
-from plane_mcp.resolver import EntityResolutionError
-
 from collections import defaultdict
 from fastmcp import FastMCP
-from plane_mcp.journey.cache import get_cached_project_slugs_docstring
 from plane.errors.errors import HttpError
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.resolver import EntityResolver
+from plane_mcp.resolver import EntityResolver, EntityResolutionError
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
 from plane_mcp.journey.lod import LODProfile
 from plane_mcp.sanitize import sanitize_html
