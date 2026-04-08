@@ -4,8 +4,9 @@ import time
 import tempfile
 import logging
 
-def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:    
+def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
     from plane_mcp.client import get_plane_client_context
+    ctx = None  # Always initialised before use; set inside try so fallback is safe
     try:
         ctx = get_plane_client_context()
         ws = ctx.workspace_slug or "default"
@@ -16,7 +17,7 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
     cache_dir = os.path.join(tempfile.gettempdir(), "plane_mcp")
     os.makedirs(cache_dir, exist_ok=True)
     cache_file = os.path.join(cache_dir, f"workspace_{safe_ws}_context_cache.json")
-    
+
     context = {}
     if os.path.exists(cache_file):
         if time.time() - os.path.getmtime(cache_file) < cache_ttl_seconds:
@@ -25,10 +26,10 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
                     context = json.load(f)
             except Exception as e:
                 logging.getLogger(__name__).debug(f"Cache read failed for {cache_file}, will refresh: {e}")
-                
+
     if not context:
         try:
-            if ctx.client and ctx.workspace_slug:
+            if ctx is not None and ctx.client and ctx.workspace_slug:
                 response = ctx.client.projects.list(workspace_slug=ctx.workspace_slug)
                 
                 projects = []

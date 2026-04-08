@@ -147,7 +147,7 @@ class ReadJourney(JourneyBase):
 
     def read_ticket(self, ticket_id: str, lod: Literal["summary", "standard", "full"] = "standard", comments: bool = False) -> dict:
         work_item_id = self.resolver.resolve_ticket(ticket_id)
-        project_identifier, issue_sequence = self.parse_ticket_id(ticket_id)
+        project_identifier, _issue_sequence = self.parse_ticket_id(ticket_id)
         project_id = self.resolver.resolve_project(project_identifier)
         
         client, workspace_slug = get_plane_client_context()

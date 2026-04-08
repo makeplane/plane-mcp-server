@@ -137,7 +137,7 @@ class EntityResolver:
         try:
             issue_sequence = int(parts[1])
         except ValueError:
-            raise ValueError(f"Invalid ticket sequence in '{ticket_id}'. Must be an integer (e.g., 123).")
+            raise ValueError(f"Invalid ticket sequence in '{ticket_id}'. Must be an integer (e.g., 123).") from None
 
         # Resolve project to ensure the project exists and is valid
         self.resolve_project(project_identifier)

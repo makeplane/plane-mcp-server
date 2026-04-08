@@ -224,23 +224,25 @@ def register_create_update_tools(mcp: FastMCP) -> None:
         title: str,
         project_slug: str,
         description: str | None = None,
+        state_name: str | None = None,
         labels: list[str] | None = None,
         cycle_name: str | None = None,
     ) -> dict:
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = CreateUpdateJourney(resolver)
-        return journey.create_ticket(title=title, project_slug=project_slug, description=description, labels=labels, cycle_name=cycle_name)
+        return journey.create_ticket(title=title, project_slug=project_slug, description=description, state_name=state_name, labels=labels, cycle_name=cycle_name)
 
     create_ticket.__doc__ = """
         Create a new ticket with automatic resolution of labels and cycles.
-        Missing labels or cycles will be automatically created. 
-        The ticket is automatically placed in the default Backlog state.
+        Missing labels or cycles will be automatically created.
+        If state_name is not provided, the ticket is placed in the default Backlog state.
 
         Args:
             title: Title of the ticket.
             project_slug: The Plane project identifier (e.g., 'PLANE'). To discover valid project slugs, call this tool with project_slug='help'.
             description: Optional detailed markdown description of the ticket.
+            state_name: Optional initial state name (e.g., 'Todo', 'In Progress'). Defaults to Backlog.
             labels: List of label names.
             cycle_name: Name of the cycle to add this ticket to.
         """
