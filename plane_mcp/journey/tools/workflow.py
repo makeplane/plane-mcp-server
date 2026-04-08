@@ -1,5 +1,7 @@
 """Workflow tools for Journey Endpoint."""
 
+from plane_mcp.resolver import EntityResolutionError
+
 from collections import defaultdict
 from fastmcp import FastMCP
 from plane_mcp.journey.cache import get_cached_project_slugs_docstring
@@ -87,17 +89,21 @@ class WorkflowJourney(JourneyBase):
             msg = f"Processed {len(w_ids)} tickets."
             
             if cycle_id:
-                # Add all tickets in this project to the cycle
-                client.cycles.add_work_items(
-                    workspace_slug=workspace_slug,
-                    project_id=proj_id,
-                    cycle_id=cycle_id,
-                    issue_ids=w_ids
-                )
-                msg += f" Added to cycle '{cycle_name}'."
+                # Add all tickets in this project to the cycle; non-fatal on failure
+                try:
+                    client.cycles.add_work_items(
+                        workspace_slug=workspace_slug,
+                        project_id=proj_id,
+                        cycle_id=cycle_id,
+                        issue_ids=w_ids
+                    )
+                    msg += f" Added to cycle '{cycle_name}'."
+                except Exception as e:
+                    logger.warning("Failed to add tickets to cycle '%s' for project %s: %s", cycle_name, proj_identifier, e)
+                    msg += f" Warning: tickets processed but could not be added to cycle '{cycle_name}'."
             else:
                 msg += " Note: Cycles are disabled for this project, skipped cycle assignment."
-            
+
             # Optionally transition them to In Progress if such state exists
             try:
                 state_id = self.resolver.resolve_state(proj_identifier, "In Progress")
@@ -108,9 +114,12 @@ class WorkflowJourney(JourneyBase):
                         work_item_id=w_id,
                         data=UpdateWorkItem(state=state_id)
                     )
-            except ValueError:
-                # "In Progress" state not found, skip automatic transition
+            except EntityResolutionError:
+                # "In Progress" state not found in this project — skip silently, it's optional
                 pass
+            except Exception as e:
+                # Unexpected API error — log but don't fail the whole batch
+                logger.warning("State transition to 'In Progress' failed for project %s: %s", proj_identifier, e)
                 
             results[proj_identifier] = msg
             
