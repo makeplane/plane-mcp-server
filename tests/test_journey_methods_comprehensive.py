@@ -62,7 +62,7 @@ def test_search_tickets_success(mock_get_context, resolver, mock_client):
     args, kwargs = mock_client.work_items._get.call_args
     assert args[0] == "test-workspace/projects/proj-123/work-items"
     assert kwargs["params"]["priority"] == "high"
-    assert kwargs["params"]["per_page"] == 100
+    assert kwargs["params"]["per_page"] == 10  # per_page is now min(limit, 100)
     
     assert len(result["results"]) == 1
     assert result["results"][0]["key"] == "TEST-1"
@@ -197,16 +197,22 @@ def test_create_ticket_with_all_params(mock_get_context, resolver, mock_client):
     mock_state = MagicMock()
     mock_state.name = "Todo"
     mock_state.id = "state-123"
-    mock_state_resp = MagicMock(); mock_state_resp.results = [mock_state]; mock_client.states.list.return_value = mock_state_resp
+    mock_state_resp = MagicMock()
+    mock_state_resp.results = [mock_state]
+    mock_client.states.list.return_value = mock_state_resp
     
     # Mock label resolution (not found, creates new)
-    mock_label_resp = MagicMock(); mock_label_resp.results = []; mock_client.labels.list.return_value = mock_label_resp
+    mock_label_resp = MagicMock()
+    mock_label_resp.results = []
+    mock_client.labels.list.return_value = mock_label_resp
     mock_new_label = MagicMock()
     mock_new_label.id = "label-123"
     mock_client.labels.create.return_value = mock_new_label
     
     # Mock cycle resolution
-    mock_cycle_resp = MagicMock(); mock_cycle_resp.results = []; mock_client.cycles.list.return_value = mock_cycle_resp
+    mock_cycle_resp = MagicMock()
+    mock_cycle_resp.results = []
+    mock_client.cycles.list.return_value = mock_cycle_resp
     mock_new_cycle = MagicMock()
     mock_new_cycle.id = "cycle-123"
     mock_client.cycles.create.return_value = mock_new_cycle
@@ -271,7 +277,9 @@ def test_transition_ticket_success(mock_get_context, resolver, mock_client):
     mock_state = MagicMock()
     mock_state.name = "In Progress"
     mock_state.id = "state-456"
-    mock_state_resp = MagicMock(); mock_state_resp.results = [mock_state]; mock_client.states.list.return_value = mock_state_resp
+    mock_state_resp = MagicMock()
+    mock_state_resp.results = [mock_state]
+    mock_client.states.list.return_value = mock_state_resp
     
     # Mock update
     mock_updated = MagicMock()
@@ -303,7 +311,9 @@ def test_begin_work_success(mock_get_context, resolver, mock_client):
     journey = WorkflowJourney(resolver)
     
     # Setup mocks
-    mock_cycle_resp = MagicMock(); mock_cycle_resp.results = []; mock_client.cycles.list.return_value = mock_cycle_resp
+    mock_cycle_resp = MagicMock()
+    mock_cycle_resp.results = []
+    mock_client.cycles.list.return_value = mock_cycle_resp
     mock_new_cycle = MagicMock()
     mock_new_cycle.id = "cycle-123"
     mock_client.cycles.create.return_value = mock_new_cycle
@@ -311,7 +321,9 @@ def test_begin_work_success(mock_get_context, resolver, mock_client):
     mock_state = MagicMock()
     mock_state.name = "In Progress"
     mock_state.id = "state-in-prog"
-    mock_state_resp = MagicMock(); mock_state_resp.results = [mock_state]; mock_client.states.list.return_value = mock_state_resp
+    mock_state_resp = MagicMock()
+    mock_state_resp.results = [mock_state]
+    mock_client.states.list.return_value = mock_state_resp
     
     mock_updated = MagicMock()
     mock_updated.sequence_id = 1
@@ -351,7 +363,9 @@ def test_begin_work_cycles_disabled(mock_get_context, resolver, mock_client):
     mock_state = MagicMock()
     mock_state.name = "In Progress"
     mock_state.id = "state-in-prog"
-    mock_state_resp = MagicMock(); mock_state_resp.results = [mock_state]; mock_client.states.list.return_value = mock_state_resp
+    mock_state_resp = MagicMock()
+    mock_state_resp.results = [mock_state]
+    mock_client.states.list.return_value = mock_state_resp
     
     mock_updated = MagicMock()
     mock_updated.sequence_id = 1
@@ -387,7 +401,9 @@ def test_complete_work_success(mock_get_context, resolver, mock_client):
     mock_state = MagicMock()
     mock_state.name = "Done"
     mock_state.id = "state-done"
-    mock_state_resp = MagicMock(); mock_state_resp.results = [mock_state]; mock_client.states.list.return_value = mock_state_resp
+    mock_state_resp = MagicMock()
+    mock_state_resp.results = [mock_state]
+    mock_client.states.list.return_value = mock_state_resp
     
     mock_updated = MagicMock()
     mock_updated.sequence_id = 1
@@ -412,7 +428,9 @@ def test_complete_work_no_done_state_returns_partial(mock_get_context, resolver,
     mock_client.work_items.comments.create.return_value = {"id": "comment-1"}
 
     # No Done or Completed state exists
-    mock_state = MagicMock(); mock_state.name = "In Progress"; mock_state.id = "state-ip"
+    mock_state = MagicMock()
+    mock_state.name = "In Progress"
+    mock_state.id = "state-ip"
     mock_client.states.list.return_value = MagicMock(results=[mock_state])
 
     result = journey.complete_work("TEST-1", "Work is done")

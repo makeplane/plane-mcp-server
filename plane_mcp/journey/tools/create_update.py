@@ -22,7 +22,7 @@ class CreateUpdateJourney(JourneyBase):
     def _resolve_or_create_labels(self, project_id: str, label_names: list[str]) -> list[str]:
         client, workspace_slug = get_plane_client_context()
         existing = client.labels.list(workspace_slug=workspace_slug, project_id=project_id).results
-        name_to_id = {l.name.lower(): l.id for l in existing if l.name}
+        name_to_id = {label.name.lower(): label.id for label in existing if label.name}
 
         new_labels_needed = [n for n in label_names if n.lower() not in name_to_id]
         if len(new_labels_needed) > MAX_NEW_LABELS_PER_REQUEST:
@@ -49,19 +49,19 @@ class CreateUpdateJourney(JourneyBase):
 
     def _resolve_or_create_cycle(self, project_id: str, cycle_name: str) -> str | None:
         client, workspace_slug = get_plane_client_context()
-        existing = client.cycles.list(workspace_slug=workspace_slug, project_id=project_id).results
-        for c in existing:
-            if c.name and c.name.lower() == cycle_name.lower():
-                return c.id
-        
-        # Create missing cycle
-        me = client.users.get_me()
-        user_id = me.id if hasattr(me, "id") else None
-        
-        import datetime
-        start_dt = datetime.date.today().isoformat()
-        end_dt = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
         try:
+            existing = client.cycles.list(workspace_slug=workspace_slug, project_id=project_id).results
+            for c in existing:
+                if c.name and c.name.lower() == cycle_name.lower():
+                    return c.id
+
+            # Create missing cycle
+            me = client.users.get_me()
+            user_id = me.id if hasattr(me, "id") else None
+
+            import datetime
+            start_dt = datetime.date.today().isoformat()
+            end_dt = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
             new_cycle = client.cycles.create(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
@@ -70,7 +70,7 @@ class CreateUpdateJourney(JourneyBase):
             return new_cycle.id
         except HttpError as e:
             if getattr(e, "status_code", getattr(getattr(e, "response", None), "status_code", None)) == 400:
-                logger.warning(f"Cycles appear to be disabled for project {project_id}. Skipping cycle creation.")
+                logger.warning(f"Cycles appear to be disabled for project {project_id}. Skipping cycle lookup/creation.")
                 return None
             raise
 

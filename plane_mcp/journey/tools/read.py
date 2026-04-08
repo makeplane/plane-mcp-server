@@ -35,9 +35,10 @@ class ReadJourney(JourneyBase):
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()
         
+        per_page = min(limit, 100)
         query_params = {
-            "per_page": 100, # Fetch max per page for faster deep searching
-            "expand": "assignees,labels,state"
+            "per_page": per_page,
+            "expand": "assignees,labels,state",
         }
         
         if cursor:
@@ -49,11 +50,11 @@ class ReadJourney(JourneyBase):
             state_ids = [self.resolver.resolve_state(project_slug, s) for s in states]
             query_params["state"] = ",".join(state_ids)
             
+        unresolved_labels: list[str] = []
         if labels:
-            unresolved_labels = []
             try:
                 existing_labels = client.labels.list(workspace_slug=workspace_slug, project_id=project_id).results
-                name_to_id = {l.name.lower(): l.id for l in existing_labels if l.name}
+                name_to_id = {label.name.lower(): label.id for label in existing_labels if label.name}
                 label_ids = []
                 for name in labels:
                     if name.lower() in name_to_id:
@@ -64,7 +65,13 @@ class ReadJourney(JourneyBase):
                     query_params["labels"] = ",".join(label_ids)
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"Failed to resolve labels: {e}")
+                logging.getLogger(__name__).warning(f"Label resolution failed, returning empty results: {e}")
+                return {
+                    "results": [],
+                    "next_cursor": None,
+                    "prev_cursor": None,
+                    "warnings": [f"Label filter could not be applied due to an error: {e}. Please retry or check your label names."],
+                }
                 
         if assignees:
             assignee_ids = []
@@ -114,16 +121,12 @@ class ReadJourney(JourneyBase):
                         matched_results.append(item)
                 else:
                     matched_results.append(item)
-                    
-                if len(matched_results) >= limit:
-                    break
-            
-            # If we don't have a next page, or we've hit our limit, break the loop
-            if not hasattr(paginated, "next_cursor") or not paginated.next_cursor:
+
+            # Advance cursor only after a full page is consumed — keeps page boundaries aligned
+            next_cursor_to_return = getattr(paginated, "next_cursor", None)
+            if not next_cursor_to_return:
                 break
-                
-            current_cursor = paginated.next_cursor
-            next_cursor_to_return = current_cursor
+            current_cursor = next_cursor_to_return
 
         try:
             profile = LODProfile(lod)
@@ -137,7 +140,7 @@ class ReadJourney(JourneyBase):
             "next_cursor": next_cursor_to_return,
             "prev_cursor": paginated.prev_cursor if hasattr(paginated, "prev_cursor") else None
         }
-        if labels and unresolved_labels:
+        if unresolved_labels:
             result["warnings"] = [f"Label not found and filter was skipped: {', '.join(unresolved_labels)}"]
         return result
 

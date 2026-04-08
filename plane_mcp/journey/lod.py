@@ -1,9 +1,13 @@
 """Level of Detail (LOD) filtering system to strip verbose REST metadata."""
+import logging
+import uuid as uuid_module
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.resolver import EntityResolver
 from markdownify import markdownify
+
+logger = logging.getLogger(__name__)
 
 class LODProfile(Enum):
     SUMMARY = "summary"
@@ -20,7 +24,7 @@ STANDARD_FIELDS = {
     "ticket_id", "name", "description_html", "priority", "labels", "state"
 }
 
-def inject_sequence_id(data: Dict[str, Any], project_identifier: Optional[str] = None) -> None:
+def inject_sequence_id(data: dict[str, Any], project_identifier: str | None = None) -> None:
     """
     Consistently inject sequence IDs (e.g., 'ENG-123') into the data dictionary
     to enable zero-lookup chaining for subsequent AI actions.
@@ -35,37 +39,40 @@ def inject_sequence_id(data: Dict[str, Any], project_identifier: Optional[str] =
     if proj_id and "sequence_id" in data:
         data["ticket_id"] = f"{proj_id}-{data['sequence_id']}"
 
-def _hydrate_state(data: Dict[str, Any], project_identifier: Optional[str] = None) -> None:
+def _hydrate_state(data: dict[str, Any], project_identifier: str | None = None) -> None:
     """If state is a raw UUID, attempt to hydrate its name."""
     state_val = data.get("state")
     if state_val:
         state_str = str(state_val)
-        if len(state_str) == 36 and "-" in state_str:
-            try:
-                client, workspace_slug = get_plane_client_context()
-                resolver = EntityResolver(client, workspace_slug)
+        try:
+            uuid_module.UUID(state_str)
+        except ValueError:
+            return  # Not a UUID, nothing to hydrate
+        try:
+            client, workspace_slug = get_plane_client_context()
+            resolver = EntityResolver(client, workspace_slug)
+            
+            # Figure out project UUID
+            proj_id = None
+            if data.get("project"):
+                proj_id = str(data.get("project"))
+            elif data.get("project_id"):
+                proj_id = str(data.get("project_id"))
+            elif project_identifier:
+                proj_id = str(resolver.resolve_project(project_identifier))
                 
-                # Figure out project UUID
-                proj_id = None
-                if data.get("project"):
-                    proj_id = str(data.get("project"))
-                elif data.get("project_id"):
-                    proj_id = str(data.get("project_id"))
-                elif project_identifier:
-                    proj_id = str(resolver.resolve_project(project_identifier))
-                    
-                if proj_id:
-                    state_obj = client.states.retrieve(workspace_slug=workspace_slug, project_id=proj_id, state_id=state_str)
-                    data["state"] = {"name": state_obj.name, "id": state_str}
-            except Exception:
-                pass
+            if proj_id:
+                state_obj = client.states.retrieve(workspace_slug=workspace_slug, project_id=proj_id, state_id=state_str)
+                data["state"] = {"name": state_obj.name, "id": state_str}
+        except Exception as e:
+            logger.debug("Could not hydrate state %s: %s", state_str, e)
 
 def _clean_html(html_str: str) -> str:
     if not html_str:
         return ""
     return markdownify(html_str, heading_style="ATX", bullet_list_marker="-").strip()
 
-def _apply_lod_to_dict(data: Dict[str, Any], profile: LODProfile, project_identifier: Optional[str] = None) -> Dict[str, Any]:
+def _apply_lod_to_dict(data: dict[str, Any], profile: LODProfile, project_identifier: str | None = None) -> dict[str, Any]:
     inject_sequence_id(data, project_identifier)
     _hydrate_state(data, project_identifier)
     
@@ -105,7 +112,10 @@ def _apply_lod_to_dict(data: Dict[str, Any], profile: LODProfile, project_identi
             result["priority"] = data["priority"]
             
         if "labels" in data and isinstance(data["labels"], list):
-            result["labels"] = [l.get("name") if isinstance(l, dict) and "name" in l else l for l in data["labels"]]
+            result["labels"] = [
+                label.get("name") if isinstance(label, dict) and "name" in label else label
+                for label in data["labels"]
+            ]
             
         # State mapping
         if "state" in data:
@@ -127,10 +137,10 @@ def _apply_lod_to_dict(data: Dict[str, Any], profile: LODProfile, project_identi
     return result
 
 def apply_lod(
-    data: Union[Dict, List, Any], 
+    data: dict | list | Any,
     profile: LODProfile = LODProfile.SUMMARY,
-    project_identifier: Optional[str] = None
-) -> Union[Dict, List]:
+    project_identifier: str | None = None
+) -> dict | list:
     """
     Applies the LOD filter to a dictionary, list of dictionaries, or Pydantic model
     and returns a clean JSON-serializable structure.

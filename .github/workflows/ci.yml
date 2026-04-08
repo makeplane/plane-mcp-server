@@ -14,8 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  packages: write
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -41,6 +40,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      packages: write
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -57,10 +59,21 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Set image tags
+        id: tags
+        run: |
+          BRANCH_TAG=$(echo "${{ github.ref_name }}" | sed 's|/|-|g')
+          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/plane-mcp-server"
+          TAGS="${IMAGE}:${BRANCH_TAG}"
+          if [ "${{ github.ref_name }}" = "main" ] || [ "${{ github.ref_name }}" = "master" ]; then
+            TAGS="${TAGS},${IMAGE}:latest"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/plane-mcp-server:latest
+          tags: ${{ steps.tags.outputs.tags }}

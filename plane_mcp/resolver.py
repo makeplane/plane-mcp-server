@@ -1,25 +1,24 @@
 """Stateless EntityResolver for mapping human-readable identifiers to Plane UUIDs."""
 
-from typing import Dict, List, Optional
+import time
+
 from plane import PlaneClient
-from plane.models.query_params import PaginatedQueryParams
 from plane.errors.errors import HttpError
+from plane.models.query_params import PaginatedQueryParams
 
 
 class EntityResolutionError(ValueError):
     """Exception raised when an entity cannot be resolved, containing actionable options."""
-    def __init__(self, message: str, available_options: Optional[List[str]] = None):
+    def __init__(self, message: str, available_options: list[str] | None = None):
         super().__init__(message)
         self.available_options = available_options or []
 
 
-import time
-
 # Global caches to prevent N+1 queries across tool invocations in the same process
-_GLOBAL_PROJECT_CACHE: Dict[str, str] = {}
-_GLOBAL_STATE_CACHE: Dict[str, Dict[str, str]] = {}
-_GLOBAL_WORK_ITEM_CACHE: Dict[str, str] = {}
-_CACHE_LAST_UPDATED: Dict[str, float] = {"projects": 0.0, "states": 0.0, "work_items": 0.0}
+_GLOBAL_PROJECT_CACHE: dict[str, str] = {}
+_GLOBAL_STATE_CACHE: dict[str, dict[str, str]] = {}
+_GLOBAL_WORK_ITEM_CACHE: dict[str, str] = {}
+_CACHE_LAST_UPDATED: dict[str, float] = {"projects": 0.0, "states": 0.0, "work_items": 0.0}
 _CACHE_TTL_SECONDS = 300  # 5 minutes
 
 class EntityResolver:
@@ -72,7 +71,7 @@ class EntityResolver:
         except Exception as e:
             if isinstance(e, EntityResolutionError):
                 raise
-            raise RuntimeError(f"Failed to fetch projects: {str(e)}")
+            raise RuntimeError(f"Failed to fetch projects: {e!s}") from e
 
     def resolve_state(self, project_identifier: str, state_name: str) -> str:
         """
@@ -111,7 +110,7 @@ class EntityResolver:
         except Exception as e:
             if isinstance(e, EntityResolutionError):
                 raise
-            raise RuntimeError(f"Failed to fetch states for project {project_identifier}: {str(e)}")
+            raise RuntimeError(f"Failed to fetch states for project {project_identifier}: {e!s}") from e
 
     def resolve_ticket(self, ticket_id: str) -> str:
         """
@@ -149,12 +148,12 @@ class EntityResolver:
             return work_item_id
         except HttpError as e:
             if getattr(e, "status_code", None) == 404:
-                 raise EntityResolutionError(
-                     f"Ticket '{ticket_id}' not found.",
-                     available_options=[]
-                 )
-            raise RuntimeError(f"Failed to retrieve ticket '{ticket_id}': {str(e)}")
+                raise EntityResolutionError(
+                    f"Ticket '{ticket_id}' not found.",
+                    available_options=[]
+                ) from e
+            raise RuntimeError(f"Failed to retrieve ticket '{ticket_id}': {e!s}") from e
         except Exception as e:
             if isinstance(e, EntityResolutionError):
                 raise
-            raise RuntimeError(f"Failed to retrieve ticket '{ticket_id}': {str(e)}")
+            raise RuntimeError(f"Failed to retrieve ticket '{ticket_id}': {e!s}") from e

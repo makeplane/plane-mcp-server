@@ -1,7 +1,7 @@
 """Base classes and utilities for Journey-based AI tools."""
 
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, TypeVar, Tuple, cast
+from typing import Any, Callable, TypeVar, cast
 from plane_mcp.resolver import EntityResolver
 from plane_mcp.journey.lod import apply_lod, LODProfile
 
@@ -17,13 +17,13 @@ class JourneyBase:
     def __init__(self, resolver: EntityResolver):
         self.resolver = resolver
 
-    def apply_lod(self, data: Any, profile: LODProfile = LODProfile.SUMMARY, project_identifier: Optional[str] = None) -> Any:
+    def apply_lod(self, data: Any, profile: LODProfile = LODProfile.SUMMARY, project_identifier: str | None = None) -> Any:
         """
         Applies LOD profile, returning clean minimized data for AI context.
         """
         return apply_lod(data, profile=profile, project_identifier=project_identifier)
 
-    def parse_ticket_id(self, ticket_id: str) -> Tuple[str, int]:
+    def parse_ticket_id(self, ticket_id: str) -> tuple[str, int]:
         """
         Parses a typical sequence ID (ENG-123) into project_identifier and sequence_id.
         """
@@ -38,7 +38,7 @@ class JourneyBase:
         try:
             issue_sequence = int(parts[1])
         except ValueError:
-            raise ValueError(f"Invalid ticket sequence in '{ticket_id}'. Must be an integer (e.g., 123).")
+            raise ValueError(f"Invalid ticket sequence in '{ticket_id}'. Must be an integer (e.g., 123).") from None
             
         return project_identifier, issue_sequence
 
@@ -58,8 +58,8 @@ def with_lod(profile: LODProfile = LODProfile.SUMMARY) -> Callable[[T], T]:
             if not project_identifier and "ticket_id" in kwargs:
                 try:
                     project_identifier = kwargs["ticket_id"].split("-")[0]
-                except Exception:
-                    pass
+                except (AttributeError, IndexError):
+                    pass  # ticket_id format doesn't match expected pattern
             
             # Extract self if it's a method
             if args and hasattr(args[0], "apply_lod"):
@@ -120,7 +120,7 @@ def mcp_error_boundary(func: T) -> T:
                 # Try to determine return type safely
                 try:
                     sig = inspect.signature(func)
-                    if sig.return_annotation == list or str(sig.return_annotation).startswith("list"):
+                    if sig.return_annotation is list or str(sig.return_annotation).startswith("list"):
                         return [{"error": error_msg}]
                 except Exception:
                     pass

@@ -15,8 +15,8 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
             try:
                 with open(cache_file, "r") as f:
                     context = json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).debug(f"Cache read failed for {cache_file}, will refresh: {e}")
                 
     if not context:
         try:
@@ -42,13 +42,13 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
                         states_by_project[p.identifier] = []
                         
                     try:
-                        l_res = ctx.client.labels.list(workspace_slug=ctx.workspace_slug, project_id=p.id)
-                        labels_by_project[p.identifier] = [l.name for l in l_res.results if l.name]
+                        label_res = ctx.client.labels.list(workspace_slug=ctx.workspace_slug, project_id=p.id)
+                        labels_by_project[p.identifier] = [label.name for label in label_res.results if label.name]
                     except Exception:
                         labels_by_project[p.identifier] = []
                 
                 all_states = sorted({s for ss in states_by_project.values() for s in ss})
-                all_labels = sorted({l for ll in labels_by_project.values() for l in ll})
+                all_labels = sorted({label for label_list in labels_by_project.values() for label in label_list})
                 
                 context = {
                     "projects": projects,
@@ -96,7 +96,7 @@ def get_cached_labels_string() -> str:
     labels = context.get("all_labels", context.get("labels", []))
     if not labels:
         return "'bug', 'feature'"
-    return ", ".join([f"'{l}'" for l in labels])
+    return ", ".join([f"'{label}'" for label in labels])
     
 def get_cached_priorities_string() -> str:
     context = get_cached_workspace_context()

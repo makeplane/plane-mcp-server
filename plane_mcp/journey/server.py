@@ -20,8 +20,15 @@ def get_oauth_mcp(base_path: str = "/"):
     redis_port = os.getenv("REDIS_PORT")
 
     if redis_host and redis_port:
+        try:
+            redis_port_int = int(redis_port)
+        except ValueError:
+            raise ValueError(
+                f"REDIS_PORT must be a valid integer, got '{redis_port}'. "
+                "Please set REDIS_PORT to a valid port number (e.g., 6379)."
+            ) from None
         logger.info("Using Redis for token storage")
-        client_storage = RedisStore(host=redis_host, port=int(redis_port))
+        client_storage = RedisStore(host=redis_host, port=redis_port_int)
     else:
         logger.warning(
             "Using in-memory storage - tokens will be lost on restart! "
@@ -29,14 +36,22 @@ def get_oauth_mcp(base_path: str = "/"):
         )
         client_storage = MemoryStore()
 
+    client_id = os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_ID", "dummy_client_id")
+    client_secret = os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_SECRET", "dummy_client_secret")
+    if client_id == "dummy_client_id" or client_secret == "dummy_client_secret":
+        logger.warning(
+            "OAuth provider is using placeholder credentials. "
+            "Set PLANE_OAUTH_PROVIDER_CLIENT_ID and PLANE_OAUTH_PROVIDER_CLIENT_SECRET for production."
+        )
+
     # Initialize the MCP server
     oauth_mcp = FastMCP(
         "Plane Journey MCP Server",
         icons=[Icon(src="https://plane.so/favicon.ico", alt="Plane Journey MCP Server")],
         website_url="https://plane.so",
         auth=PlaneOAuthProvider(
-            client_id=os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_ID", "dummy_client_id"),
-            client_secret=os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_SECRET", "dummy_client_secret"),
+            client_id=client_id,
+            client_secret=client_secret,
             base_url=f"{os.getenv('PLANE_OAUTH_PROVIDER_BASE_URL', 'http://localhost:8211')}{base_path}",
             plane_base_url=os.getenv("PLANE_BASE_URL", ""),
             plane_internal_base_url=os.getenv("PLANE_INTERNAL_BASE_URL", ""),
