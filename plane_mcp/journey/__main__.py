@@ -52,8 +52,15 @@ def main() -> None:
         get_stdio_mcp().run()
         return
 
+    if server_mode == ServerMode.SSE:
+        raise NotImplementedError(
+            "SSE mode is not implemented in the agent server. "
+            "Use 'stdio' or 'http'. SSE transport is defined in the MCP spec "
+            "but not supported by this endpoint."
+        )
+
     if server_mode == ServerMode.HTTP:
-        http_mcp = get_stdio_mcp()
+        http_mcp = get_header_mcp()
         http_app = http_mcp.http_app(transport="streamable-http")
 
         app = Starlette(

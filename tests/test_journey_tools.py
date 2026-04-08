@@ -16,11 +16,11 @@ def mock_client():
 @pytest.fixture
 def resolver(mock_client):
     res = EntityResolver(mock_client, "test-workspace")
-    # Pre-populate cache so we don't need to mock projects.list everywhere
-    plane_mcp.resolver._GLOBAL_PROJECT_CACHE.update({"ENG": "proj-1"})
-    plane_mcp.resolver._GLOBAL_WORK_ITEM_CACHE.update({"ENG-1": "ticket-1", "ENG-2": "ticket-2"})
-    plane_mcp.resolver._CACHE_LAST_UPDATED["projects"] = time.time()
-    plane_mcp.resolver._CACHE_LAST_UPDATED["work_items"] = time.time()
+    # Pre-populate workspace-scoped cache so we don't need to mock projects.list everywhere
+    plane_mcp.resolver._GLOBAL_PROJECT_CACHE["test-workspace"].update({"ENG": "proj-1"})
+    plane_mcp.resolver._GLOBAL_WORK_ITEM_CACHE["test-workspace"].update({"ENG-1": "ticket-1", "ENG-2": "ticket-2"})
+    plane_mcp.resolver._CACHE_LAST_UPDATED["test-workspace"]["projects"] = time.time()
+    plane_mcp.resolver._CACHE_LAST_UPDATED["test-workspace"]["work_items"] = time.time()
     return res
 
 @patch('plane_mcp.journey.tools.create_update.get_plane_client_context')
@@ -91,8 +91,8 @@ def test_begin_work_batch(mock_get_context, resolver, mock_client):
     mock_client.cycles.create.return_value = new_cycle
     
     # Pre-populate state cache for "In Progress"
-    plane_mcp.resolver._GLOBAL_STATE_CACHE.update({"proj-1": {"in progress": "state-ip"}})
-    plane_mcp.resolver._CACHE_LAST_UPDATED["states"] = time.time()
+    plane_mcp.resolver._GLOBAL_STATE_CACHE.setdefault("test-workspace", {}).update({"proj-1": {"in progress": "state-ip"}})
+    plane_mcp.resolver._CACHE_LAST_UPDATED.setdefault("test-workspace", {})["states"] = time.time()
     
     journey = WorkflowJourney(resolver)
     

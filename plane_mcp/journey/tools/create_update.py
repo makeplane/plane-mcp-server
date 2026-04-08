@@ -111,15 +111,25 @@ class CreateUpdateJourney(JourneyBase):
             data=data
         )
         
+        key = f"{project_slug}-{new_ticket.sequence_id}"
+
         if cycle_id and new_ticket.id:
-            client.cycles.add_work_items(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                cycle_id=cycle_id,
-                issue_ids=[new_ticket.id]
-            )
-            
-        return {"key": f"{project_slug}-{new_ticket.sequence_id}"}
+            try:
+                client.cycles.add_work_items(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    cycle_id=cycle_id,
+                    issue_ids=[new_ticket.id]
+                )
+            except Exception as e:
+                logger.warning("Created %s but failed to add it to cycle %s: %s", key, cycle_id, e)
+                return {
+                    "key": key,
+                    "status": "warning",
+                    "message": "Ticket created successfully, but adding it to the cycle failed. The ticket exists.",
+                }
+
+        return {"key": key}
 
     def update_ticket(
         self,

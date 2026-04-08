@@ -9,6 +9,4 @@ def clear_resolver_caches():
     plane_mcp.resolver._GLOBAL_PROJECT_CACHE.clear()
     plane_mcp.resolver._GLOBAL_STATE_CACHE.clear()
     plane_mcp.resolver._GLOBAL_WORK_ITEM_CACHE.clear()
-    plane_mcp.resolver._CACHE_LAST_UPDATED["projects"] = 0.0
-    plane_mcp.resolver._CACHE_LAST_UPDATED["states"] = 0.0
-    plane_mcp.resolver._CACHE_LAST_UPDATED["work_items"] = 0.0
+    plane_mcp.resolver._CACHE_LAST_UPDATED.clear()

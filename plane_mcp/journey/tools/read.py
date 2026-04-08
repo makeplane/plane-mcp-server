@@ -34,8 +34,11 @@ class ReadJourney(JourneyBase):
 
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()
-        
-        per_page = min(limit, 100)
+
+        if limit <= 0:
+            return {"results": [], "next_cursor": None, "prev_cursor": None}
+        limit = min(limit, 100)
+        per_page = limit
         query_params = {
             "per_page": per_page,
             "expand": "assignees,labels,state",
@@ -97,8 +100,6 @@ class ReadJourney(JourneyBase):
         max_pages_to_fetch = 5
         pages_fetched = 0
 
-        if limit <= 0:
-            return {"results": [], "next_cursor": None, "prev_cursor": None}
 
         # Loop to pull pages and deep-search until we hit the requested limit or run out of pages
         while len(matched_results) < limit and pages_fetched < max_pages_to_fetch:
@@ -133,7 +134,7 @@ class ReadJourney(JourneyBase):
         except ValueError:
             profile = LODProfile.STANDARD
             
-        transformed_results = self.apply_lod(matched_results, profile=profile, project_identifier=project_slug)
+        transformed_results = self.apply_lod(matched_results[:limit], profile=profile, project_identifier=project_slug)
         
         result = {
             "results": transformed_results,

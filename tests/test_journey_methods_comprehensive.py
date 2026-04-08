@@ -447,7 +447,9 @@ def test_search_tickets_unknown_label_returns_warning(mock_get_context, resolver
     journey = ReadJourney(resolver)
 
     # Only 'bug' exists; 'phantom' does not
-    existing_label = MagicMock(); existing_label.name = "bug"; existing_label.id = "lbl-1"
+    existing_label = MagicMock()
+    existing_label.name = "bug"
+    existing_label.id = "lbl-1"
     mock_client.labels.list.return_value = MagicMock(results=[existing_label])
 
     mock_client.work_items._get.return_value = {

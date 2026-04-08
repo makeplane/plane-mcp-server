@@ -15,8 +15,13 @@ from plane_mcp.resolver import EntityResolver
 from plane_mcp.journey.tools.read import ReadJourney
 
 
+pytestmark = pytest.mark.e2e
+
+
 @pytest.fixture
 def e2e_journey():
+    if not (os.getenv("PLANE_API_KEY") and os.getenv("PLANE_WORKSPACE_SLUG")):
+        pytest.skip("E2E test requires PLANE_API_KEY and PLANE_WORKSPACE_SLUG env vars")
     client, workspace_slug = get_plane_client_context()
     resolver = EntityResolver(client, workspace_slug)
     return ReadJourney(resolver)

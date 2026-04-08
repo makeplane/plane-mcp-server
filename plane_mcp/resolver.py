@@ -14,11 +14,13 @@ class EntityResolutionError(ValueError):
         self.available_options = available_options or []
 
 
-# Global caches to prevent N+1 queries across tool invocations in the same process
-_GLOBAL_PROJECT_CACHE: dict[str, str] = {}
-_GLOBAL_STATE_CACHE: dict[str, dict[str, str]] = {}
-_GLOBAL_WORK_ITEM_CACHE: dict[str, str] = {}
-_CACHE_LAST_UPDATED: dict[str, float] = {"projects": 0.0, "states": 0.0, "work_items": 0.0}
+# Global caches keyed by workspace_slug to prevent cross-workspace UUID pollution
+# Structure: {workspace_slug: {identifier: uuid}}
+_GLOBAL_PROJECT_CACHE: dict[str, dict[str, str]] = {}
+_GLOBAL_STATE_CACHE: dict[str, dict[str, dict[str, str]]] = {}
+_GLOBAL_WORK_ITEM_CACHE: dict[str, dict[str, str]] = {}
+# Per-workspace timestamps: {workspace_slug: {"projects": float, "states": float, "work_items": float}}
+_CACHE_LAST_UPDATED: dict[str, dict[str, float]] = {}
 _CACHE_TTL_SECONDS = 300  # 5 minutes
 
 class EntityResolver:
@@ -31,18 +33,24 @@ class EntityResolver:
     def __init__(self, client: PlaneClient, workspace_slug: str):
         self.client = client
         self.workspace_slug = workspace_slug
-        
-        # We now use the global caches
-        self._project_cache = _GLOBAL_PROJECT_CACHE
-        self._state_cache = _GLOBAL_STATE_CACHE
-        self._work_item_cache = _GLOBAL_WORK_ITEM_CACHE
+
+        # Ensure per-workspace cache buckets exist
+        _GLOBAL_PROJECT_CACHE.setdefault(workspace_slug, {})
+        _GLOBAL_STATE_CACHE.setdefault(workspace_slug, {})
+        _GLOBAL_WORK_ITEM_CACHE.setdefault(workspace_slug, {})
+        _CACHE_LAST_UPDATED.setdefault(workspace_slug, {"projects": 0.0, "states": 0.0, "work_items": 0.0})
+
+        self._project_cache = _GLOBAL_PROJECT_CACHE[workspace_slug]
+        self._state_cache = _GLOBAL_STATE_CACHE[workspace_slug]
+        self._work_item_cache = _GLOBAL_WORK_ITEM_CACHE[workspace_slug]
+        self._ts = _CACHE_LAST_UPDATED[workspace_slug]
 
     def resolve_project(self, identifier_or_slug: str) -> str:
         """
         Resolve a project identifier (e.g. 'ENG') or slug to its UUID.
         """
         key = identifier_or_slug.upper()
-        if key in self._project_cache and (time.time() - _CACHE_LAST_UPDATED["projects"] < _CACHE_TTL_SECONDS):
+        if key in self._project_cache and (time.time() - self._ts["projects"] < _CACHE_TTL_SECONDS):
             return self._project_cache[key]
 
         # Fetch all projects to cache and find
@@ -59,7 +67,7 @@ class EntityResolver:
                 if hasattr(p, 'slug') and p.slug:
                     self._project_cache[p.slug.upper()] = p.id
 
-            _CACHE_LAST_UPDATED["projects"] = time.time()
+            self._ts["projects"] = time.time()
 
             if key in self._project_cache:
                 return self._project_cache[key]
@@ -73,6 +81,7 @@ class EntityResolver:
                 raise
             raise RuntimeError(f"Failed to fetch projects: {e!s}") from e
 
+
     def resolve_state(self, project_identifier: str, state_name: str) -> str:
         """
         Resolve a state name (e.g. 'In Progress') to its UUID for a specific project.
@@ -80,7 +89,7 @@ class EntityResolver:
         project_id = self.resolve_project(project_identifier)
         key = state_name.lower()
 
-        if project_id in self._state_cache and key in self._state_cache[project_id] and (time.time() - _CACHE_LAST_UPDATED["states"] < _CACHE_TTL_SECONDS):
+        if project_id in self._state_cache and key in self._state_cache[project_id] and (time.time() - self._ts["states"] < _CACHE_TTL_SECONDS):
             return self._state_cache[project_id][key]
 
         try:
@@ -98,7 +107,7 @@ class EntityResolver:
                 self._state_cache[project_id][s.name.lower()] = s.id
                 available.append(s.name)
 
-            _CACHE_LAST_UPDATED["states"] = time.time()
+            self._ts["states"] = time.time()
 
             if key in self._state_cache[project_id]:
                 return self._state_cache[project_id][key]
@@ -117,7 +126,7 @@ class EntityResolver:
         Resolve a ticket ID (e.g. 'ENG-123') to its work_item UUID.
         """
         key = ticket_id.upper()
-        if key in self._work_item_cache and (time.time() - _CACHE_LAST_UPDATED["work_items"] < _CACHE_TTL_SECONDS):
+        if key in self._work_item_cache and (time.time() - self._ts["work_items"] < _CACHE_TTL_SECONDS):
             return self._work_item_cache[key]
         
         parts = key.split('-')
@@ -144,7 +153,7 @@ class EntityResolver:
                 raise EntityResolutionError(f"Ticket '{ticket_id}' not found.")
                 
             self._work_item_cache[key] = work_item_id
-            _CACHE_LAST_UPDATED["work_items"] = time.time()
+            self._ts["work_items"] = time.time()
             return work_item_id
         except HttpError as e:
             if getattr(e, "status_code", None) == 404:

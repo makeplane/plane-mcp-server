@@ -5,9 +5,17 @@ import tempfile
 import logging
 
 def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:    
+    from plane_mcp.client import get_plane_client_context
+    try:
+        ctx = get_plane_client_context()
+        ws = ctx.workspace_slug or "default"
+    except Exception:
+        ws = "default"
+    # Sanitize slug for use as a filename component
+    safe_ws = "".join(c if c.isalnum() or c in "-_" else "_" for c in ws)
     cache_dir = os.path.join(tempfile.gettempdir(), "plane_mcp")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, "workspace_context_cache.json")
+    cache_file = os.path.join(cache_dir, f"workspace_{safe_ws}_context_cache.json")
     
     context = {}
     if os.path.exists(cache_file):
@@ -20,8 +28,6 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
                 
     if not context:
         try:
-            from plane_mcp.client import get_plane_client_context
-            ctx = get_plane_client_context()
             if ctx.client and ctx.workspace_slug:
                 response = ctx.client.projects.list(workspace_slug=ctx.workspace_slug)
                 
