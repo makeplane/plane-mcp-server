@@ -28,9 +28,18 @@ class ReadJourney(JourneyBase):
         if project_slug.lower() == 'help':
             from plane_mcp.journey.cache import get_cached_workspace_context
             opts = get_cached_workspace_context(0).copy()
-            opts.pop("all_states", None)
-            opts.pop("all_labels", None)
-            return {"status": "help", "message": "Here are the valid options for this workspace.", "options": opts}
+            llm_content = {"projects": opts.get("projects", []), "priorities": opts.get("priorities", [])}
+            display_lines = []
+            for p in llm_content.get("projects", []):
+                slug = p.get("project_slug", "UNKNOWN")
+                desc = p.get("description", "").strip() or p.get("name", "")
+                display_lines.append(f"{slug} - {desc}")
+            display_str = "\n".join(display_lines) if display_lines else "No projects found."
+            
+            return {
+                "llmContent": llm_content,
+                "returnDisplay": display_str
+            }
 
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()
@@ -214,7 +223,39 @@ def register_read_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = ReadJourney(resolver)
-        return journey.search_tickets(project_slug, query, labels, priority, states, assignees, limit, cursor, lod)
+        raw_data = journey.search_tickets(project_slug, query, labels, priority, states, assignees, limit, cursor, lod)
+        
+        if project_slug.lower() == 'help':
+            return raw_data
+            
+        import re
+        def strip_html_markdown(text: str) -> str:
+            if not text:
+                return ""
+            text = re.sub(r'<[^>]+>', '', text)
+            return " ".join(text.split())
+
+        formatted_str = []
+        for item in raw_data.get("results", []):
+            slug = item.get("ticket_id", item.get("key", "UNKNOWN"))
+            title = item.get("name", "Untitled")
+            desc = item.get("description", "")
+            
+            clean_desc = strip_html_markdown(desc)
+            if len(clean_desc) > 80:
+                snippet = clean_desc[:80] + "..."
+            else:
+                snippet = clean_desc
+            
+            if snippet:
+                formatted_str.append(f"{slug} {title}\n{snippet}")
+            else:
+                formatted_str.append(f"{slug} {title}")
+
+        return {
+            "llmContent": raw_data,
+            "returnDisplay": "\n\n".join(formatted_str)
+        }
 
     search_tickets.__doc__ = """
         Search for issues. You can use standard filters or a text query.
@@ -238,13 +279,35 @@ def register_read_tools(mcp: FastMCP) -> None:
     def read_ticket(ticket_id: str, lod: Literal["summary", "standard", "full"] = "standard", comments: bool = False) -> dict:
         """
         Read the details of a single ticket.
-        
+
         Args:
             ticket_id: The globally unique, human-readable identifier (e.g., ENG-123). The system automatically resolves the project and issue routing from this prefix.
-            lod: Level of Detail profile ("summary", "standard", or "full"). Default is "standard".
+            lod: Level of Detail profile ("summary", "standard", "full"). Default is "standard".
             comments: If true, fetches and appends the ticket's comments to the result.
         """
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = ReadJourney(resolver)
-        return journey.read_ticket(ticket_id, lod, comments)
+        raw_data = journey.read_ticket(ticket_id, lod, comments)
+
+        import re
+        def clean_description_for_read(text: str) -> str:
+            if not text:
+                return ""
+            # Only strip HTML tags, preserve newlines and Markdown
+            return re.sub(r'<[^>]+>', '', text).strip()
+
+        slug = raw_data.get("ticket_id", raw_data.get("key", ticket_id))
+        title = raw_data.get("name", "Untitled")
+        desc = raw_data.get("description", "")
+
+        clean_desc = clean_description_for_read(desc)
+
+        returnDisplay = f"{slug} {title}\n\n{clean_desc}"
+        if "comments" in raw_data:
+            returnDisplay += "\n\nComments:\n" + raw_data["comments"]
+
+        return {
+            "llmContent": raw_data,
+            "returnDisplay": returnDisplay.strip()
+        }

@@ -37,33 +37,33 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
                 labels_by_project = {}
                 
                 for p in response.results:
-                    projects.append({
-                        "identifier": p.identifier, 
-                        "name": p.name, 
-                        "description": getattr(p, "description", "")
-                    })
+                    proj_dict = {
+                        "project_slug": p.identifier,
+                        "name": p.name,
+                        "description": getattr(p, "description", "") or ""
+                    }
                     try:
                         s_res = ctx.client.states.list(workspace_slug=ctx.workspace_slug, project_id=p.id)
-                        states_by_project[p.identifier] = [s.name for s in s_res.results if s.name]
+                        proj_dict["states"] = [s.name for s in s_res.results if s.name]
                     except Exception:
-                        states_by_project[p.identifier] = []
+                        proj_dict["states"] = []
                         
                     try:
                         label_res = ctx.client.labels.list(workspace_slug=ctx.workspace_slug, project_id=p.id)
-                        labels_by_project[p.identifier] = [label.name for label in label_res.results if label.name]
+                        proj_dict["labels"] = [label.name for label in label_res.results if label.name]
                     except Exception:
-                        labels_by_project[p.identifier] = []
+                        proj_dict["labels"] = []
+                        
+                    projects.append(proj_dict)
                 
-                all_states = sorted({s for ss in states_by_project.values() for s in ss})
-                all_labels = sorted({label for label_list in labels_by_project.values() for label in label_list})
+                all_states = sorted({s for p in projects for s in p.get("states", [])})
+                all_labels = sorted({label for p in projects for label in p.get("labels", [])})
                 
                 context = {
                     "projects": projects,
-                    "states_by_project": states_by_project,
-                    "labels_by_project": labels_by_project,
+                    "priorities": ["urgent", "high", "medium", "low", "none"],
                     "all_states": all_states,
-                    "all_labels": all_labels,
-                    "priorities": ["urgent", "high", "medium", "low", "none"]
+                    "all_labels": all_labels
                 }
                 
                 with open(cache_file, "w") as f:

@@ -86,7 +86,20 @@ class CreateUpdateJourney(JourneyBase):
         
         if project_slug.lower() == 'help':
             from plane_mcp.journey.cache import get_cached_workspace_context
-            return {"status": "help", "message": "Here are the valid options for this workspace.", "options": get_cached_workspace_context(0)}
+            ctx = get_cached_workspace_context(0)
+            llm_content = {"projects": ctx.get("projects", []), "priorities": ctx.get("priorities", [])}
+            display_lines = []
+            for p in llm_content.get("projects", []):
+                slug = p.get("project_slug", "UNKNOWN")
+                desc = p.get("description", "").strip() or p.get("name", "")
+                # Format exactly as requested: PROJECT_SLUG - Description
+                display_lines.append(f"{slug} - {desc}")
+            display_str = "\n".join(display_lines) if display_lines else "No projects found."
+            
+            return {
+                "llmContent": llm_content,
+                "returnDisplay": display_str
+            }
 
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()
@@ -231,7 +244,16 @@ def register_create_update_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = CreateUpdateJourney(resolver)
-        return journey.create_ticket(title=title, project_slug=project_slug, description=description, state_name=state_name, labels=labels, cycle_name=cycle_name)
+        raw_data = journey.create_ticket(title=title, project_slug=project_slug, description=description, state_name=state_name, labels=labels, cycle_name=cycle_name)
+        
+        if project_slug.lower() == 'help':
+            return raw_data
+            
+        ticket_key = raw_data.get("key", "UNKNOWN")
+        return {
+            "llmContent": raw_data,
+            "returnDisplay": f"✅ Ticket {ticket_key} created successfully."
+        }
 
     create_ticket.__doc__ = """
         Create a new ticket with automatic resolution of labels and cycles.
@@ -274,4 +296,21 @@ def register_create_update_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = CreateUpdateJourney(resolver)
-        return journey.update_ticket(ticket_id, new_title, append_text, append_after_snippet, replace_text, replace_target_snippet, comment)
+        raw_data = journey.update_ticket(ticket_id, new_title, append_text, append_after_snippet, replace_text, replace_target_snippet, comment)
+        
+        if raw_data.get("status") == "error":
+            return {
+                "llmContent": raw_data,
+                "returnDisplay": f"❌ Error: {raw_data.get('message')}"
+            }
+            
+        if raw_data.get("status") == "warning":
+            return {
+                "llmContent": raw_data,
+                "returnDisplay": f"⚠️ {raw_data.get('message')}"
+            }
+            
+        return {
+            "llmContent": raw_data,
+            "returnDisplay": f"✅ Ticket {ticket_id} updated successfully."
+        }
