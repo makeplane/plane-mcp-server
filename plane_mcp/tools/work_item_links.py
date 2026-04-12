@@ -1,11 +1,8 @@
 """Work item link-related tools for Plane MCP Server."""
 
-from typing import Any
-
 from fastmcp import FastMCP
 from plane.models.work_items import (
     CreateWorkItemLink,
-    PaginatedWorkItemLinkResponse,
     UpdateWorkItemLink,
     WorkItemLink,
 )
@@ -15,57 +12,6 @@ from plane_mcp.client import get_plane_client_context
 
 def register_work_item_link_tools(mcp: FastMCP) -> None:
     """Register all work item link-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_work_item_links(
-        project_id: str,
-        work_item_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[WorkItemLink]:
-        """
-        List links for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of WorkItemLink objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedWorkItemLinkResponse = client.work_items.links.list(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-            params=params,
-        )
-        return response.results
-
-    @mcp.tool()
-    def retrieve_work_item_link(
-        project_id: str,
-        work_item_id: str,
-        link_id: str,
-    ) -> WorkItemLink:
-        """
-        Retrieve a specific link for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            link_id: UUID of the link
-
-        Returns:
-            WorkItemLink object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.work_items.links.retrieve(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-            link_id=link_id,
-        )
 
     @mcp.tool()
     def create_work_item_link(

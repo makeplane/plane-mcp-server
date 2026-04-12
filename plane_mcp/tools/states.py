@@ -1,12 +1,11 @@
 """State-related tools for Plane MCP Server."""
 
-from typing import Any, get_args
+from typing import get_args
 
 from fastmcp import FastMCP
 from plane.models.enums import GroupEnum
 from plane.models.states import (
     CreateState,
-    PaginatedStateResponse,
     State,
     UpdateState,
 )
@@ -16,27 +15,6 @@ from plane_mcp.client import get_plane_client_context
 
 def register_state_tools(mcp: FastMCP) -> None:
     """Register all state-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_states(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[State]:
-        """
-        List all states in a project.
-
-        Args:
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of State objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedStateResponse = client.states.list(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
-        return response.results
 
     @mcp.tool()
     def create_state(
@@ -89,21 +67,6 @@ def register_state_tools(mcp: FastMCP) -> None:
         )
 
         return client.states.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
-
-    @mcp.tool()
-    def retrieve_state(project_id: str, state_id: str) -> State:
-        """
-        Retrieve a state by ID.
-
-        Args:
-            project_id: UUID of the project
-            state_id: UUID of the state
-
-        Returns:
-            State object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.states.retrieve(workspace_slug=workspace_slug, project_id=project_id, state_id=state_id)
 
     @mcp.tool()
     def update_state(

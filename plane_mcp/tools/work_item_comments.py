@@ -6,7 +6,6 @@ from fastmcp import FastMCP
 from plane.models.enums import AccessEnum
 from plane.models.work_items import (
     CreateWorkItemComment,
-    PaginatedWorkItemCommentResponse,
     UpdateWorkItemComment,
     WorkItemComment,
 )
@@ -16,57 +15,6 @@ from plane_mcp.client import get_plane_client_context
 
 def register_work_item_comment_tools(mcp: FastMCP) -> None:
     """Register all work item comment-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_work_item_comments(
-        project_id: str,
-        work_item_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[WorkItemComment]:
-        """
-        List comments for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of WorkItemComment objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedWorkItemCommentResponse = client.work_items.comments.list(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-            params=params,
-        )
-        return response.results
-
-    @mcp.tool()
-    def retrieve_work_item_comment(
-        project_id: str,
-        work_item_id: str,
-        comment_id: str,
-    ) -> WorkItemComment:
-        """
-        Retrieve a specific comment for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            comment_id: UUID of the comment
-
-        Returns:
-            WorkItemComment object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.work_items.comments.retrieve(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-            comment_id=comment_id,
-        )
 
     @mcp.tool()
     def create_work_item_comment(

@@ -19,6 +19,7 @@ from plane_mcp.tools.work_item_links import register_work_item_link_tools
 from plane_mcp.tools.work_item_properties import register_work_item_property_tools
 from plane_mcp.tools.work_item_relations import register_work_item_relation_tools
 from plane_mcp.tools.work_item_types import register_work_item_type_tools
+from plane_mcp.tools.unified import register_unified_tools
 from plane_mcp.tools.work_items import register_work_item_tools
 from plane_mcp.tools.work_logs import register_work_log_tools
 from plane_mcp.tools.workspaces import register_workspace_tools
@@ -26,6 +27,7 @@ from plane_mcp.tools.workspaces import register_workspace_tools
 
 def register_tools(mcp: FastMCP) -> None:
     """Register all tools with the MCP server."""
+    register_unified_tools(mcp)
     register_project_tools(mcp)
     register_work_item_tools(mcp)
     register_work_item_activity_tools(mcp)
