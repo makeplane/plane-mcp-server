@@ -20,15 +20,15 @@ def register_work_log_tools(mcp: FastMCP) -> None:
     ) -> WorkItemWorkLog:
         """
         Create a work log for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            duration: Duration of work in minutes
-            description: Description of the work performed
-
+        
+        Parameters:
+            project_id (str): UUID of the project.
+            work_item_id (str): UUID of the work item.
+            duration (int | None): Duration of work in minutes; include when known.
+            description (str | None): Human-readable description of the work.
+        
         Returns:
-            Created WorkItemWorkLog object
+            WorkItemWorkLog: The created work log object.
         """
         client, workspace_slug = get_plane_client_context()
 

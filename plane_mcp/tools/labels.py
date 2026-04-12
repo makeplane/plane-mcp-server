@@ -67,21 +67,21 @@ def register_label_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> Label:
         """
-        Update a label by ID.
-
-        Args:
-            project_id: UUID of the project
-            label_id: UUID of the label
-            name: Label name
-            color: Label color (hex color code)
-            description: Label description
-            parent: UUID of the parent label (for nested labels)
-            sort_order: Sort order for the label
-            external_source: External system source name
-            external_id: External system identifier
-
+        Update an existing label in the specified project.
+        
+        Parameters:
+            project_id: UUID of the project containing the label.
+            label_id: UUID of the label to update.
+            name: New label name, if provided.
+            color: Hex color code for the label, if provided.
+            description: New description for the label, if provided.
+            parent: UUID of the parent label for nesting, if provided.
+            sort_order: Numeric sort order for label positioning, if provided.
+            external_source: Name of the external system source, if provided.
+            external_id: Identifier from the external system, if provided.
+        
         Returns:
-            Updated Label object
+            Label representing the updated label.
         """
         client, workspace_slug = get_plane_client_context()
 

@@ -26,7 +26,14 @@ from plane_mcp.tools.workspaces import register_workspace_tools
 
 
 def register_tools(mcp: FastMCP) -> None:
-    """Register all tools with the MCP server."""
+    """
+    Register all Plane MCP tools onto the provided MCP server.
+    
+    Registers each feature-specific toolset (unified, project, work items, work item activity, work item comments, work item links, work item relations, work logs, cycles, users, modules, initiatives, intake, labels, pages, work item properties, work item types, states, workspaces, epics, and milestones) in a fixed sequence. Exceptions raised by individual registration functions are not caught and will propagate.
+    
+    Parameters:
+        mcp (FastMCP): The MCP server instance on which to register all tools.
+    """
     register_unified_tools(mcp)
     register_project_tools(mcp)
     register_work_item_tools(mcp)

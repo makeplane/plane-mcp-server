@@ -12,10 +12,10 @@ def register_workspace_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def get_workspace_features() -> WorkspaceFeature:
         """
-        Get features of the current workspace.
-
+        Fetches the current workspace's feature flags.
+        
         Returns:
-            WorkspaceFeature object containing feature flags
+            WorkspaceFeature: The workspace's feature flags.
         """
         client, workspace_slug = get_plane_client_context()
         return client.workspaces.get_features(workspace_slug=workspace_slug)

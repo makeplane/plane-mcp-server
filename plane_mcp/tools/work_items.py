@@ -60,7 +60,31 @@ def _build_advanced_search_filters(
 
 
 def register_work_item_tools(mcp: FastMCP) -> None:
-    """Register all work item-related tools with the MCP server."""
+    """
+    Create a new work item in a project.
+    
+    If `priority` is not one of the allowed PriorityEnum literal values it will be ignored (treated as unset).
+    
+    Returns:
+        Created WorkItem object
+    """
+    """
+    Update fields of an existing work item.
+    
+    If `priority` is not one of the allowed PriorityEnum literal values it will be ignored (treated as unset).
+    
+    Returns:
+        Updated WorkItem object
+    """
+    """
+    Delete a work item by ID.
+    """
+    """
+    Search work items across the current workspace using a free-form text `query` that matches fields like name and description.
+    
+    Returns:
+        WorkItemSearch object containing matching work items and related metadata
+    """
 
     @mcp.tool()
     def create_work_item(
@@ -85,32 +109,31 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         type: str | None = None,
     ) -> WorkItem:
         """
-        Create a new work item.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            name: Work item name (required)
-            assignees: List of user IDs to assign to the work item
-            labels: List of label IDs to attach to the work item
-            type_id: UUID of the work item type
-            point: Story point value
-            description_html: HTML description of the work item
-            description_stripped: Plain text description (stripped of HTML)
-            priority: Priority level (urgent, high, medium, low, none)
-            start_date: Start date (ISO 8601 format)
-            target_date: Target/end date (ISO 8601 format)
-            sort_order: Sort order value
-            is_draft: Whether the work item is a draft
-            external_source: External system source name
-            external_id: External system identifier
-            parent: UUID of the parent work item
-            state: UUID of the state
-            estimate_point: Estimate point value
-            type: Work item type identifier
-
+        Create a new work item in the specified project.
+        
+        Parameters:
+            project_id (str): UUID of the project.
+            name (str): Title of the work item.
+            assignees (list[str] | None): List of user IDs to assign to the work item.
+            labels (list[str] | None): List of label IDs to attach to the work item.
+            type_id (str | None): UUID of the work item type.
+            point (int | None): Story point value.
+            description_html (str | None): HTML description of the work item.
+            description_stripped (str | None): Plain-text description.
+            priority (str | None): Priority level; if not one of the allowed PriorityEnum values, the priority will be ignored.
+            start_date (str | None): Start date in ISO 8601 format.
+            target_date (str | None): Target/end date in ISO 8601 format.
+            sort_order (float | None): Sort order value.
+            is_draft (bool | None): Whether the work item is a draft.
+            external_source (str | None): External system source name.
+            external_id (str | None): External system identifier.
+            parent (str | None): UUID of the parent work item.
+            state (str | None): UUID of the state.
+            estimate_point (str | None): Estimate point value.
+            type (str | None): Work item type identifier.
+        
         Returns:
-            Created WorkItem object
+            WorkItem: The created work item.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -166,33 +189,18 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         type: str | None = None,
     ) -> WorkItem:
         """
-        Update a work item by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            name: Work item name
-            assignees: List of user IDs to assign to the work item
-            labels: List of label IDs to attach to the work item
-            type_id: UUID of the work item type
-            point: Story point value
-            description_html: HTML description of the work item
-            description_stripped: Plain text description (stripped of HTML)
-            priority: Priority level (urgent, high, medium, low, none)
-            start_date: Start date (ISO 8601 format)
-            target_date: Target/end date (ISO 8601 format)
-            sort_order: Sort order value
-            is_draft: Whether the work item is a draft
-            external_source: External system source name
-            external_id: External system identifier
-            parent: UUID of the parent work item
-            state: UUID of the state
-            estimate_point: Estimate point value
-            type: Work item type identifier
-
+        Update fields of an existing work item.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the work item.
+            work_item_id (str): UUID of the work item to update.
+            priority (str | None): Priority level, e.g. "urgent", "high", "medium", "low", "none".
+            start_date (str | None): Start date in ISO 8601 format.
+            target_date (str | None): Target/end date in ISO 8601 format.
+            parent (str | None): UUID of the parent work item, if any.
+        
         Returns:
-            Updated WorkItem object
+            WorkItem: The updated work item object.
         """
         client, workspace_slug = get_plane_client_context()
 

@@ -14,7 +14,42 @@ from plane_mcp.client import get_plane_client_context
 
 
 def register_state_tools(mcp: FastMCP) -> None:
-    """Register all state-related tools with the MCP server."""
+    """
+    Register state-related MCP tools on the provided FastMCP instance.
+    """
+    """
+    Create a new state in the specified project.
+    
+    Parameters:
+        group (str | None): Optional state group; expected values include "backlog", "unstarted", "started", "completed", "cancelled".
+        description (str | None): Optional human-readable description.
+        sequence (float | None): Optional ordering value for the state.
+        is_triage (bool | None): Optional flag indicating a triage state.
+        default (bool | None): Optional flag indicating the default state.
+        external_source (str | None): Optional external system source name.
+        external_id (str | None): Optional external system identifier.
+    
+    Returns:
+        State: The created State object.
+    """
+    """
+    Update an existing state by ID in the specified project.
+    
+    Parameters:
+        group (str | None): Optional state group; expected values include "backlog", "unstarted", "started", "completed", "cancelled".
+        description (str | None): Optional human-readable description.
+        sequence (float | None): Optional ordering value for the state.
+        is_triage (bool | None): Optional flag indicating a triage state.
+        default (bool | None): Optional flag indicating the default state.
+        external_source (str | None): Optional external system source name.
+        external_id (str | None): Optional external system identifier.
+    
+    Returns:
+        State: The updated State object.
+    """
+    """
+    Delete a state by ID from the specified project.
+    """
 
     @mcp.tool()
     def create_state(
@@ -30,22 +65,22 @@ def register_state_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> State:
         """
-        Create a new state.
-
-        Args:
-            project_id: UUID of the project
-            name: State name
-            color: State color (hex color code)
-            description: State description
-            sequence: State sequence order
-            group: State group (e.g., backlog, unstarted, started, completed, cancelled)
-            is_triage: Whether this is a triage state
-            default: Whether this is the default state
-            external_source: External system source name
-            external_id: External system identifier
-
+        Create a new state in the specified project.
+        
+        Parameters:
+            project_id (str): Project identifier.
+            name (str): State name.
+            color (str): State color (hex code).
+            description (str | None): Optional state description.
+            sequence (float | None): Optional ordering position for the state.
+            group (str | None): Optional group category; one of "backlog", "unstarted", "started", "completed", "cancelled".
+            is_triage (bool | None): Whether the state is a triage state.
+            default (bool | None): Whether the state is the project's default.
+            external_source (str | None): Optional external system name.
+            external_id (str | None): Optional identifier in the external system.
+        
         Returns:
-            Created State object
+            State: The created State object.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -83,23 +118,15 @@ def register_state_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> State:
         """
-        Update a state by ID.
-
-        Args:
-            project_id: UUID of the project
-            state_id: UUID of the state
-            name: State name
-            color: State color (hex color code)
-            description: State description
-            sequence: State sequence order
-            group: State group (e.g., backlog, unstarted, started, completed, cancelled)
-            is_triage: Whether this is a triage state
-            default: Whether this is the default state
-            external_source: External system source name
-            external_id: External system identifier
-
+        Update a state by its identifier.
+        
+        If `group` is provided, it is validated against the allowed GroupEnum literal values; an invalid value will be ignored.
+        
+        Parameters:
+            group (str | None): Optional state group (e.g., "backlog", "unstarted", "started", "completed", "cancelled"). If not one of the allowed literals, the group is not applied.
+        
         Returns:
-            Updated State object
+            State: The updated State object.
         """
         client, workspace_slug = get_plane_client_context()
 

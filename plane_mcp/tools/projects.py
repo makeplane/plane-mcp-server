@@ -16,7 +16,104 @@ from plane_mcp.client import get_plane_client_context
 
 
 def register_project_tools(mcp: FastMCP) -> None:
-    """Register all project-related tools with the MCP server."""
+    """
+    Create a new project in the current workspace.
+    
+    Parameters:
+        name: Project name.
+        identifier: Project identifier (short string like "MP").
+        description: Project description.
+        project_lead: UUID of the project lead user.
+        default_assignee: UUID of the default assignee user.
+        emoji: Emoji for the project.
+        cover_image: Cover image URL or asset ID.
+        module_view: Enable module view.
+        cycle_view: Enable cycle view.
+        issue_views_view: Enable issue views.
+        page_view: Enable page view.
+        intake_view: Enable intake view.
+        guest_view_all_features: Allow guests to view all features.
+        archive_in: Days until auto-archive.
+        close_in: Days until auto-close.
+        timezone: Timezone string; must match an allowed TimezoneEnum literal or it will be ignored.
+        external_source: External system source name.
+        external_id: External system identifier.
+        is_issue_type_enabled: Enable issue types.
+    
+    Returns:
+        Created Project object.
+    """
+    """
+    Update an existing project by ID in the current workspace.
+    
+    Parameters:
+        project_id: UUID of the project to update.
+        name: New project name.
+        description: New project description.
+        project_lead: UUID of the project lead user.
+        default_assignee: UUID of the default assignee user.
+        identifier: New project identifier.
+        emoji: Emoji for the project.
+        cover_image: Cover image URL or asset ID.
+        module_view: Enable/disable module view.
+        cycle_view: Enable/disable cycle view.
+        issue_views_view: Enable/disable issue views.
+        page_view: Enable/disable page view.
+        intake_view: Enable/disable intake view.
+        guest_view_all_features: Allow guests to view all features.
+        archive_in: Days until auto-archive.
+        close_in: Days until auto-close.
+        timezone: Timezone string; must match an allowed TimezoneEnum literal or it will be ignored.
+        external_source: External system source name.
+        external_id: External system identifier.
+        is_issue_type_enabled: Enable issue types.
+        is_time_tracking_enabled: Enable time tracking.
+        default_state: UUID of the default state.
+        estimate: Estimate configuration.
+    
+    Returns:
+        Updated Project object.
+    """
+    """
+    Delete a project by ID from the current workspace.
+    
+    Parameters:
+        project_id: UUID of the project to delete.
+    """
+    """
+    Retrieve a worklog summary for a project in the current workspace.
+    
+    Parameters:
+        project_id: UUID of the project.
+    
+    Returns:
+        List of ProjectWorklogSummary objects containing work item IDs and aggregated durations.
+    """
+    """
+    Retrieve the feature flags for a project in the current workspace.
+    
+    Parameters:
+        project_id: UUID of the project.
+    
+    Returns:
+        ProjectFeature object describing enabled and disabled features for the project.
+    """
+    """
+    Update feature flags for a project in the current workspace.
+    
+    Parameters:
+        project_id: UUID of the project.
+        epics: Enable/disable epics feature.
+        modules: Enable/disable modules feature.
+        cycles: Enable/disable cycles feature.
+        views: Enable/disable views feature.
+        pages: Enable/disable pages feature.
+        intakes: Enable/disable intakes feature.
+        work_item_types: Enable/disable work item types feature.
+    
+    Returns:
+        Updated ProjectFeature object.
+    """
 
     @mcp.tool()
     def create_project(
@@ -41,32 +138,31 @@ def register_project_tools(mcp: FastMCP) -> None:
         is_issue_type_enabled: bool | None = None,
     ) -> Project:
         """
-        Create a new project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            name: Project name
-            identifier: Project identifier (e.g., "MP" for "My Project")
-            description: Project description
-            project_lead: UUID of the project lead user
-            default_assignee: UUID of the default assignee user
-            emoji: Emoji for the project
-            cover_image: Cover image URL or asset ID
-            module_view: Enable module view
-            cycle_view: Enable cycle view
-            issue_views_view: Enable issue views view
-            page_view: Enable page view
-            intake_view: Enable intake view
-            guest_view_all_features: Allow guests to view all features
-            archive_in: Days until auto-archive
-            close_in: Days until auto-close
-            timezone: Project timezone
-            external_source: External system source name
-            external_id: External system identifier
-            is_issue_type_enabled: Enable issue types
-
+        Create a new Plane project in the current workspace.
+        
+        Parameters:
+            name: Project name.
+            identifier: Project identifier (e.g., "MP" for "My Project").
+            description: Project description.
+            project_lead: UUID of the project lead user.
+            default_assignee: UUID of the default assignee user.
+            emoji: Emoji for the project.
+            cover_image: Cover image URL or asset ID.
+            module_view: Enable module view.
+            cycle_view: Enable cycle view.
+            issue_views_view: Enable issue views view.
+            page_view: Enable page view.
+            intake_view: Enable intake view.
+            guest_view_all_features: Allow guests to view all features.
+            archive_in: Number of days until the project is auto-archived.
+            close_in: Number of days until the project is auto-closed.
+            timezone: Timezone identifier; if the value is not one of the allowed TimezoneEnum literals, it will be treated as `None`.
+            external_source: External system source name.
+            external_id: External system identifier.
+            is_issue_type_enabled: Enable issue types.
+        
         Returns:
-            Created Project object
+            Project: The created Project object.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -126,36 +222,16 @@ def register_project_tools(mcp: FastMCP) -> None:
         estimate: str | None = None,
     ) -> Project:
         """
-        Update a project by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            name: Project name
-            description: Project description
-            project_lead: UUID of the project lead user
-            default_assignee: UUID of the default assignee user
-            identifier: Project identifier
-            emoji: Emoji for the project
-            cover_image: Cover image URL or asset ID
-            module_view: Enable module view
-            cycle_view: Enable cycle view
-            issue_views_view: Enable issue views view
-            page_view: Enable page view
-            intake_view: Enable intake view
-            guest_view_all_features: Allow guests to view all features
-            archive_in: Days until auto-archive
-            close_in: Days until auto-close
-            timezone: Project timezone
-            external_source: External system source name
-            external_id: External system identifier
-            is_issue_type_enabled: Enable issue types
-            is_time_tracking_enabled: Enable time tracking
-            default_state: UUID of the default state
-            estimate: Estimate configuration
-
+        Update fields of an existing project identified by its ID.
+        
+        The provided `timezone` string is validated against allowed TimezoneEnum literal values; if it does not match, the timezone is cleared (set to `None`) in the update payload.
+        
+        Parameters:
+            project_id (str): UUID of the project to update.
+            timezone (str | None): Timezone identifier to set for the project; must match an allowed TimezoneEnum literal or it will be ignored.
+        
         Returns:
-            Updated Project object
+            Project: The updated Project object returned by the API.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -206,14 +282,13 @@ def register_project_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def get_project_worklog_summary(project_id: str) -> list[ProjectWorklogSummary]:
         """
-        Get work log summary for a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-
+        Retrieve aggregated worklog summaries for a project.
+        
+        Parameters:
+        	project_id (str): UUID of the project to summarize worklogs for.
+        
         Returns:
-            List of ProjectWorklogSummary objects containing work item IDs and durations
+        	list[ProjectWorklogSummary]: A list of ProjectWorklogSummary objects, each summarizing durations and associated work item identifiers.
         """
         client, workspace_slug = get_plane_client_context()
         return client.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
@@ -221,14 +296,13 @@ def register_project_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def get_project_features(project_id: str) -> ProjectFeature:
         """
-        Get features of a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-
+        Get the feature settings for a project.
+        
+        Parameters:
+            project_id (str): UUID of the project whose features will be retrieved.
+        
         Returns:
-            ProjectFeature object containing enabled/disabled features
+            ProjectFeature: The project's feature configuration, indicating which features are enabled.
         """
         client, workspace_slug = get_plane_client_context()
         return client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)

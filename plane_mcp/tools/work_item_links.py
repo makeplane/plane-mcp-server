@@ -21,14 +21,14 @@ def register_work_item_link_tools(mcp: FastMCP) -> None:
     ) -> WorkItemLink:
         """
         Create a link for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            url: URL of the link
-
+        
+        Parameters:
+            project_id (str): UUID of the project.
+            work_item_id (str): UUID of the work item.
+            url (str): Target URL for the link.
+        
         Returns:
-            Created WorkItemLink object
+            WorkItemLink: The created work item link.
         """
         client, workspace_slug = get_plane_client_context()
 

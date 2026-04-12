@@ -27,20 +27,20 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> WorkItemType:
         """
-        Create a new work item type.
-
-        Args:
-            project_id: UUID of the project
-            name: Work item type name
-            description: Work item type description
-            project_ids: List of project IDs this type applies to
-            is_epic: Whether this is an epic type
-            is_active: Whether the type is active
-            external_source: External system source name
-            external_id: External system identifier
-
+        Create a new work item type in the current workspace for the given project.
+        
+        Parameters:
+            project_id: Project UUID where the work item type will be created.
+            name: Name of the work item type.
+            description: Optional human-readable description.
+            project_ids: Optional list of project UUIDs this type applies to.
+            is_epic: Optional flag indicating whether the type represents an epic.
+            is_active: Optional flag indicating whether the type is active.
+            external_source: Optional name of an external system providing this type.
+            external_id: Optional identifier from the external system.
+        
         Returns:
-            Created WorkItemType object
+            WorkItemType: The newly created work item type.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -69,21 +69,24 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> WorkItemType:
         """
-        Update a work item type by ID.
-
-        Args:
-            project_id: UUID of the project
-            work_item_type_id: UUID of the work item type
-            name: Work item type name
-            description: Work item type description
-            project_ids: List of project IDs this type applies to
-            is_epic: Whether this is an epic type
-            is_active: Whether the type is active
-            external_source: External system source name
-            external_id: External system identifier
-
+        Updates a work item type identified by its ID in the current Plane workspace.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the work item type.
+            work_item_type_id (str): UUID of the work item type to update.
+            name (str | None): New name for the work item type.
+            description (str | None): New description for the work item type.
+            project_ids (list[str] | None): List of project UUIDs the type applies to.
+            is_epic (bool | None): Whether the type should be marked as an epic.
+            is_active (bool | None): Whether the type should be active.
+            external_source (str | None): External system source name.
+            external_id (str | None): External system identifier.
+        
         Returns:
-            Updated WorkItemType object
+            WorkItemType: The updated work item type.
+        
+        Notes:
+            Only parameters provided as non-None are applied; unspecified fields are left unchanged.
         """
         client, workspace_slug = get_plane_client_context()
 

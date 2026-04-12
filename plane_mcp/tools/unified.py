@@ -86,7 +86,16 @@ def _resolve_client_attr(client: Any, attr_path: str) -> Any:
 
 
 def register_unified_tools(mcp: FastMCP) -> None:
-    """Register unified list and retrieve tools with the MCP server."""
+    """
+    Register unified Plane entity list and retrieve tools on the provided MCP instance.
+    
+    This registers two MCP tools:
+    - `entity_list`: list collections of Plane entities by `entity_type`, enforcing required scope identifiers
+      (e.g., `project_id`, `cycle_id`, `module_id`, `milestone_id`, `work_item_id`, `type_id`) and accepting optional
+      query `params`. Returns a list of entity objects.
+    - `entity_retrieve`: retrieve a single Plane entity by `entity_id` (or by `project_identifier` + `issue_identifier`
+      for `work_item_by_identifier`), enforcing required scope identifiers depending on `entity_type`. Returns the entity object.
+    """
 
     @mcp.tool()
     def entity_list(

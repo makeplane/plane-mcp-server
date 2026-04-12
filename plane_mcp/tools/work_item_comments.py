@@ -28,18 +28,20 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
     ) -> WorkItemComment:
         """
         Create a comment for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            comment_html: Comment content in HTML format
-            comment_json: Comment content in JSON format
-            access: Access level for the comment (INTERNAL or EXTERNAL)
-            external_source: External system source name
-            external_id: External system identifier
-
+        
+        If `access` is not one of the allowed values in `AccessEnum`, it will be treated as `None` (no access override).
+        
+        Parameters:
+            project_id: UUID of the project containing the work item.
+            work_item_id: UUID of the target work item.
+            comment_html: Comment content in HTML format, if provided.
+            comment_json: Comment content in structured JSON format, if provided.
+            access: Optional access level for the comment; must match a value from `AccessEnum` (e.g., "INTERNAL" or "EXTERNAL").
+            external_source: Optional name of the external system that produced the comment.
+            external_id: Optional identifier of the comment in the external system.
+        
         Returns:
-            Created WorkItemComment object
+            The created WorkItemComment object.
         """
         client, workspace_slug = get_plane_client_context()
 

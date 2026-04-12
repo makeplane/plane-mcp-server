@@ -24,17 +24,17 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> Milestone:
         """
-        Create a new milestone.
-
-        Args:
-            project_id: UUID of the project
-            title: Milestone title
-            target_date: Target date for the milestone (ISO 8601 format)
-            external_source: External system source name
-            external_id: External system identifier
-
+        Create a milestone in the specified project.
+        
+        Parameters:
+            project_id (str): UUID of the project to attach the milestone to.
+            title (str): Milestone title.
+            target_date (str | None): Target date in ISO 8601 format, or None.
+            external_source (str | None): Name of the external system that provided this milestone, or None.
+            external_id (str | None): Identifier from the external system, or None.
+        
         Returns:
-            Created Milestone object
+            Milestone: The created Milestone object.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -57,18 +57,18 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> Milestone:
         """
-        Update a milestone by ID.
-
-        Args:
-            project_id: UUID of the project
-            milestone_id: UUID of the milestone
-            title: Milestone title
-            target_date: Target date for the milestone (ISO 8601 format)
-            external_source: External system source name
-            external_id: External system identifier
-
+        Update a milestone by its ID.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the milestone.
+            milestone_id (str): UUID of the milestone to update.
+            title (str | None): New milestone title, or `None` to leave unchanged.
+            target_date (str | None): New target date in ISO 8601 format, or `None` to leave unchanged.
+            external_source (str | None): Name of the external system associated with the milestone, or `None`.
+            external_id (str | None): Identifier in the external system, or `None`.
+        
         Returns:
-            Updated Milestone object
+            Milestone: The updated Milestone object.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -128,11 +128,11 @@ def register_milestone_tools(mcp: FastMCP) -> None:
     ) -> None:
         """
         Remove work items from a milestone.
-
-        Args:
-            project_id: UUID of the project
-            milestone_id: UUID of the milestone
-            issue_ids: List of work item IDs to remove from the milestone
+        
+        Parameters:
+            project_id (str): UUID of the project containing the milestone.
+            milestone_id (str): UUID of the milestone to update.
+            issue_ids (list[str]): List of work item IDs to remove from the milestone.
         """
         client, workspace_slug = get_plane_client_context()
         client.milestones.remove_work_items(

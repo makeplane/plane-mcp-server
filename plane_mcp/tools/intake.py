@@ -21,15 +21,14 @@ def register_intake_tools(mcp: FastMCP) -> None:
         data: dict[str, Any],
     ) -> IntakeWorkItem:
         """
-        Create a new intake work item in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            data: Intake work item data as a dictionary
-
+        Create an intake work item in the specified project.
+        
+        Parameters:
+            project_id (str): UUID of the target project.
+            data (dict[str, Any]): Mapping of fields for the new intake work item; must conform to the CreateIntakeWorkItem schema.
+        
         Returns:
-            Created IntakeWorkItem object
+            IntakeWorkItem: The created intake work item.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -44,17 +43,14 @@ def register_intake_tools(mcp: FastMCP) -> None:
         data: dict[str, Any],
     ) -> IntakeWorkItem:
         """
-        Update an intake work item by work item ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_id: UUID of the work item (use the issue field from
-                IntakeWorkItem response, not the intake work item ID)
-            data: Updated intake work item data as a dictionary
-
+        Update an existing intake work item for a project.
+        
+        Parameters:
+            work_item_id (str): The work item identifier as exposed in the intake response's `issue` field (use this value rather than any internal intake work item ID).
+            data (dict[str, Any]): Mapping of intake work item fields to update; the payload will be validated against the intake update schema.
+        
         Returns:
-            Updated IntakeWorkItem object
+            IntakeWorkItem: The updated intake work item.
         """
         client, workspace_slug = get_plane_client_context()
 

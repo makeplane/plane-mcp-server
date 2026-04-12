@@ -12,7 +12,46 @@ from plane_mcp.client import get_plane_client_context
 
 
 def register_initiative_tools(mcp: FastMCP) -> None:
-    """Register all initiative-related tools with the MCP server."""
+    """
+    Register initiative-related MCP tools (create, update, delete) on the provided FastMCP instance.
+    """
+    """
+    Create a new initiative in the current workspace.
+    
+    Parameters:
+        name (str): Initiative name.
+        description_html (str | None): HTML description of the initiative.
+        start_date (str | None): ISO 8601 start date.
+        end_date (str | None): ISO 8601 end date.
+        logo_props (dict | None): Logo properties.
+        state (InitiativeState | str | None): Initiative state (e.g., "DRAFT", "PLANNED", "ACTIVE", "COMPLETED", "CLOSED").
+        lead (str | None): UUID of the user who leads the initiative.
+    
+    Returns:
+        Initiative: The created initiative object.
+    """
+    """
+    Update an existing initiative by ID in the current workspace.
+    
+    Parameters:
+        initiative_id (str): UUID of the initiative to update.
+        name (str | None): New initiative name.
+        description_html (str | None): New HTML description.
+        start_date (str | None): New ISO 8601 start date.
+        end_date (str | None): New ISO 8601 end date.
+        logo_props (dict | None): New logo properties.
+        state (InitiativeState | str | None): New initiative state (e.g., "DRAFT", "PLANNED", "ACTIVE", "COMPLETED", "CLOSED").
+        lead (str | None): UUID of the user who leads the initiative.
+    
+    Returns:
+        Initiative: The updated initiative object.
+    """
+    """
+    Delete an initiative by ID from the current workspace.
+    
+    Parameters:
+        initiative_id (str): UUID of the initiative to delete.
+    """
 
     @mcp.tool()
     def create_initiative(
@@ -25,20 +64,19 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         lead: str | None = None,
     ) -> Initiative:
         """
-        Create a new initiative in the workspace.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            name: Initiative name
-            description_html: HTML description of the initiative
-            start_date: Initiative start date (ISO 8601 format)
-            end_date: Initiative end date (ISO 8601 format)
-            logo_props: Logo properties dictionary
-            state: Initiative state (DRAFT, PLANNED, ACTIVE, COMPLETED, CLOSED)
-            lead: UUID of the user who leads the initiative
-
+        Create a new initiative in the current Plane workspace.
+        
+        Parameters:
+            name (str): Initiative name.
+            description_html (str | None): Optional HTML description.
+            start_date (str | None): Optional start date in ISO 8601 format.
+            end_date (str | None): Optional end date in ISO 8601 format.
+            logo_props (dict | None): Optional dictionary of logo properties.
+            state (InitiativeState | str | None): Optional initiative state, e.g. "DRAFT", "PLANNED", "ACTIVE", "COMPLETED", or "CLOSED".
+            lead (str | None): Optional UUID string of the user who leads the initiative.
+        
         Returns:
-            Created Initiative object
+            Initiative: The created Initiative object.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -66,21 +104,20 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         lead: str | None = None,
     ) -> Initiative:
         """
-        Update an initiative by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            initiative_id: UUID of the initiative
-            name: Initiative name
-            description_html: HTML description of the initiative
-            start_date: Initiative start date (ISO 8601 format)
-            end_date: Initiative end date (ISO 8601 format)
-            logo_props: Logo properties dictionary
-            state: Initiative state (DRAFT, PLANNED, ACTIVE, COMPLETED, CLOSED)
-            lead: UUID of the user who leads the initiative
-
+        Update an existing initiative's fields by its ID.
+        
+        Parameters:
+            initiative_id (str): UUID of the initiative to update.
+            name (str | None): New initiative name.
+            description_html (str | None): HTML description content.
+            start_date (str | None): Start date in ISO 8601 format (YYYY-MM-DD or full timestamp).
+            end_date (str | None): End date in ISO 8601 format (YYYY-MM-DD or full timestamp).
+            logo_props (dict | None): Dictionary of logo properties (e.g., URL, alt text).
+            state (InitiativeState | str | None): Initiative state (e.g., "DRAFT", "PLANNED", "ACTIVE", "COMPLETED", "CLOSED").
+            lead (str | None): UUID of the user who will be the initiative lead.
+        
         Returns:
-            Updated Initiative object
+            Initiative: The updated Initiative object.
         """
         client, workspace_slug = get_plane_client_context()
 

@@ -15,6 +15,80 @@ from plane_mcp.client import get_plane_client_context
 
 def register_module_tools(mcp: FastMCP) -> None:
     """Register all module-related tools with the MCP server."""
+    """
+    Create a new module in the specified project.
+    
+    Parameters:
+        project_id (str): UUID of the project.
+        name (str): Module name.
+        description (str | None): Module description.
+        start_date (str | None): Module start date in ISO 8601 format.
+        target_date (str | None): Module target/end date in ISO 8601 format.
+        status (str | None): Module status; allowed values: "backlog", "planned", "in-progress", "paused", "completed", "cancelled".
+        lead (str | None): UUID of the user who leads the module.
+        members (list[str] | None): List of user IDs who are members of the module.
+        external_source (str | None): External system source name.
+        external_id (str | None): External system identifier.
+    
+    Returns:
+        Module: The created module.
+    """
+    """
+    Update an existing module by ID.
+    
+    Parameters:
+        project_id (str): UUID of the project.
+        module_id (str): UUID of the module to update.
+        name (str | None): New module name.
+        description (str | None): New module description.
+        start_date (str | None): Module start date in ISO 8601 format.
+        target_date (str | None): Module target/end date in ISO 8601 format.
+        status (str | None): Module status; allowed values: "backlog", "planned", "in-progress", "paused", "completed", "cancelled".
+        lead (str | None): UUID of the user who leads the module.
+        members (list[str] | None): List of user IDs who are members of the module.
+        external_source (str | None): External system source name.
+        external_id (str | None): External system identifier.
+    
+    Returns:
+        Module: The updated module.
+    """
+    """
+    Delete a module by ID.
+    
+    Parameters:
+        project_id (str): UUID of the project.
+        module_id (str): UUID of the module to delete.
+    """
+    """
+    Add work items to a module.
+    
+    Parameters:
+        project_id (str): UUID of the project.
+        module_id (str): UUID of the module.
+        issue_ids (list[str]): List of work item IDs to add to the module.
+    """
+    """
+    Remove a work item from a module.
+    
+    Parameters:
+        project_id (str): UUID of the project.
+        module_id (str): UUID of the module.
+        work_item_id (str): UUID of the work item to remove.
+    """
+    """
+    Archive a module.
+    
+    Parameters:
+        project_id (str): UUID of the project.
+        module_id (str): UUID of the module to archive.
+    """
+    """
+    Unarchive a module.
+    
+    Parameters:
+        project_id (str): UUID of the project.
+        module_id (str): UUID of the module to unarchive.
+    """
 
     @mcp.tool()
     def create_module(
@@ -30,23 +104,24 @@ def register_module_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> Module:
         """
-        Create a new module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            name: Module name
-            description: Module description
-            start_date: Module start date (ISO 8601 format)
-            target_date: Module target/end date (ISO 8601 format)
-            status: Module status (backlog, planned, in-progress, paused, completed, cancelled)
-            lead: UUID of the user who leads the module
-            members: List of user IDs who are members of the module
-            external_source: External system source name
-            external_id: External system identifier
-
+        Create a new module within the specified project.
+        
+        If `status` is not one of the allowed ModuleStatusEnum values, the module's status will be left unset.
+        
+        Parameters:
+            project_id (str): UUID of the project to contain the module.
+            name (str): Module name.
+            description (str | None): Module description.
+            start_date (str | None): Module start date in ISO 8601 format.
+            target_date (str | None): Module target/end date in ISO 8601 format.
+            status (str | None): Desired module status; valid values are the members of `ModuleStatusEnum`. If invalid, the status will be ignored.
+            lead (str | None): UUID of the user who leads the module.
+            members (list[str] | None): List of user UUIDs who are members of the module.
+            external_source (str | None): External system source name.
+            external_id (str | None): External system identifier.
+        
         Returns:
-            Created Module object
+            Module: The created Module.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -84,24 +159,25 @@ def register_module_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
     ) -> Module:
         """
-        Update a module by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-            name: Module name
-            description: Module description
-            start_date: Module start date (ISO 8601 format)
-            target_date: Module target/end date (ISO 8601 format)
-            status: Module status (backlog, planned, in-progress, paused, completed, cancelled)
-            lead: UUID of the user who leads the module
-            members: List of user IDs who are members of the module
-            external_source: External system source name
-            external_id: External system identifier
-
+        Update an existing module in the current workspace.
+        
+        If `status` is not one of the allowed values ("backlog", "planned", "in-progress", "paused", "completed", "cancelled"), it will be ignored (no status change). Other provided fields will be applied to the module identified by `project_id` and `module_id`.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the module.
+            module_id (str): UUID of the module to update.
+            name (str | None): New module name.
+            description (str | None): New module description.
+            start_date (str | None): Module start date (ISO 8601).
+            target_date (str | None): Module target/end date (ISO 8601).
+            status (str | None): Module status; allowed values are "backlog", "planned", "in-progress", "paused", "completed", "cancelled".
+            lead (str | None): UUID of the user who leads the module.
+            members (list[str] | None): List of user UUIDs who are members of the module.
+            external_source (str | None): External system source name.
+            external_id (str | None): External system identifier.
+        
         Returns:
-            Updated Module object
+            Module: The updated Module object.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -129,12 +205,11 @@ def register_module_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def delete_module(project_id: str, module_id: str) -> None:
         """
-        Delete a module by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
+        Delete a module from a project in the current workspace.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the module.
+            module_id (str): UUID of the module to delete.
         """
         client, workspace_slug = get_plane_client_context()
         client.modules.delete(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
@@ -146,13 +221,12 @@ def register_module_tools(mcp: FastMCP) -> None:
         issue_ids: list[str],
     ) -> None:
         """
-        Add work items to a module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-            issue_ids: List of work item IDs to add to the module
+        Add the given work items to the specified module within the current workspace.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the module.
+            module_id (str): UUID of the module to update.
+            issue_ids (list[str]): List of work item IDs to add to the module.
         """
         client, workspace_slug = get_plane_client_context()
         client.modules.add_work_items(
@@ -169,13 +243,12 @@ def register_module_tools(mcp: FastMCP) -> None:
         work_item_id: str,
     ) -> None:
         """
-        Remove a work item from a module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-            work_item_id: UUID of the work item to remove
+        Remove a work item from a module in the current workspace.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the module.
+            module_id (str): UUID of the module to update.
+            work_item_id (str): UUID of the work item to remove from the module.
         """
         client, workspace_slug = get_plane_client_context()
         client.modules.remove_work_item(
@@ -188,12 +261,11 @@ def register_module_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def archive_module(project_id: str, module_id: str) -> None:
         """
-        Archive a module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
+        Archive a module in the current Plane workspace.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the module.
+            module_id (str): UUID of the module to archive.
         """
         client, workspace_slug = get_plane_client_context()
         client.modules.archive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)

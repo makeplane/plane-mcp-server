@@ -19,7 +19,14 @@ def register_epic_tools(mcp: FastMCP) -> None:
     """Register all epic-related tools with the MCP server."""
 
     def _get_epic_work_item_type(client: PlaneClient, workspace_slug: str, project_id: str) -> WorkItemType | None:
-        """Helper function to get the work item type ID for epics."""
+        """
+        Finds the project's work item type that is marked as an epic.
+        
+        Searches the work item types for the given workspace and project and returns the first type whose `is_epic` attribute is truthy.
+        
+        Returns:
+            WorkItemType | None: The work item type designated as an epic if found, `None` otherwise.
+        """
         response = client.work_item_types.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -52,31 +59,20 @@ def register_epic_tools(mcp: FastMCP) -> None:
         estimate_point: str | None = None,
     ) -> Epic:
         """
-        Create a new epic.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            name: Epic name (required)
-            assignees: List of user IDs to assign to the epic
-            labels: List of label IDs to attach to the epic
-            type_id: UUID of the epic type
-            point: Story point value
-            description_html: HTML description of the epic
-            description_stripped: Plain text description (stripped of HTML)
-            priority: Priority level (urgent, high, medium, low, none)
-            start_date: Start date (ISO 8601 format)
-            target_date: Target/end date (ISO 8601 format)
-            sort_order: Sort order value
-            is_draft: Whether the epic is a draft
-            external_source: External system source name
-            external_id: External system identifier
-            parent: UUID of the parent epic
-            state: UUID of the state
-            estimate_point: Estimate point value
-
+        Create a new epic work item in the specified project.
+        
+        If `priority` is provided but not one of the allowed PriorityEnum values, it will be ignored (treated as no priority). Raises ValueError if the project has no work item type marked as an epic.
+        
+        Parameters:
+            project_id: UUID of the project where the epic will be created.
+            name: Title of the epic.
+            priority: Desired priority value; ignored if not one of the allowed PriorityEnum literals.
+        
         Returns:
-            Created WorkItem object
+            Epic: The created epic resource.
+        
+        Raises:
+            ValueError: If no work item type with `is_epic=True` exists in the project.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -208,14 +204,11 @@ def register_epic_tools(mcp: FastMCP) -> None:
         epic_id: str,
     ) -> None:
         """
-        Delete an epic by ID.
-
-        Args:
-            project_id: UUID of the project
-            epic_id: UUID of the epic
-
-        Returns:
-            None
+        Delete the epic identified by epic_id from the given project.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the epic.
+            epic_id (str): UUID of the epic to delete.
         """
         client, workspace_slug = get_plane_client_context()
 

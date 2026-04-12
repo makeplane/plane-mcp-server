@@ -13,7 +13,16 @@ from plane_mcp.client import get_plane_client_context
 
 
 def register_work_item_relation_tools(mcp: FastMCP) -> None:
-    """Register all work item relation-related tools with the MCP server."""
+    """
+    Register work-item relation tools on the given MCP instance.
+    
+    Registers two tools on `mcp`:
+    - `create_work_item_relation`: creates one or more relations from a work item to other issues, validating the relation type.
+    - `remove_work_item_relation`: removes a relation between a work item and a related issue.
+    
+    Parameters:
+        mcp (FastMCP): MCP server instance to register the tools on.
+    """
 
     @mcp.tool()
     def create_work_item_relation(
@@ -23,14 +32,16 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
         issues: list[str],
     ) -> None:
         """
-        Create relations for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            relation_type: Type of relationship (blocking, blocked_by, duplicate,
-                          relates_to, start_before, start_after, finish_before, finish_after)
-            issues: List of work item IDs to create relations with
+        Create relations between a work item and other work items in the given project.
+        
+        Parameters:
+            project_id (str): UUID of the project containing the work item.
+            work_item_id (str): UUID of the work item to which relations will be added.
+            relation_type (str): Relation type; must be one of the allowed WorkItemRelationTypeEnum values.
+            issues (list[str]): List of work item IDs to relate to the target work item.
+        
+        Raises:
+            ValueError: If `relation_type` is not one of the allowed WorkItemRelationTypeEnum values.
         """
         client, workspace_slug = get_plane_client_context()
 
