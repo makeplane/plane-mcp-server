@@ -181,16 +181,15 @@ def register_unified_tools(mcp: FastMCP) -> None:
 
         if scope in ("project", "cycle", "module", "milestone", "work_item", "work_item_type"):
             kwargs["project_id"] = project_id
-        if scope == "cycle":
-            kwargs["cycle_id"] = cycle_id
-        elif scope == "module":
-            kwargs["module_id"] = module_id
-        elif scope == "milestone":
-            kwargs["milestone_id"] = milestone_id
-        elif scope == "work_item":
-            kwargs["work_item_id"] = work_item_id
-        elif scope == "work_item_type":
-            kwargs["type_id"] = type_id
+        if container_id_kwarg is not None:
+            container_id_values: dict[str, str | None] = {
+                "cycle_id": cycle_id,
+                "module_id": module_id,
+                "milestone_id": milestone_id,
+                "work_item_id": work_item_id,
+                "type_id": type_id,
+            }
+            kwargs[container_id_kwarg] = container_id_values[container_id_kwarg]
 
         if method_key not in _NO_PARAMS_METHODS:
             kwargs["params"] = params

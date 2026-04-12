@@ -13,7 +13,6 @@ from plane_mcp.tools.pages import register_page_tools
 from plane_mcp.tools.projects import register_project_tools
 from plane_mcp.tools.states import register_state_tools
 from plane_mcp.tools.users import register_user_tools
-from plane_mcp.tools.work_item_activities import register_work_item_activity_tools
 from plane_mcp.tools.work_item_comments import register_work_item_comment_tools
 from plane_mcp.tools.work_item_links import register_work_item_link_tools
 from plane_mcp.tools.work_item_properties import register_work_item_property_tools
@@ -30,7 +29,6 @@ def register_tools(mcp: FastMCP) -> None:
     register_unified_tools(mcp)
     register_project_tools(mcp)
     register_work_item_tools(mcp)
-    register_work_item_activity_tools(mcp)
     register_work_item_comment_tools(mcp)
     register_work_item_link_tools(mcp)
     register_work_item_relation_tools(mcp)
