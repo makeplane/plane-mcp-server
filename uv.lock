@@ -916,10 +916,11 @@ wheels = [
 
 [[package]]
 name = "plane-mcp-server"
-version = "0.2.8"
+version = "0.2.9"
 source = { editable = "." }
 dependencies = [
     { name = "authlib" },
+    { name = "fakeredis", extra = ["lua"] },
     { name = "fastmcp" },
     { name = "mcp" },
     { name = "plane-sdk" },
@@ -936,6 +937,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "authlib", specifier = ">=1.6.9" },
+    { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1,<2.35.0" },
     { name = "fastmcp", specifier = "==2.14.4" },
     { name = "mcp", specifier = "==1.26.0" },
     { name = "plane-sdk", specifier = "==0.2.8" },
