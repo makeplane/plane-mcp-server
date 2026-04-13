@@ -87,13 +87,19 @@ def main() -> None:
         return
 
     if server_mode == ServerMode.HTTP:
-        oauth_mcp = get_oauth_mcp("/http")
+
+        prefix = os.getenv("MCP_PATH_PREFIX") or ""
+
+        oauth_mcp = get_oauth_mcp(prefix + "/http")
         oauth_app = oauth_mcp.http_app(stateless_http=True)
         header_app = get_header_mcp().http_app(stateless_http=True)
 
-        sse_mcp = get_oauth_mcp()
+        sse_mcp = get_oauth_mcp(prefix)
         sse_app = sse_mcp.http_app(transport="sse")
 
+        # mcp_path is appended to the auth provider's base_url to form the
+        # advertised resource URL. base_url already carries the prefix, so these
+        # stay at /mcp and /sse to avoid double-prefixing.
         oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
         sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
 
@@ -103,9 +109,9 @@ def main() -> None:
                 *oauth_well_known,
                 *sse_well_known,
                 # Mount both MCP servers
-                Mount("/http/api-key", app=header_app),
-                Mount("/http", app=oauth_app),
-                Mount("/", app=sse_app),
+                Mount(prefix + "/http/api-key", app=header_app),
+                Mount(prefix + "/http", app=oauth_app),
+                Mount(prefix or "/", app=sse_app),
             ],
             lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
         )
