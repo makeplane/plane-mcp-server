@@ -1,6 +1,6 @@
 [project]
 name = "plane-mcp-server"
-version = "0.2.8"
+version = "0.2.9"
 description = "A Model Context Protocol server for Plane integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,9 @@ dependencies = [
     "authlib>=1.6.9",
     "markdownify>=0.14.1",
     "nh3>=0.2.17",
+    # pydocket 0.16.6 (pinned by fastmcp 2.14.4) imports `FakeConnection` from
+    # `fakeredis.aioredis`, which was removed in fakeredis 2.35.0.
+    "fakeredis[lua]>=2.32.1,<2.35.0",
 ]
 
 [project.optional-dependencies]
