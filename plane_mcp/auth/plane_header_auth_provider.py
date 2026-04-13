@@ -28,7 +28,7 @@ class PlaneHeaderAuthProvider(TokenVerifier):
                 response = await client.get(
                     user_url,
                     headers={
-                        "Authorization": f"Bearer {token}",
+                        "x-api-key": token,
                         "Content-Type": "application/json",
                     },
                 )
