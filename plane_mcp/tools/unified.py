@@ -148,7 +148,9 @@ def register_unified_tools(mcp: FastMCP) -> None:
             milestone_id: UUID of the milestone (required for milestone_work_items)
             work_item_id: UUID of the work item (required for work item-scoped entities)
             type_id: UUID of the work item type (required for work_item_properties)
-            params: Optional query parameters as a dictionary (e.g., per_page, cursor, order_by)
+            params: Optional pagination/ordering parameters only. Supported keys: per_page (int),
+                cursor (str), order_by (str), expand (str), fields (str). Do NOT use this for
+                filtering (e.g. by assignee, state, label) — filtering is not supported by this tool.
 
         Returns:
             List of entity objects of the requested type
