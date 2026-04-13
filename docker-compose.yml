@@ -1,0 +1,45 @@
+# Docker Compose for local development
+#
+# Setup:
+#   cp .env.docker .env        # copy the template
+#   # edit .env with your values
+#   docker compose up --build
+#
+# The MCP server runs in HTTP mode and is available at:
+#   http://localhost:8211/mcp          (OAuth)
+#   http://localhost:8211/http/api-key/mcp  (header API key)
+
+name: plane-mcp-dev
+
+services:
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Override entrypoint to install in editable mode before starting the server
+    # (command would be appended to the Dockerfile ENTRYPOINT, causing arg parse errors)
+    entrypoint: ["sh", "-c", "uv pip install --system -e '.[dev]' && python -m plane_mcp http"]
+    ports:
+      - "8211:8211"
+    volumes:
+      # Mount local source so code changes don't require a full rebuild
+      - ./plane_mcp:/app/plane_mcp
+    env_file:
+      - .env
+    environment:
+      # Valkey is wired automatically via the valkey service below
+      REDIS_HOST: valkey
+      REDIS_PORT: "6379"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
