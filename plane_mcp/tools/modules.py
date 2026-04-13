@@ -1,46 +1,20 @@
 """Module-related tools for Plane MCP Server."""
 
-from typing import Any, get_args
+from typing import get_args
 
 from fastmcp import FastMCP
 from plane.models.enums import ModuleStatusEnum
 from plane.models.modules import (
     CreateModule,
     Module,
-    PaginatedArchivedModuleResponse,
-    PaginatedModuleResponse,
-    PaginatedModuleWorkItemResponse,
     UpdateModule,
 )
-from plane.models.work_items import WorkItem
 
 from plane_mcp.client import get_plane_client_context
 
 
 def register_module_tools(mcp: FastMCP) -> None:
     """Register all module-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_modules(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[Module]:
-        """
-        List all modules in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of Module objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedModuleResponse = client.modules.list(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
-        return response.results
 
     @mcp.tool()
     def create_module(
@@ -94,22 +68,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         )
 
         return client.modules.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
-
-    @mcp.tool()
-    def retrieve_module(project_id: str, module_id: str) -> Module:
-        """
-        Retrieve a module by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-
-        Returns:
-            Module object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.modules.retrieve(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
 
     @mcp.tool()
     def update_module(
@@ -182,28 +140,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         client.modules.delete(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
 
     @mcp.tool()
-    def list_archived_modules(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[Module]:
-        """
-        List archived modules in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of archived Module objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedArchivedModuleResponse = client.modules.list_archived(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
-        return response.results
-
-    @mcp.tool()
     def add_work_items_to_module(
         project_id: str,
         module_id: str,
@@ -248,33 +184,6 @@ def register_module_tools(mcp: FastMCP) -> None:
             module_id=module_id,
             work_item_id=work_item_id,
         )
-
-    @mcp.tool()
-    def list_module_work_items(
-        project_id: str,
-        module_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[WorkItem]:
-        """
-        List work items in a module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of WorkItem objects in the module
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedModuleWorkItemResponse = client.modules.list_work_items(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            module_id=module_id,
-            params=params,
-        )
-        return response.results
 
     @mcp.tool()
     def archive_module(project_id: str, module_id: str) -> None:
