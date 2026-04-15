@@ -94,6 +94,16 @@ jobs:
       - id: checkout_files
         name: Checkout Files
         uses: actions/checkout@v4
+      - name: Install Modern Docker CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          sudo chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y docker-ce-cli
       - name: Plane MCP Server Build and Push
         uses: makeplane/actions/build-push@v1.0.0
         with:
@@ -102,7 +112,7 @@ jobs:
           release-version: ${{ needs.release_build_setup.outputs.release_version }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
+          docker-image-owner: ${{ secrets.DOCKERHUB_USERNAME }}
           docker-image-name: ${{ needs.release_build_setup.outputs.dh_img_name }}
           build-context: .
           dockerfile-path: ./Dockerfile
@@ -115,11 +125,7 @@ jobs:
     if: ${{ needs.release_build_setup.outputs.build_type == 'Release' }}
     name: Build Release
     runs-on: ubuntu-22.04
-    needs:
-      [
-        release_build_setup,
-        build_and_push,
-      ]
+    needs: [release_build_setup, build_and_push]
     env:
       REL_VERSION: ${{ needs.release_build_setup.outputs.release_version }}
     steps:

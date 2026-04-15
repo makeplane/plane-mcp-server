@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import sys
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -61,13 +61,12 @@ class ServerMode(Enum):
 
 
 @asynccontextmanager
-async def combined_lifespan(oauth_app, header_app, sse_app):
-    """Combine lifespans from both OAuth and Header MCP apps."""
-    # Start both lifespans
-    async with oauth_app.lifespan(oauth_app):
-        async with header_app.lifespan(header_app):
-            async with sse_app.lifespan(sse_app):
-                yield
+async def combined_lifespan(apps):
+    """Combine lifespans from multiple MCP apps."""
+    async with AsyncExitStack() as stack:
+        for app in apps:
+            await stack.enter_async_context(app.lifespan(app))
+        yield
 
 
 def main() -> None:
@@ -83,7 +82,10 @@ def main() -> None:
         if not os.getenv("PLANE_WORKSPACE_SLUG"):
             raise ValueError("PLANE_WORKSPACE_SLUG is not set")
 
-        get_stdio_mcp().run()
+        from plane_mcp.journey.tools import register_tools as register_journey_tools
+        stdio_mcp = get_stdio_mcp()
+        register_journey_tools(stdio_mcp)
+        stdio_mcp.run()
         return
 
     if server_mode == ServerMode.HTTP:
@@ -97,17 +99,35 @@ def main() -> None:
         oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
         sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
 
+        # --- AGENT JOURNEY API ---
+        from plane_mcp.journey.server import (
+            get_header_mcp as journey_get_header_mcp,
+            get_oauth_mcp as journey_get_oauth_mcp
+        )
+        journey_oauth_mcp = journey_get_oauth_mcp("/agent")
+        journey_oauth_app = journey_oauth_mcp.http_app(stateless_http=True)
+        
+        journey_header_mcp = journey_get_header_mcp()
+        journey_header_app = journey_header_mcp.http_app(stateless_http=True)
+        
+        journey_oauth_well_known = []
+        if hasattr(journey_oauth_mcp, 'auth') and journey_oauth_mcp.auth:
+            journey_oauth_well_known = journey_oauth_mcp.auth.get_well_known_routes(mcp_path="/agent/mcp")
+
         app = Starlette(
             routes=[
                 # Well-known routes for OAuth and Header HTTP
                 *oauth_well_known,
                 *sse_well_known,
+                *journey_oauth_well_known,
                 # Mount both MCP servers
                 Mount("/http/api-key", app=header_app),
                 Mount("/http", app=oauth_app),
+                Mount("/agent/api-key", app=journey_header_app),
+                Mount("/agent", app=journey_oauth_app),
                 Mount("/", app=sse_app),
             ],
-            lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
+            lifespan=lambda app: combined_lifespan([oauth_app, header_app, sse_app, journey_oauth_app, journey_header_app]),
         )
 
         app.add_middleware(
