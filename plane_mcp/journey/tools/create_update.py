@@ -88,18 +88,7 @@ class CreateUpdateJourney(JourneyBase):
             from plane_mcp.journey.cache import get_cached_workspace_context
             ctx = get_cached_workspace_context(0)
             llm_content = {"projects": ctx.get("projects", []), "priorities": ctx.get("priorities", [])}
-            display_lines = []
-            for p in llm_content.get("projects", []):
-                slug = p.get("project_slug", "UNKNOWN")
-                desc = p.get("description", "").strip() or p.get("name", "")
-                # Format exactly as requested: PROJECT_SLUG - Description
-                display_lines.append(f"{slug} - {desc}")
-            display_str = "\n".join(display_lines) if display_lines else "No projects found."
-            
-            return {
-                "llmContent": llm_content,
-                "returnDisplay": display_str
-            }
+            return llm_content
 
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()
@@ -137,12 +126,12 @@ class CreateUpdateJourney(JourneyBase):
             except Exception as e:
                 logger.warning("Created %s but failed to add it to cycle %s: %s", key, cycle_id, e)
                 return {
-                    "key": key,
+                    "issue_key": key,
                     "status": "warning",
                     "message": "Ticket created successfully, but adding it to the cycle failed. The ticket exists.",
                 }
 
-        return {"key": key}
+        return {"issue_key": key}
 
     def update_ticket(
         self,
@@ -230,7 +219,7 @@ class CreateUpdateJourney(JourneyBase):
         if not title_changed and not desc_changed and not comment:
             return {"status": "warning", "message": "No changes were provided to update_ticket."}
             
-        return {"key": ticket_id, "status": "success", "message": "Ticket updated successfully."}
+        return {"issue_key": ticket_id, "status": "success", "message": "Ticket updated successfully."}
 
 def register_create_update_tools(mcp: FastMCP) -> None:
     def create_ticket(
@@ -248,12 +237,8 @@ def register_create_update_tools(mcp: FastMCP) -> None:
         
         if project_slug.lower() == 'help':
             return raw_data
-            
-        ticket_key = raw_data.get("key", "UNKNOWN")
-        return {
-            "llmContent": raw_data,
-            "returnDisplay": f"✅ Ticket {ticket_key} created successfully."
-        }
+
+        return raw_data
 
     create_ticket.__doc__ = """
         Create a new ticket with automatic resolution of labels and cycles.
@@ -298,19 +283,4 @@ def register_create_update_tools(mcp: FastMCP) -> None:
         journey = CreateUpdateJourney(resolver)
         raw_data = journey.update_ticket(ticket_id, new_title, append_text, append_after_snippet, replace_text, replace_target_snippet, comment)
         
-        if raw_data.get("status") == "error":
-            return {
-                "llmContent": raw_data,
-                "returnDisplay": f"❌ Error: {raw_data.get('message')}"
-            }
-            
-        if raw_data.get("status") == "warning":
-            return {
-                "llmContent": raw_data,
-                "returnDisplay": f"⚠️ {raw_data.get('message')}"
-            }
-            
-        return {
-            "llmContent": raw_data,
-            "returnDisplay": f"✅ Ticket {ticket_id} updated successfully."
-        }
+        return raw_data

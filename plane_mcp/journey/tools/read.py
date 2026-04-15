@@ -29,17 +29,9 @@ class ReadJourney(JourneyBase):
             from plane_mcp.journey.cache import get_cached_workspace_context
             opts = get_cached_workspace_context(0).copy()
             llm_content = {"projects": opts.get("projects", []), "priorities": opts.get("priorities", [])}
-            display_lines = []
-            for p in llm_content.get("projects", []):
-                slug = p.get("project_slug", "UNKNOWN")
-                desc = p.get("description", "").strip() or p.get("name", "")
-                display_lines.append(f"{slug} - {desc}")
-            display_str = "\n".join(display_lines) if display_lines else "No projects found."
+
             
-            return {
-                "llmContent": llm_content,
-                "returnDisplay": display_str
-            }
+            return llm_content
 
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()
@@ -227,35 +219,15 @@ def register_read_tools(mcp: FastMCP) -> None:
         
         if project_slug.lower() == 'help':
             return raw_data
-            
+
+        # Strip HTML tags from description fields in-place for clean human+machine output
         import re
-        def strip_html_markdown(text: str) -> str:
-            if not text:
-                return ""
-            text = re.sub(r'<[^>]+>', '', text)
-            return " ".join(text.split())
-
-        formatted_str = []
+        _html_re = re.compile(r'<[^>]+')
         for item in raw_data.get("results", []):
-            slug = item.get("ticket_id", item.get("key", "UNKNOWN"))
-            title = item.get("name", "Untitled")
-            desc = item.get("description", "")
-            
-            clean_desc = strip_html_markdown(desc)
-            if len(clean_desc) > 80:
-                snippet = clean_desc[:80] + "..."
-            else:
-                snippet = clean_desc
-            
-            if snippet:
-                formatted_str.append(f"{slug} {title}\n{snippet}")
-            else:
-                formatted_str.append(f"{slug} {title}")
+            if item.get("description"):
+                item["description"] = " ".join(_html_re.sub('', item["description"]).split()).strip()
 
-        return {
-            "llmContent": raw_data,
-            "returnDisplay": "\n\n".join(formatted_str)
-        }
+        return raw_data
 
     search_tickets.__doc__ = """
         Search for issues. You can use standard filters or a text query.
@@ -290,24 +262,9 @@ def register_read_tools(mcp: FastMCP) -> None:
         journey = ReadJourney(resolver)
         raw_data = journey.read_ticket(ticket_id, lod, comments)
 
+        # Strip HTML tags from description, preserving newlines and Markdown structure
         import re
-        def clean_description_for_read(text: str) -> str:
-            if not text:
-                return ""
-            # Only strip HTML tags, preserve newlines and Markdown
-            return re.sub(r'<[^>]+>', '', text).strip()
+        if raw_data.get("description"):
+            raw_data["description"] = re.sub(r'<[^>]+>', '', raw_data["description"]).strip()
 
-        slug = raw_data.get("ticket_id", raw_data.get("key", ticket_id))
-        title = raw_data.get("name", "Untitled")
-        desc = raw_data.get("description", "")
-
-        clean_desc = clean_description_for_read(desc)
-
-        returnDisplay = f"{slug} {title}\n\n{clean_desc}"
-        if "comments" in raw_data:
-            returnDisplay += "\n\nComments:\n" + raw_data["comments"]
-
-        return {
-            "llmContent": raw_data,
-            "returnDisplay": returnDisplay.strip()
-        }
+        return raw_data

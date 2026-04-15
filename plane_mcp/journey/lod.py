@@ -80,7 +80,7 @@ def _apply_lod_to_dict(data: dict[str, Any], profile: LODProfile, project_identi
     if profile == LODProfile.SUMMARY:
         for key, value in data.items():
             if key in SUMMARY_FIELDS:
-                out_key = "key" if key == "ticket_id" else key
+                out_key = "issue_key" if key == "ticket_id" else key
                 if key == "state" and isinstance(value, dict) and "name" in value:
                     result[out_key] = value["name"]
                 else:
@@ -91,14 +91,13 @@ def _apply_lod_to_dict(data: dict[str, Any], profile: LODProfile, project_identi
             result["state"] = data["state_detail"]["name"]
 
         if "ticket_id" in data:
-            result["key"] = data["ticket_id"]
+            result["issue_key"] = data["ticket_id"]
             
     elif profile == LODProfile.STANDARD:
-        # Standard: Default ticket read fields (Key, Name, Details, priority, labels, state)
-        
-        # Priority mapping
+        # Standard: Default ticket read fields (issue_key, Name, Details, priority, labels, state)
+
         if "ticket_id" in data:
-            result["ticket_id"] = data["ticket_id"]
+            result["issue_key"] = data["ticket_id"]
         if "name" in data:
             result["name"] = data["name"]
         
@@ -133,6 +132,9 @@ def _apply_lod_to_dict(data: dict[str, Any], profile: LODProfile, project_identi
         if "description_html" in result and isinstance(result["description_html"], str):
             result["description"] = _clean_html(result["description_html"])
             del result["description_html"]
+        # Alias the internal ticket_id intermediate to the canonical issue_key
+        if "ticket_id" in result:
+            result["issue_key"] = result.pop("ticket_id")
             
     return result
 
