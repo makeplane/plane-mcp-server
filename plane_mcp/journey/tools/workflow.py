@@ -1,17 +1,19 @@
 """Workflow tools for Journey Endpoint."""
 
+import logging
 from collections import defaultdict
+from datetime import datetime, timedelta
+
 from fastmcp import FastMCP
 from plane.errors.errors import HttpError
+from plane.models.cycles import CreateCycle
+from plane.models.work_items import CreateWorkItemComment, UpdateWorkItem
+
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.resolver import EntityResolver, EntityResolutionError
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
 from plane_mcp.journey.lod import LODProfile
+from plane_mcp.resolver import EntityResolutionError, EntityResolver
 from plane_mcp.sanitize import sanitize_html
-from plane.models.work_items import UpdateWorkItem, CreateWorkItemComment
-from plane.models.cycles import CreateCycle
-from datetime import datetime, timedelta
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +98,9 @@ class WorkflowJourney(JourneyBase):
                     )
                     msg += f" Added to cycle '{cycle_name}'."
                 except Exception as e:
-                    logger.warning("Failed to add tickets to cycle '%s' for project %s: %s", cycle_name, proj_identifier, e)
+                    logger.warning(
+                        "Failed to add tickets to cycle '%s' for project %s: %s", cycle_name, proj_identifier, e
+                    )
                     msg += f" Warning: tickets processed but could not be added to cycle '{cycle_name}'."
             else:
                 msg += " Note: Cycles are disabled for this project, skipped cycle assignment."
@@ -157,7 +161,13 @@ class WorkflowJourney(JourneyBase):
 
             return self.apply_lod(updated, profile=LODProfile.SUMMARY, project_identifier=project_identifier)
             
-        return {"status": "partial", "message": "Comment added, but no 'Done' or 'Completed' state found. Call transition_ticket explicitly to close this ticket."}
+        return {
+            "status": "partial",
+            "message": (
+                "No workflow states found indicating a 'Done' or 'Completed' state found. "
+                "Call transition_ticket explicitly to close this ticket."
+            )
+        }
 
 
 def register_workflow_tools(mcp: FastMCP) -> None:
@@ -169,7 +179,8 @@ def register_workflow_tools(mcp: FastMCP) -> None:
         
     transition_ticket.__doc__ = """
         Transition a ticket to a new state.
-        Use this primitive for granular edge-case routing, such as moving a ticket to Canceled, Duplicate, or custom review states.
+        Use this primitive for granular edge-case routing, such as moving a ticket to Canceled, 
+        Duplicate, or custom review states.
         
         Args:
             ticket_id: The globally unique, human-readable identifier (e.g., ENG-123).
@@ -186,7 +197,8 @@ def register_workflow_tools(mcp: FastMCP) -> None:
         Use this macro as your primary method for standard workflow progression (starting work).
         
         Args:
-            ticket_ids: List of globally unique, human-readable identifiers (e.g. ['ENG-123', 'ENG-124']). The system automatically resolves the project and issue routing from these prefixes.
+            ticket_ids: List of globally unique, human-readable identifiers (e.g. ['ENG-123', 'ENG-124']). 
+                The system automatically resolves the project and issue routing from these prefixes.
             cycle_name: The name of the cycle to add tickets to. If you are unsure, make your best logical guess.
         """
         client, workspace_slug = get_plane_client_context()
@@ -202,7 +214,9 @@ def register_workflow_tools(mcp: FastMCP) -> None:
         Use this macro as your primary method for standard workflow progression (finishing work).
         
         Args:
-            ticket_id: The globally unique, human-readable identifier (e.g., ENG-123). The system automatically resolves the project and issue routing from this prefix; no separate project context is needed.
+            ticket_id: The globally unique, human-readable identifier (e.g., ENG-123). The system 
+                automatically resolves the project and issue routing from this prefix; no separate 
+                project context is needed.
             comment: The text to add as a comment.
         """
         client, workspace_slug = get_plane_client_context()

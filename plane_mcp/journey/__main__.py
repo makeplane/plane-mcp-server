@@ -11,7 +11,7 @@ from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
-from plane_mcp.journey.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
+from plane_mcp.journey.server import get_header_mcp, get_stdio_mcp
 
 logger = get_logger(__name__)
 

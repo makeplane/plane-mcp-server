@@ -1,9 +1,9 @@
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch
-from plane.models.query_params import PaginatedQueryParams
 from plane.errors.errors import HttpError
 
-from plane_mcp.resolver import EntityResolver, EntityResolutionError
+from plane_mcp.resolver import EntityResolutionError, EntityResolver
 
 
 @pytest.fixture

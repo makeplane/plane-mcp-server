@@ -1,7 +1,9 @@
 """Pytest configuration for Plane MCP Server tests."""
 
 import pytest
+
 import plane_mcp.resolver
+
 
 @pytest.fixture(autouse=True)
 def clear_resolver_caches():

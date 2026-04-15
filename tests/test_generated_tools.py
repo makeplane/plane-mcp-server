@@ -1,8 +1,9 @@
 import ast
 import os
 
+
 def check_file_for_uuid(filepath):
-    with open(filepath, "r") as f:
+    with open(filepath) as f:
         tree = ast.parse(f.read())
         
     for node in ast.walk(tree):

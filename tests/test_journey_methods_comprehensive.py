@@ -1,10 +1,12 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
-from plane_mcp.resolver import EntityResolver
-from plane_mcp.journey.tools.read import ReadJourney
+import pytest
+
 from plane_mcp.journey.tools.create_update import CreateUpdateJourney
+from plane_mcp.journey.tools.read import ReadJourney
 from plane_mcp.journey.tools.workflow import WorkflowJourney
+from plane_mcp.resolver import EntityResolver
+
 
 @pytest.fixture
 def mock_client():

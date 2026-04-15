@@ -9,11 +9,12 @@ Verifies that:
 """
 
 import os
-import pytest
-from plane_mcp.client import get_plane_client_context
-from plane_mcp.resolver import EntityResolver
-from plane_mcp.journey.tools.read import ReadJourney
 
+import pytest
+
+from plane_mcp.client import get_plane_client_context
+from plane_mcp.journey.tools.read import ReadJourney
+from plane_mcp.resolver import EntityResolver
 
 pytestmark = pytest.mark.e2e
 
@@ -40,6 +41,7 @@ def test_per_page_equals_limit(e2e_journey):
     # search_tickets calls get_plane_client_context() internally for a fresh client.
     # We must patch that function so the recording wrapper is on the client it actually uses.
     from unittest.mock import patch
+
     from plane_mcp.client import get_plane_client_context
 
     real_client, real_ws = get_plane_client_context()
@@ -97,7 +99,7 @@ def test_label_exception_returns_llm_friendly(e2e_journey):
     A) Label not found by name -> warning + results still returned (search broadened but warned)
     B) Label lookup throws exception -> empty results + warning (safe failure, no widening)
     """
-    client = e2e_journey.resolver.client
+    _ = e2e_journey.resolver.client
 
     # --- Mode A: label name not found (not an exception, just missing) ---
     result_a = e2e_journey.search_tickets(

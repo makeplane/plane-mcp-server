@@ -1,9 +1,11 @@
 """Base classes and utilities for Journey-based AI tools."""
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, TypeVar, cast
+
+from plane_mcp.journey.lod import LODProfile, apply_lod
 from plane_mcp.resolver import EntityResolver
-from plane_mcp.journey.lod import apply_lod, LODProfile
 
 T = TypeVar('T', bound=Callable[..., Any])
 
@@ -17,7 +19,9 @@ class JourneyBase:
     def __init__(self, resolver: EntityResolver):
         self.resolver = resolver
 
-    def apply_lod(self, data: Any, profile: LODProfile = LODProfile.SUMMARY, project_identifier: str | None = None) -> Any:
+    def apply_lod(
+        self, data: Any, profile: LODProfile = LODProfile.SUMMARY, project_identifier: str | None = None
+    ) -> Any:
         """
         Applies LOD profile, returning clean minimized data for AI context.
         """
@@ -82,8 +86,8 @@ def mcp_error_boundary(func: T) -> T:
             return func(*args, **kwargs)
         except Exception as e:
             try:
-                import logging
                 import inspect
+                import logging
                 import traceback
                 
                 error_details = traceback.format_exc()
@@ -128,5 +132,7 @@ def mcp_error_boundary(func: T) -> T:
                 return {"error": error_msg}
             except Exception as inner_e:
                 # Absolute fallback if error handling itself fails
-                return {"error": f"CRITICAL: Tool {func.__name__} failed, and error handler also crashed: {str(inner_e)}"}
+                return {
+                    "error": f"CRITICAL: Tool {func.__name__} failed, and error handler also crashed: {str(inner_e)}"
+                }
     return cast(T, wrapper)

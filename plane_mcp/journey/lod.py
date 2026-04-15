@@ -3,9 +3,11 @@ import logging
 import uuid as uuid_module
 from enum import Enum
 from typing import Any
+
+from markdownify import markdownify
+
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.resolver import EntityResolver
-from markdownify import markdownify
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,9 @@ def _hydrate_state(data: dict[str, Any], project_identifier: str | None = None) 
                 proj_id = str(resolver.resolve_project(project_identifier))
                 
             if proj_id:
-                state_obj = client.states.retrieve(workspace_slug=workspace_slug, project_id=proj_id, state_id=state_str)
+                state_obj = client.states.retrieve(
+                    workspace_slug=workspace_slug, project_id=proj_id, state_id=state_str
+                )
                 data["state"] = {"name": state_obj.name, "id": state_str}
         except Exception as e:
             logger.debug("Could not hydrate state %s: %s", state_str, e)
@@ -72,7 +76,9 @@ def _clean_html(html_str: str) -> str:
         return ""
     return markdownify(html_str, heading_style="ATX", bullet_list_marker="-").strip()
 
-def _apply_lod_to_dict(data: dict[str, Any], profile: LODProfile, project_identifier: str | None = None) -> dict[str, Any]:
+def _apply_lod_to_dict(
+    data: dict[str, Any], profile: LODProfile, project_identifier: str | None = None
+) -> dict[str, Any]:
     inject_sequence_id(data, project_identifier)
     _hydrate_state(data, project_identifier)
     
@@ -162,7 +168,9 @@ def apply_lod(
     if isinstance(data, list):
         filtered_data = [
             _apply_lod_to_dict(
-                item.model_dump(mode='json') if hasattr(item, "model_dump") else (item.dict() if hasattr(item, "dict") else item),
+                item.model_dump(mode='json') if hasattr(item, "model_dump") else (
+                    item.dict() if hasattr(item, "dict") else item
+                ),
                 profile,
                 project_identifier
             ) if hasattr(item, "model_dump") or hasattr(item, "dict") or isinstance(item, dict) else item 

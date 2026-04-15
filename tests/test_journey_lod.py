@@ -1,9 +1,11 @@
 """Unit tests for the Level of Detail (LOD) filtering system."""
 
-import pytest
-from plane_mcp.journey.lod import apply_lod, LODProfile, inject_sequence_id
-from plane_mcp.journey.base import JourneyBase, with_lod
 from unittest.mock import Mock
+
+import pytest
+
+from plane_mcp.journey.base import JourneyBase, with_lod
+from plane_mcp.journey.lod import LODProfile, apply_lod, inject_sequence_id
 
 
 @pytest.fixture

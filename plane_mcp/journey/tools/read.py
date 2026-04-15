@@ -1,13 +1,15 @@
 """Read tools for Journey Endpoint."""
 
 from typing import Literal
+
 from fastmcp import FastMCP
-from plane_mcp.journey.cache import get_cached_project_slugs_docstring
+from plane.models.query_params import RetrieveQueryParams
+
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.resolver import EntityResolver
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
 from plane_mcp.journey.lod import LODProfile
-from plane.models.query_params import RetrieveQueryParams
+from plane_mcp.resolver import EntityResolver
+
 
 class ReadJourney(JourneyBase):
     def search_tickets(
@@ -74,7 +76,10 @@ class ReadJourney(JourneyBase):
                     "results": [],
                     "next_cursor": None,
                     "prev_cursor": None,
-                    "warnings": [f"Label filter could not be applied due to an error: {e}. Please retry or check your label names."],
+                    "warnings": [
+                        f"Label filter could not be applied due to an error: {e}. "
+                        "Please retry or check your label names."
+                    ],
                 }
                 
         if assignees:
@@ -146,7 +151,9 @@ class ReadJourney(JourneyBase):
             result["warnings"] = [f"Label not found and filter was skipped: {', '.join(unresolved_labels)}"]
         return result
 
-    def read_ticket(self, ticket_id: str, lod: Literal["summary", "standard", "full"] = "standard", comments: bool = False) -> dict:
+    def read_ticket(
+        self, ticket_id: str, lod: Literal["summary", "standard", "full"] = "standard", comments: bool = False
+    ) -> dict:
         work_item_id = self.resolver.resolve_ticket(ticket_id)
         project_identifier, _issue_sequence = self.parse_ticket_id(ticket_id)
         project_id = self.resolver.resolve_project(project_identifier)
@@ -183,7 +190,9 @@ class ReadJourney(JourneyBase):
                     username = "user"
                     # Try to extract the best available identifier
                     if hasattr(c, 'actor_detail') and c.actor_detail:
-                        username = getattr(c.actor_detail, 'display_name', getattr(c.actor_detail, 'username', username))
+                        username = getattr(
+                            c.actor_detail, 'display_name', getattr(c.actor_detail, 'username', username)
+                        )
                     elif hasattr(c, 'actor') and c.actor:
                         username = str(c.actor)
                         
@@ -234,7 +243,8 @@ def register_read_tools(mcp: FastMCP) -> None:
         If the desired result is not in the current page, call again with the provided next_cursor.
 
         Args:
-            project_slug: The Plane project identifier (e.g., 'PLANE' or 'TEST'). To discover valid project slugs, states, and labels, call this tool with project_slug='help'.
+            project_slug: The Plane project identifier (e.g., 'PLANE' or 'TEST'). To discover valid project slugs, 
+                states, and labels, call this tool with project_slug='help'.
             query: Free-form text search query.
             labels: List of label names to filter by (e.g., ['bug', 'feature']).
             priority: List of priorities to filter by (e.g., ['urgent', 'high', 'medium', 'low', 'none']).
@@ -248,12 +258,15 @@ def register_read_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     @mcp_error_boundary
-    def read_ticket(ticket_id: str, lod: Literal["summary", "standard", "full"] = "standard", comments: bool = False) -> dict:
+    def read_ticket(
+        ticket_id: str, lod: Literal["summary", "standard", "full"] = "standard", comments: bool = False
+    ) -> dict:
         """
         Read the details of a single ticket.
 
         Args:
-            ticket_id: The globally unique, human-readable identifier (e.g., ENG-123). The system automatically resolves the project and issue routing from this prefix.
+            ticket_id: The globally unique, human-readable identifier (e.g., ENG-123). The system automatically 
+                resolves the project and issue routing from this prefix.
             lod: Level of Detail profile ("summary", "standard", "full"). Default is "standard".
             comments: If true, fetches and appends the ticket's comments to the result.
         """

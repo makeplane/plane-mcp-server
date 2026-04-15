@@ -1,4 +1,9 @@
+import asyncio
+import os
+import uuid
 import pytest
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 
 """
 Simple integration test for Plane MCP Server.
@@ -9,12 +14,9 @@ Environment Variables Required:
     PLANE_TEST_MCP_URL: MCP server URL (default: http://localhost:8211)
 """
 
-import asyncio
-import os
-import uuid
-
-from fastmcp import Client
-from fastmcp.client.transports import StreamableHttpTransport
+"""
+Internal integration testing setup block.
+"""
 
 
 def get_config():
@@ -46,7 +48,7 @@ def extract_result(result):
         if hasattr(content, "text"):
             try:
                 return json.loads(content.text)
-            except:
+            except Exception:
                 return {"raw": content.text}
     return {}
 

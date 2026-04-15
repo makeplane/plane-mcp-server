@@ -1,8 +1,9 @@
-import os
 import json
-import time
-import tempfile
 import logging
+import os
+import tempfile
+import time
+
 
 def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
     from plane_mcp.client import get_plane_client_context
@@ -22,7 +23,7 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
     if os.path.exists(cache_file):
         if time.time() - os.path.getmtime(cache_file) < cache_ttl_seconds:
             try:
-                with open(cache_file, "r") as f:
+                with open(cache_file) as f:
                     context = json.load(f)
             except Exception as e:
                 logging.getLogger(__name__).debug(f"Cache read failed for {cache_file}, will refresh: {e}")
@@ -33,8 +34,6 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
                 response = ctx.client.projects.list(workspace_slug=ctx.workspace_slug)
                 
                 projects = []
-                states_by_project = {}
-                labels_by_project = {}
                 
                 for p in response.results:
                     proj_dict = {

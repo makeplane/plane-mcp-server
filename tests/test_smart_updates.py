@@ -1,7 +1,10 @@
-import pytest
 from unittest.mock import MagicMock, patch
-from plane_mcp.resolver import EntityResolver
+
+import pytest
+
 from plane_mcp.journey.tools.create_update import CreateUpdateJourney
+from plane_mcp.resolver import EntityResolver
+
 
 @pytest.fixture
 def mock_client():
@@ -109,7 +112,7 @@ def test_replace_text_missing_snippet(mock_get_context, journey, mock_client):
     result = journey.update_ticket("TEST-1", replace_text="qux")
     
     assert result["status"] == "error"
-    assert "must provide 'replace_target_snippet'" in result["message"]
+    assert "did not provide 'replace_target_snippet'" in result["message"]
     assert not mock_client.work_items.update.called
 
 @patch('plane_mcp.journey.tools.create_update.get_plane_client_context')
