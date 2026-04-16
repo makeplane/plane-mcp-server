@@ -1,6 +1,6 @@
 [project]
 name = "plane-mcp-server"
-version = "0.2.10"
+version = "0.2.9"
 description = "A Model Context Protocol server for Plane integration"
 readme = "README.md"
 requires-python = ">=3.10"
