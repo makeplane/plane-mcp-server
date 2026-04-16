@@ -190,23 +190,22 @@ def register_cycle_tools(mcp: FastMCP) -> None:
     def add_work_items_to_cycle(
         project_id: str,
         cycle_id: str,
-        issue_ids: list[str],
+        work_item_ids: list[str],
     ) -> None:
         """
         Add work items to a cycle.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cycle_id: UUID of the cycle
-            issue_ids: List of work item IDs to add to the cycle
+            work_item_ids: List of work item UUIDs to add to the cycle
         """
         client, workspace_slug = get_plane_client_context()
         client.cycles.add_work_items(
             workspace_slug=workspace_slug,
             project_id=project_id,
             cycle_id=cycle_id,
-            issue_ids=issue_ids,
+            issue_ids=work_item_ids,
         )
 
     @mcp.tool()
