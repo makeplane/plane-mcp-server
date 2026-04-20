@@ -58,11 +58,24 @@ def get_cached_workspace_context(cache_ttl_seconds: int = 300) -> dict:
                 all_states = sorted({s for p in projects for s in p.get("states", [])})
                 all_labels = sorted({label for p in projects for label in p.get("labels", [])})
                 
+                try:
+                    stickies_res = ctx.client.stickies.list(workspace_slug=ctx.workspace_slug)
+                    stickies = [
+                        {
+                            "name": s.name or "Untitled", 
+                            "description": s.description_stripped or ""
+                        } 
+                        for s in stickies_res.results
+                    ]
+                except Exception:
+                    stickies = []
+                
                 context = {
                     "projects": projects,
                     "priorities": ["urgent", "high", "medium", "low", "none"],
                     "all_states": all_states,
-                    "all_labels": all_labels
+                    "all_labels": all_labels,
+                    "stickies": stickies
                 }
                 
                 with open(cache_file, "w") as f:

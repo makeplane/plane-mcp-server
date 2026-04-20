@@ -91,7 +91,12 @@ class CreateUpdateJourney(JourneyBase):
         if project_slug.lower() == 'help':
             from plane_mcp.journey.cache import get_cached_workspace_context
             ctx = get_cached_workspace_context(0)
-            llm_content = {"projects": ctx.get("projects", []), "priorities": ctx.get("priorities", [])}
+            llm_content = {
+                "projects": ctx.get("projects", []), 
+                "priorities": ctx.get("priorities", []),
+                "stickies": ctx.get("stickies", [])
+            }
+            import json
             return llm_content
 
         project_id = self.resolver.resolve_project(project_slug)
@@ -270,6 +275,7 @@ def register_create_update_tools(mcp: FastMCP) -> None:
         if project_slug.lower() == 'help':
             return raw_data
 
+        import json
         return raw_data
 
     create_ticket.__doc__ = """
@@ -319,4 +325,5 @@ def register_create_update_tools(mcp: FastMCP) -> None:
             ticket_id, new_title, append_text, append_after_snippet, replace_text, replace_target_snippet, comment
         )
         
+        import json
         return raw_data

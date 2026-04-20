@@ -175,7 +175,9 @@ def register_workflow_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = WorkflowJourney(resolver)
-        return journey.transition_ticket(ticket_id, state_name)
+        raw_data = journey.transition_ticket(ticket_id, state_name)
+        import json
+        return raw_data
         
     transition_ticket.__doc__ = """
         Transition a ticket to a new state.
@@ -204,7 +206,9 @@ def register_workflow_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = WorkflowJourney(resolver)
-        return journey.begin_work(ticket_ids, cycle_name)
+        raw_data = journey.begin_work(ticket_ids, cycle_name)
+        import json
+        return raw_data
 
     @mcp.tool()
     @mcp_error_boundary
@@ -222,4 +226,6 @@ def register_workflow_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = WorkflowJourney(resolver)
-        return journey.complete_work(ticket_id, comment)
+        raw_data = journey.complete_work(ticket_id, comment)
+        import json
+        return raw_data
