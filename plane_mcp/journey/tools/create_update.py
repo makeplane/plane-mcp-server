@@ -10,6 +10,7 @@ from plane.models.work_items import CreateWorkItem, UpdateWorkItem
 
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
+from plane_mcp.journey.yaml_formatter import with_yaml
 from plane_mcp.resolver import EntityResolver
 from plane_mcp.sanitize import sanitize_html
 
@@ -91,14 +92,21 @@ class CreateUpdateJourney(JourneyBase):
         if project_slug.lower() == 'help':
             from plane_mcp.journey.cache import get_cached_workspace_context
             ctx = get_cached_workspace_context(0)
+            
+            raw_stickies = ctx.get("stickies", [])
+            processed_stickies = []
+            for s in raw_stickies:
+                desc = s.get("description_stripped") or s.get("description") or ""
+                if desc:
+                    processed_stickies.append(desc)
+
             llm_content = {
                 "projects": ctx.get("projects", []), 
                 "priorities": ctx.get("priorities", []),
-                "stickies": ctx.get("stickies", [])
+                "stickies": processed_stickies
             }
-            import json
-            return llm_content
 
+            return llm_content
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()
         
@@ -275,9 +283,8 @@ def register_create_update_tools(mcp: FastMCP) -> None:
         if project_slug.lower() == 'help':
             return raw_data
 
-        import json
-        return raw_data
 
+        return raw_data
     create_ticket.__doc__ = """
         Create a new ticket with automatic resolution of labels and cycles.
         Missing labels or cycles will be automatically created.
@@ -292,9 +299,10 @@ def register_create_update_tools(mcp: FastMCP) -> None:
             labels: List of label names.
             cycle_name: Name of the cycle to add this ticket to.
         """
-    create_ticket = mcp.tool()(mcp_error_boundary(create_ticket))
+    create_ticket = mcp.tool()(with_yaml(mcp_error_boundary(create_ticket)))
 
     @mcp.tool()
+    @with_yaml
     @mcp_error_boundary
     def update_ticket(
         ticket_id: str,
@@ -325,5 +333,5 @@ def register_create_update_tools(mcp: FastMCP) -> None:
             ticket_id, new_title, append_text, append_after_snippet, replace_text, replace_target_snippet, comment
         )
         
-        import json
+
         return raw_data
