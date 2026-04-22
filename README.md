@@ -71,11 +71,14 @@ Connect to the hosted Plane MCP server using a Personal Access Token (PAT).
   "mcpServers": {
     "plane": {
       "command": "npx",
-      "args": ["mcp-remote@latest", "https://mcp.plane.so/http/api-key/mcp"],
-      "headers": {
-        "Authorization": "Bearer <PAT_TOKEN>",
-        "X-Workspace-slug": "<SLUG>"
-      }
+      "args": [
+        "mcp-remote@latest",
+        "https://mcp.plane.so/http/api-key/mcp",
+        "--header",
+        "Authorization: Bearer <PAT_TOKEN>",
+        "--header",
+        "X-Workspace-slug: <SLUG>"
+      ]
     }
   }
 }
