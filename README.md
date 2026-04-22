@@ -58,7 +58,7 @@ Connect to the hosted Plane MCP server using OAuth authentication.
 
 Connect to the hosted Plane MCP server using a Personal Access Token (PAT).
 
-**URL**: `https://mcp.plane.so/api-key/mcp`
+**URL**: `https://mcp.plane.so/http/api-key/mcp`
 
 **Headers**:
 - `Authorization: Bearer <PAT_TOKEN>`
