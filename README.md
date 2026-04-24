@@ -13,6 +13,10 @@ A Model Context Protocol (MCP) server for Plane integration. This server provide
 
 The server supports three transport methods. **We recommend using `uvx`** as it doesn't require installation.
 
+**Requirements**:
+- **Python 3.10+** (for stdio transport, via `uvx`)
+- **Node.js 22+** (for remote transports, via `npx`)
+
 ### 1. Stdio Transport (for local use)
 
 **MCP Client Configuration** (using uvx - recommended):
@@ -58,7 +62,7 @@ Connect to the hosted Plane MCP server using OAuth authentication.
 
 Connect to the hosted Plane MCP server using a Personal Access Token (PAT).
 
-**URL**: `https://mcp.plane.so/api-key/mcp`
+**URL**: `https://mcp.plane.so/http/api-key/mcp`
 
 **Headers**:
 - `Authorization: Bearer <PAT_TOKEN>`
@@ -218,13 +222,127 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `update_work_item_property` | Update a work item property with partial data |
 | `delete_work_item_property` | Delete a work item property by ID |
 
+### Epics
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_epics` | List all epics in a project |
+| `create_epic` | Create a new epic |
+| `retrieve_epic` | Retrieve an epic by ID |
+| `update_epic` | Update an epic by ID |
+| `delete_epic` | Delete an epic by ID |
+
+### Milestones
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_milestones` | List all milestones in a project |
+| `create_milestone` | Create a new milestone |
+| `retrieve_milestone` | Retrieve a milestone by ID |
+| `update_milestone` | Update a milestone by ID |
+| `delete_milestone` | Delete a milestone by ID |
+| `add_work_items_to_milestone` | Add work items to a milestone |
+| `remove_work_items_from_milestone` | Remove work items from a milestone |
+| `list_milestone_work_items` | List work items in a milestone |
+
+### Labels
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_labels` | List all labels in a project |
+| `create_label` | Create a new label |
+| `retrieve_label` | Retrieve a label by ID |
+| `update_label` | Update a label by ID |
+| `delete_label` | Delete a label by ID |
+
+### States
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_states` | List all states in a project |
+| `create_state` | Create a new state |
+| `retrieve_state` | Retrieve a state by ID |
+| `update_state` | Update a state by ID |
+| `delete_state` | Delete a state by ID |
+
+### Work Item Comments
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_item_comments` | List comments for a work item |
+| `retrieve_work_item_comment` | Retrieve a specific comment for a work item |
+| `create_work_item_comment` | Create a comment for a work item |
+| `update_work_item_comment` | Update a comment for a work item |
+| `delete_work_item_comment` | Delete a comment for a work item |
+
+### Work Item Links
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_item_links` | List links for a work item |
+| `retrieve_work_item_link` | Retrieve a specific link for a work item |
+| `create_work_item_link` | Create a link for a work item |
+| `update_work_item_link` | Update a link for a work item |
+| `delete_work_item_link` | Delete a link for a work item |
+
+### Work Item Types
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_item_types` | List all work item types in a project |
+| `create_work_item_type` | Create a new work item type |
+| `retrieve_work_item_type` | Retrieve a work item type by ID |
+| `update_work_item_type` | Update a work item type by ID |
+| `delete_work_item_type` | Delete a work item type by ID |
+
+### Work Item Relations
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_item_relations` | List relations for a work item |
+| `create_work_item_relation` | Create relations for a work item |
+| `remove_work_item_relation` | Remove a relation from a work item |
+
+### Work Item Activities
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_item_activities` | List activities for a work item |
+| `retrieve_work_item_activity` | Retrieve a specific activity for a work item |
+
+### Work Logs
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_logs` | List work logs for a work item |
+| `create_work_log` | Create a work log for a work item |
+| `update_work_log` | Update a work log for a work item |
+| `delete_work_log` | Delete a work log for a work item |
+
+### Pages
+
+| Tool Name | Description |
+|-----------|-------------|
+| `retrieve_workspace_page` | Retrieve a workspace page by ID |
+| `retrieve_project_page` | Retrieve a project page by ID |
+| `create_workspace_page` | Create a workspace page |
+| `create_project_page` | Create a project page |
+
+### Workspaces
+
+| Tool Name | Description |
+|-----------|-------------|
+| `get_workspace_members` | Get all members of the current workspace |
+| `get_workspace_features` | Get features of the current workspace |
+| `update_workspace_features` | Update features of the current workspace |
+
 ### Users
 
 | Tool Name | Description |
 |-----------|-------------|
 | `get_me` | Get current authenticated user information |
 
-**Total Tools**: 55+ tools across 8 categories
+**Total Tools**: 100+ tools across 20 categories
 
 ## Development
 
