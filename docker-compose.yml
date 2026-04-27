@@ -1,0 +1,31 @@
+# This docker-compose configuration is intended for stand-alone MCP server testing.
+services:
+  plane-mcp:
+    build: .
+    container_name: plane-mcp
+    restart: unless-stopped
+    ports:
+      - "${FASTMCP_PORT:-8211}:${FASTMCP_PORT:-8211}"
+    environment:
+      - PLANE_API_KEY=${PLANE_API_KEY}
+      - PLANE_WORKSPACE_SLUG=${PLANE_WORKSPACE_SLUG}
+      - PLANE_BASE_URL=${PLANE_BASE_URL}
+      - FASTMCP_PORT=${FASTMCP_PORT:-8211}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    entrypoint: ["python", "-m", "plane_mcp"]
+    command: ["http"]
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:alpine
+    container_name: plane-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

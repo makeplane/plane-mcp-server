@@ -1,3 +1,10 @@
+import asyncio
+import os
+import uuid
+import pytest
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
+
 """
 Simple integration test for Plane MCP Server.
 
@@ -7,12 +14,9 @@ Environment Variables Required:
     PLANE_TEST_MCP_URL: MCP server URL (default: http://localhost:8211)
 """
 
-import asyncio
-import os
-import uuid
-
-from fastmcp import Client
-from fastmcp.client.transports import StreamableHttpTransport
+"""
+Internal integration testing setup block.
+"""
 
 
 def get_config():
@@ -44,7 +48,7 @@ def extract_result(result):
         if hasattr(content, "text"):
             try:
                 return json.loads(content.text)
-            except:
+            except Exception:
                 return {"raw": content.text}
     return {}
 
@@ -244,6 +248,10 @@ async def run_integration_test():
         print("Integration test passed!")
 
 
+@pytest.mark.skipif(
+    not os.getenv("PLANE_TEST_API_KEY") or not os.getenv("PLANE_TEST_WORKSPACE_SLUG"),
+    reason="Missing PLANE_TEST_API_KEY or PLANE_TEST_WORKSPACE_SLUG"
+)
 def test_full_integration():
     """Pytest entry point - runs the async integration test."""
     asyncio.run(run_integration_test())
@@ -404,6 +412,10 @@ async def run_tools_availability_test():
         print("Tools availability test passed!")
 
 
+@pytest.mark.skipif(
+    not os.getenv("PLANE_TEST_API_KEY") or not os.getenv("PLANE_TEST_WORKSPACE_SLUG"),
+    reason="Missing PLANE_TEST_API_KEY or PLANE_TEST_WORKSPACE_SLUG"
+)
 def test_tools_availability():
     """Pytest entry point - verifies all expected tools are registered."""
     asyncio.run(run_tools_availability_test())
