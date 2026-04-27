@@ -6,59 +6,17 @@ from fastmcp import FastMCP
 from plane.models.enums import TimezoneEnum
 from plane.models.projects import (
     CreateProject,
-    PaginatedProjectResponse,
     Project,
     ProjectFeature,
     ProjectWorklogSummary,
     UpdateProject,
 )
-from plane.models.query_params import PaginatedQueryParams
-from plane.models.users import UserLite
 
 from plane_mcp.client import get_plane_client_context
 
 
 def register_project_tools(mcp: FastMCP) -> None:
     """Register all project-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_projects(
-        cursor: str | None = None,
-        per_page: int | None = None,
-        expand: str | None = None,
-        fields: str | None = None,
-        order_by: str | None = None,
-    ) -> list[Project]:
-        """
-        List all projects in a workspace.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            cursor: Pagination cursor for getting next set of results
-            per_page: Number of results per page (1-100)
-            expand: Comma-separated list of related fields to expand in response
-            fields: Comma-separated list of fields to include in response
-            order_by: Field to order results by. Prefix with '-' for descending order
-
-        Returns:
-            List of Project objects
-        """
-        client, workspace_slug = get_plane_client_context()
-
-        params = PaginatedQueryParams(
-            cursor=cursor,
-            per_page=per_page,
-            expand=expand,
-            fields=fields,
-            order_by=order_by,
-        )
-
-        response: PaginatedProjectResponse = client.projects.list(
-            workspace_slug=workspace_slug,
-            params=params,
-        )
-
-        return response.results
 
     @mcp.tool()
     def create_project(
@@ -140,21 +98,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         )
 
         return client.projects.create(workspace_slug=workspace_slug, data=data)
-
-    @mcp.tool()
-    def retrieve_project(project_id: str) -> Project:
-        """
-        Retrieve a project by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-
-        Returns:
-            Project object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
     def update_project(
@@ -274,22 +217,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
         return client.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
-
-    @mcp.tool()
-    def get_project_members(project_id: str, params: dict[str, Any] | None = None) -> list[UserLite]:
-        """
-        Get all members of a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of UserLite objects representing project members
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id, params=params)
 
     @mcp.tool()
     def get_project_features(project_id: str) -> ProjectFeature:

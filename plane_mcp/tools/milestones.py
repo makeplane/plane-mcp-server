@@ -6,9 +6,6 @@ from fastmcp import FastMCP
 from plane.models.milestones import (
     CreateMilestone,
     Milestone,
-    MilestoneWorkItem,
-    PaginatedMilestoneResponse,
-    PaginatedMilestoneWorkItemResponse,
     UpdateMilestone,
 )
 
@@ -17,27 +14,6 @@ from plane_mcp.client import get_plane_client_context
 
 def register_milestone_tools(mcp: FastMCP) -> None:
     """Register all milestone-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_milestones(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[Milestone]:
-        """
-        List all milestones in a project.
-
-        Args:
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of Milestone objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedMilestoneResponse = client.milestones.list(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
-        return response.results
 
     @mcp.tool()
     def create_milestone(
@@ -70,23 +46,6 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         )
 
         return client.milestones.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
-
-    @mcp.tool()
-    def retrieve_milestone(project_id: str, milestone_id: str) -> Milestone:
-        """
-        Retrieve a milestone by ID.
-
-        Args:
-            project_id: UUID of the project
-            milestone_id: UUID of the milestone
-
-        Returns:
-            Milestone object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.milestones.retrieve(
-            workspace_slug=workspace_slug, project_id=project_id, milestone_id=milestone_id
-        )
 
     @mcp.tool()
     def update_milestone(
@@ -183,28 +142,3 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             issue_ids=issue_ids,
         )
 
-    @mcp.tool()
-    def list_milestone_work_items(
-        project_id: str,
-        milestone_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[MilestoneWorkItem]:
-        """
-        List work items in a milestone.
-
-        Args:
-            project_id: UUID of the project
-            milestone_id: UUID of the milestone
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of MilestoneWorkItem objects in the milestone
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedMilestoneWorkItemResponse = client.milestones.list_work_items(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            milestone_id=milestone_id,
-            params=params,
-        )
-        return response.results
