@@ -11,6 +11,7 @@ from plane.models.work_item_properties import (
     PropertySettings,
     UpdateWorkItemProperty,
     WorkItemProperty,
+    WorkItemPropertyValueDetail,
 )
 from plane.models.work_item_property_configurations import (
     DateAttributeSettings,
@@ -280,38 +281,31 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
     def list_work_item_property_values(
         project_id: str,
         work_item_id: str,
-        include_unset: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> list[WorkItemPropertyValueDetail]:
         """
         List custom property values currently set on a work item.
 
-        Resolves the work item's type, lists all active property definitions for
-        that type, and fetches the value (if any) for each property. Useful for
-        retrieving member-type custom fields such as ``Responsible`` or ``Review``
-        whose values do not appear in ``retrieve_work_item``.
+        Resolves the work item's type, iterates over all active property
+        definitions for that type, and fetches the value (if any) for each
+        property. Useful for retrieving member-type custom fields such as
+        ``Responsible`` or ``Review`` whose values do not appear in
+        ``retrieve_work_item`` under any value of ``expand``.
 
         Args:
             project_id: UUID of the project
             work_item_id: UUID of the work item
-            include_unset: If True, include properties without a set value
-                (``value`` will be ``None``). Default False — only properties
-                with values are returned.
 
         Returns:
-            List of dicts, one per property. Each dict contains:
-              - ``property_id``: UUID of the property definition
-              - ``display_name``: Human-readable name (e.g. "Responsible")
-              - ``name``: Internal name (slug)
-              - ``property_type``: TEXT/DATETIME/DECIMAL/BOOLEAN/OPTION/RELATION/URL/EMAIL/FILE
-              - ``relation_type``: USER/ISSUE for RELATION properties, else None
-              - ``is_multi``: Whether the property accepts multiple values
-              - ``value``: Single value or list of values (for multi). For
-                RELATION/USER it is the user UUID(s).
-              - ``value_record_ids``: ID(s) of the underlying value records.
+            Flat list of ``WorkItemPropertyValueDetail`` objects, one per
+            single-value property that has a value set; multi-value properties
+            contribute one entry per value. Properties without a value, or
+            marked ``is_active=False``, are omitted. Returns an empty list if
+            the work item has no type assigned.
 
-        Notes:
-            * Returns an empty list if the work item has no type assigned.
-            * Properties marked ``is_active=False`` are skipped.
+            Each entry exposes ``property_id``, so callers that need the
+            human-readable name should pair this with
+            ``list_work_item_properties(project_id, type_id)`` to map IDs to
+            ``display_name``.
         """
         client, workspace_slug = get_plane_client_context()
 
@@ -330,13 +324,10 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             type_id=type_id,
         )
 
-        result: list[dict[str, Any]] = []
+        result: list[WorkItemPropertyValueDetail] = []
         for prop in properties:
             if not getattr(prop, "is_active", True):
                 continue
-
-            value: Any = None
-            value_record_ids: Any = None
             try:
                 value_obj = client.work_item_properties.values.retrieve(
                     workspace_slug=workspace_slug,
@@ -345,32 +336,21 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
                     property_id=prop.id,
                 )
             except HttpError as exc:
-                if exc.status_code != 404:
-                    raise
-                value_obj = None
-
-            if value_obj is None:
-                if not include_unset:
+                # Invariant: ``work_item_id`` was just resolved successfully and
+                # ``prop.id`` comes from the authoritative type-bound property
+                # listing — neither can be invalid here. The Plane API returns
+                # 404 with ``{"error": "Property value not set for this work
+                # item"}`` for properties that simply have no value, so a 404
+                # at this point means "unset" and we skip it. Any other status
+                # is a real error and is propagated.
+                if exc.status_code == 404:
                     continue
-            elif isinstance(value_obj, list):
-                value = [item.value for item in value_obj]
-                value_record_ids = [item.id for item in value_obj]
-            else:
-                value = value_obj.value
-                value_record_ids = value_obj.id
+                raise
 
-            result.append(
-                {
-                    "property_id": prop.id,
-                    "display_name": prop.display_name,
-                    "name": getattr(prop, "name", None),
-                    "property_type": _enum_value(prop.property_type),
-                    "relation_type": _enum_value(prop.relation_type),
-                    "is_multi": bool(getattr(prop, "is_multi", False)),
-                    "value": value,
-                    "value_record_ids": value_record_ids,
-                }
-            )
+            if isinstance(value_obj, list):
+                result.extend(value_obj)
+            else:
+                result.append(value_obj)
 
         return result
 
@@ -379,7 +359,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         property_id: str,
-    ) -> dict[str, Any] | list[dict[str, Any]] | None:
+    ) -> WorkItemPropertyValueDetail | list[WorkItemPropertyValueDetail]:
         """
         Retrieve the value(s) of a single custom property for a work item.
 
@@ -389,32 +369,23 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             property_id: UUID of the property definition
 
         Returns:
-            For single-value properties: a dict (or ``None`` if the value is
-            not set). For multi-value properties: a list of dicts.
-            Each dict mirrors ``WorkItemPropertyValueDetail`` (id, value,
-            value_type, property_id, issue_id, created_at, updated_at, ...).
+            ``WorkItemPropertyValueDetail`` for single-value properties or a
+            list of ``WorkItemPropertyValueDetail`` for multi-value properties
+            (``is_multi=True``).
+
+        Raises:
+            HttpError: ``status_code=404`` is raised both when the
+                ``work_item_id`` / ``property_id`` is invalid *and* when the
+                property has no value set; the underlying Plane API does not
+                distinguish between the two cases at this endpoint. Use
+                ``list_work_item_property_values`` to enumerate properties that
+                are currently set on a work item without having to handle 404s.
         """
         client, workspace_slug = get_plane_client_context()
 
-        try:
-            value_obj = client.work_item_properties.values.retrieve(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                work_item_id=work_item_id,
-                property_id=property_id,
-            )
-        except HttpError as exc:
-            if exc.status_code == 404:
-                return None
-            raise
-
-        if isinstance(value_obj, list):
-            return [item.model_dump() for item in value_obj]
-        return value_obj.model_dump()
-
-
-def _enum_value(value: Any) -> Any:
-    """Convert an enum-like field to its plain value, leave other types alone."""
-    if value is None:
-        return None
-    return getattr(value, "value", value)
+        return client.work_item_properties.values.retrieve(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            property_id=property_id,
+        )
