@@ -12,15 +12,12 @@ authors = [
 keywords = ["mcp", "plane", "fastmcp", "ai", "automation"]
 
 dependencies = [
-    "fastmcp==2.14.4",
+    "fastmcp==3.2.0",
     "plane-sdk==0.2.10",
-    "py-key-value-aio[redis]==0.3.0",
+    "py-key-value-aio[redis]>=0.4.4,<0.5.0",
     "mcp==1.26.0",
     "PyJWT>=2.12.0",
     "authlib>=1.6.9",
-    # pydocket 0.16.6 (pinned by fastmcp 2.14.4) imports `FakeConnection` from
-    # `fakeredis.aioredis`, which was removed in fakeredis 2.35.0.
-    "fakeredis[lua]>=2.32.1,<2.35.0",
 ]
 
 [project.optional-dependencies]
