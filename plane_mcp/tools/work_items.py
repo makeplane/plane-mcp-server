@@ -478,3 +478,52 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         )
 
         return client.work_items.search(workspace_slug=workspace_slug, query=query, params=params)
+
+    @mcp.tool()
+    def advanced_search_work_items(
+        query: str | None = None,
+        filters: dict | None = None,
+        project_id: str | None = None,
+        workspace_search: bool | None = None,
+        limit: int | None = None,
+    ) -> list[AdvancedSearchResult]:
+        """
+        Search work items with advanced filters using AND/OR logic.
+
+        Supports filtering by assignee, state, priority, labels, dates, and more
+        using structured filter groups. Use this when you need to find work items
+        matching specific criteria (e.g. unassigned urgent items, items in a
+        particular state group).
+
+        Filter keys include: assignee_id, assignee_id__in, state_id, state_id__in,
+        state_group, state_group__in, priority, priority__in, label_id, label_id__in,
+        created_by_id, created_by_id__in, is_draft, is_archived, start_date, target_date,
+        target_date__range, cycle_id, module_id, subscriber_id, and more.
+
+        Args:
+            query: Optional free-text search string to match against work item
+                   name and description
+            filters: Optional structured filter dict using AND/OR groups.
+                     Example: {"and": [{"state_group__in": ["unstarted", "started"]},
+                     {"priority__in": ["urgent", "high"]}]}
+            project_id: Optional project UUID to scope the search to a single project
+            workspace_search: If true, search across all projects in the workspace
+            limit: Maximum number of results to return
+
+        Returns:
+            List of AdvancedSearchResult objects
+        """
+        client, workspace_slug = get_plane_client_context()
+
+        data = AdvancedSearchWorkItem(
+            query=query,
+            filters=filters,
+            limit=limit,
+            project_id=project_id,
+            workspace_search=workspace_search,
+        )
+
+        return client.work_items.advanced_search(
+            workspace_slug=workspace_slug,
+            data=data,
+        )
