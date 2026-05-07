@@ -3,6 +3,7 @@
 from typing import Any
 
 from fastmcp import FastMCP
+from plane.errors import HttpError
 from plane.models.enums import PropertyType, RelationType
 from plane.models.work_item_properties import (
     CreateWorkItemProperty,
@@ -10,6 +11,7 @@ from plane.models.work_item_properties import (
     PropertySettings,
     UpdateWorkItemProperty,
     WorkItemProperty,
+    WorkItemPropertyValueDetail,
 )
 from plane.models.work_item_property_configurations import (
     DateAttributeSettings,
@@ -273,4 +275,117 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             project_id=project_id,
             type_id=type_id,
             work_item_property_id=work_item_property_id,
+        )
+
+    @mcp.tool()
+    def list_work_item_property_values(
+        project_id: str,
+        work_item_id: str,
+    ) -> list[WorkItemPropertyValueDetail]:
+        """
+        List custom property values currently set on a work item.
+
+        Resolves the work item's type, iterates over all active property
+        definitions for that type, and fetches the value (if any) for each
+        property. Useful for retrieving member-type custom fields such as
+        ``Responsible`` or ``Review`` whose values do not appear in
+        ``retrieve_work_item`` under any value of ``expand``.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+
+        Returns:
+            Flat list of ``WorkItemPropertyValueDetail`` objects, one per
+            single-value property that has a value set; multi-value properties
+            contribute one entry per value. Properties without a value, or
+            marked ``is_active=False``, are omitted. Returns an empty list if
+            the work item has no type assigned.
+
+            Each entry exposes ``property_id``, so callers that need the
+            human-readable name should pair this with
+            ``list_work_item_properties(project_id, type_id)`` to map IDs to
+            ``display_name``.
+        """
+        client, workspace_slug = get_plane_client_context()
+
+        work_item = client.work_items.retrieve(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+        )
+        type_id = getattr(work_item, "type_id", None)
+        if not type_id:
+            return []
+
+        properties = client.work_item_properties.list(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            type_id=type_id,
+        )
+
+        result: list[WorkItemPropertyValueDetail] = []
+        for prop in properties:
+            if not getattr(prop, "is_active", True):
+                continue
+            try:
+                value_obj = client.work_item_properties.values.retrieve(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    work_item_id=work_item_id,
+                    property_id=prop.id,
+                )
+            except HttpError as exc:
+                # Invariant: ``work_item_id`` was just resolved successfully and
+                # ``prop.id`` comes from the authoritative type-bound property
+                # listing — neither can be invalid here. The Plane API returns
+                # 404 with ``{"error": "Property value not set for this work
+                # item"}`` for properties that simply have no value, so a 404
+                # at this point means "unset" and we skip it. Any other status
+                # is a real error and is propagated.
+                if exc.status_code == 404:
+                    continue
+                raise
+
+            if isinstance(value_obj, list):
+                result.extend(value_obj)
+            else:
+                result.append(value_obj)
+
+        return result
+
+    @mcp.tool()
+    def retrieve_work_item_property_value(
+        project_id: str,
+        work_item_id: str,
+        property_id: str,
+    ) -> WorkItemPropertyValueDetail | list[WorkItemPropertyValueDetail]:
+        """
+        Retrieve the value(s) of a single custom property for a work item.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+            property_id: UUID of the property definition
+
+        Returns:
+            ``WorkItemPropertyValueDetail`` for single-value properties or a
+            list of ``WorkItemPropertyValueDetail`` for multi-value properties
+            (``is_multi=True``).
+
+        Raises:
+            HttpError: ``status_code=404`` is raised both when the
+                ``work_item_id`` / ``property_id`` is invalid *and* when the
+                property has no value set; the underlying Plane API does not
+                distinguish between the two cases at this endpoint. Use
+                ``list_work_item_property_values`` to enumerate properties that
+                are currently set on a work item without having to handle 404s.
+        """
+        client, workspace_slug = get_plane_client_context()
+
+        return client.work_item_properties.values.retrieve(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            property_id=property_id,
         )
