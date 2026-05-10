@@ -23,32 +23,6 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
     """Register all work item property-related tools with the MCP server."""
 
     @mcp.tool()
-    def list_work_item_properties(
-        project_id: str,
-        type_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[WorkItemProperty]:
-        """
-        List work item properties for a work item type.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            type_id: UUID of the work item type
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of WorkItemProperty objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.work_item_properties.list(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            type_id=type_id,
-            params=params,
-        )
-
-    @mcp.tool()
     def create_work_item_property(
         project_id: str,
         type_id: str,
@@ -135,32 +109,6 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
 
         return client.work_item_properties.create(
             workspace_slug=workspace_slug, project_id=project_id, type_id=type_id, data=data
-        )
-
-    @mcp.tool()
-    def retrieve_work_item_property(
-        project_id: str,
-        type_id: str,
-        work_item_property_id: str,
-    ) -> WorkItemProperty:
-        """
-        Retrieve a work item property by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            type_id: UUID of the work item type
-            work_item_property_id: UUID of the property
-
-        Returns:
-            WorkItemProperty object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.work_item_properties.retrieve(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            type_id=type_id,
-            work_item_property_id=work_item_property_id,
         )
 
     @mcp.tool()
