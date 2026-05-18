@@ -1,6 +1,6 @@
 """Module-related tools for Plane MCP Server."""
 
-from typing import Any, get_args
+from typing import Any, TypedDict, get_args
 
 from fastmcp import FastMCP
 from plane.models.enums import ModuleStatusEnum
@@ -15,6 +15,12 @@ from plane.models.modules import (
 from plane.models.work_items import WorkItem
 
 from plane_mcp.client import get_plane_client_context
+
+
+class AddWorkItemsToModuleResult(TypedDict):
+    """Result returned after successfully adding work items to a module."""
+
+    success: bool
 
 
 def register_module_tools(mcp: FastMCP) -> None:
@@ -208,7 +214,7 @@ def register_module_tools(mcp: FastMCP) -> None:
         project_id: str,
         module_id: str,
         work_item_ids: list[str],
-    ) -> None:
+    ) -> AddWorkItemsToModuleResult:
         """
         Add work items to a module.
 
@@ -216,6 +222,9 @@ def register_module_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project
             module_id: UUID of the module
             work_item_ids: List of work item UUIDs to add to the module
+
+        Returns:
+            Success status for the operation
         """
         client, workspace_slug = get_plane_client_context()
         client.modules.add_work_items(
@@ -224,6 +233,7 @@ def register_module_tools(mcp: FastMCP) -> None:
             module_id=module_id,
             issue_ids=work_item_ids,
         )
+        return {"success": True}
 
     @mcp.tool()
     def remove_work_item_from_module(
