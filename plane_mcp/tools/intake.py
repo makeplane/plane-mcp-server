@@ -131,6 +131,11 @@ def register_intake_tools(mcp: FastMCP) -> None:
         Returns:
             Updated IntakeWorkItem object
         """
+        if status == 0 and not snoozed_till:
+            raise ValueError("snoozed_till is required when status=0 (snoozed)")
+        if status == 2 and not duplicate_to:
+            raise ValueError("duplicate_to is required when status=2 (duplicate)")
+
         client, workspace_slug = get_plane_client_context()
         intake_data = UpdateIntakeWorkItem(
             status=status,

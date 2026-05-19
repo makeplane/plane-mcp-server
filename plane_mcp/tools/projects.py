@@ -217,6 +217,9 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Updated Project object
         """
+        if network is not None and network not in {0, 2}:
+            raise ValueError("network must be 0 (secret) or 2 (public)")
+
         client, workspace_slug = get_plane_client_context()
 
         # Validate timezone against allowed literal values
@@ -265,7 +268,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         client.projects.delete(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def archive_project(project_id: str) -> dict:
+    def archive_project(project_id: str) -> None:
         """
         Archive a project.
 
@@ -274,12 +277,9 @@ def register_project_tools(mcp: FastMCP) -> None:
 
         Args:
             project_id: UUID of the project to archive
-
-        Returns:
-            Dict with archived_at timestamp
         """
         client, workspace_slug = get_plane_client_context()
-        return client.projects.archive(workspace_slug=workspace_slug, project_id=project_id)
+        client.projects.archive(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
     def unarchive_project(project_id: str) -> None:
