@@ -4,6 +4,7 @@ from typing import Any, get_args
 
 from fastmcp import FastMCP
 from plane.models.enums import TimezoneEnum
+from plane.models.estimates import Estimate, EstimatePoint
 from plane.models.projects import (
     CreateProject,
     PaginatedProjectResponse,
@@ -166,6 +167,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         identifier: str | None = None,
         emoji: str | None = None,
         cover_image: str | None = None,
+        network: int | None = None,
         module_view: bool | None = None,
         cycle_view: bool | None = None,
         issue_views_view: bool | None = None,
@@ -195,6 +197,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             identifier: Project identifier
             emoji: Emoji for the project
             cover_image: Cover image URL or asset ID
+            network: Project visibility (0=secret, 2=public)
             module_view: Enable module view
             cycle_view: Enable cycle view
             issue_views_view: Enable issue views view
@@ -229,6 +232,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             identifier=identifier,
             emoji=emoji,
             cover_image=cover_image,
+            network=network,
             module_view=module_view,
             cycle_view=cycle_view,
             issue_views_view=issue_views_view,
@@ -259,6 +263,34 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
         client.projects.delete(workspace_slug=workspace_slug, project_id=project_id)
+
+    @mcp.tool()
+    def archive_project(project_id: str) -> dict:
+        """
+        Archive a project.
+
+        Archived projects are hidden from active project lists but not deleted.
+        All work items, cycles, and modules are preserved.
+
+        Args:
+            project_id: UUID of the project to archive
+
+        Returns:
+            Dict with archived_at timestamp
+        """
+        client, workspace_slug = get_plane_client_context()
+        return client.projects.archive(workspace_slug=workspace_slug, project_id=project_id)
+
+    @mcp.tool()
+    def unarchive_project(project_id: str) -> None:
+        """
+        Unarchive a project, restoring it to active status.
+
+        Args:
+            project_id: UUID of the project to unarchive
+        """
+        client, workspace_slug = get_plane_client_context()
+        client.projects.unarchive(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
     def get_project_worklog_summary(project_id: str) -> list[ProjectWorklogSummary]:
@@ -347,3 +379,50 @@ def register_project_tools(mcp: FastMCP) -> None:
         )
 
         return client.projects.update_features(workspace_slug=workspace_slug, project_id=project_id, data=data)
+
+    @mcp.tool()
+    def get_project_estimate(project_id: str) -> Estimate:
+        """
+        Get the estimate configuration for a project.
+
+        Returns the active estimate system including its ID, which is required
+        to call list_project_estimate_points.
+
+        Args:
+            project_id: UUID of the project
+
+        Returns:
+            Estimate object with id, name, and type fields
+        """
+        client, workspace_slug = get_plane_client_context()
+        return client.estimates.retrieve(workspace_slug=workspace_slug, project_id=project_id)
+
+    @mcp.tool()
+    def list_project_estimate_points(project_id: str, estimate_id: str) -> list[EstimatePoint]:
+        """
+        List all valid estimate points for a project.
+
+        Use this to discover the available estimate point UUIDs before calling
+        update_work_item with an estimate_point value. Each EstimatePoint has
+        an id (UUID to pass to update_work_item) and a value (display label
+        such as "1", "2", "3", "5", "8" or "XS", "S", "M", "L", "XL").
+
+        Workflow:
+            1. Call get_project_estimate to get the estimate_id
+            2. Call list_project_estimate_points with that estimate_id
+            3. Pick the EstimatePoint whose value matches the user's intent
+            4. Pass that EstimatePoint.id to update_work_item(estimate_point=...)
+
+        Args:
+            project_id: UUID of the project
+            estimate_id: UUID of the estimate (from get_project_estimate)
+
+        Returns:
+            List of EstimatePoint objects, each with id and value fields
+        """
+        client, workspace_slug = get_plane_client_context()
+        return client.estimates.list_points(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            estimate_id=estimate_id,
+        )

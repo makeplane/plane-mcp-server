@@ -7,9 +7,11 @@ from plane.models.enums import PropertyType, RelationType
 from plane.models.work_item_properties import (
     CreateWorkItemProperty,
     CreateWorkItemPropertyOption,
+    CreateWorkItemPropertyValue,
     PropertySettings,
     UpdateWorkItemProperty,
     WorkItemProperty,
+    WorkItemPropertyValueDetail,
 )
 from plane.models.work_item_property_configurations import (
     DateAttributeSettings,
@@ -25,7 +27,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_work_item_properties(
         project_id: str,
-        type_id: str,
+        work_item_type_id: str,
         params: dict[str, Any] | None = None,
     ) -> list[WorkItemProperty]:
         """
@@ -34,7 +36,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            type_id: UUID of the work item type
+            work_item_type_id: UUID of the work item type
             params: Optional query parameters as a dictionary
 
         Returns:
@@ -44,14 +46,14 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         return client.work_item_properties.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            type_id=type_id,
+            type_id=work_item_type_id,
             params=params,
         )
 
     @mcp.tool()
     def create_work_item_property(
         project_id: str,
-        type_id: str,
+        work_item_type_id: str,
         display_name: str,
         property_type: str,
         relation_type: str | None = None,
@@ -72,10 +74,10 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            type_id: UUID of the work item type
+            work_item_type_id: UUID of the work item type
             display_name: Display name for the property
             property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN,
-                OPTION, RELATION, URL, EMAIL, FILE)
+                OPTION, RELATION, URL, EMAIL, FILE, FORMULA)
             relation_type: Relation type (ISSUE, USER) - required for RELATION properties
             description: Property description
             is_required: Whether the property is required
@@ -134,13 +136,13 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         )
 
         return client.work_item_properties.create(
-            workspace_slug=workspace_slug, project_id=project_id, type_id=type_id, data=data
+            workspace_slug=workspace_slug, project_id=project_id, type_id=work_item_type_id, data=data
         )
 
     @mcp.tool()
     def retrieve_work_item_property(
         project_id: str,
-        type_id: str,
+        work_item_type_id: str,
         work_item_property_id: str,
     ) -> WorkItemProperty:
         """
@@ -149,7 +151,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            type_id: UUID of the work item type
+            work_item_type_id: UUID of the work item type
             work_item_property_id: UUID of the property
 
         Returns:
@@ -159,14 +161,14 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         return client.work_item_properties.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            type_id=type_id,
+            type_id=work_item_type_id,
             work_item_property_id=work_item_property_id,
         )
 
     @mcp.tool()
     def update_work_item_property(
         project_id: str,
-        type_id: str,
+        work_item_type_id: str,
         work_item_property_id: str,
         display_name: str | None = None,
         property_type: str | None = None,
@@ -187,11 +189,11 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            type_id: UUID of the work item type
+            work_item_type_id: UUID of the work item type
             work_item_property_id: UUID of the property
             display_name: Display name for the property
             property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN,
-                OPTION, RELATION, URL, EMAIL, FILE)
+                OPTION, RELATION, URL, EMAIL, FILE, FORMULA)
             relation_type: Relation type (ISSUE, USER) - required when updating to RELATION
             description: Property description
             is_required: Whether the property is required
@@ -247,7 +249,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         return client.work_item_properties.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            type_id=type_id,
+            type_id=work_item_type_id,
             work_item_property_id=work_item_property_id,
             data=data,
         )
@@ -255,7 +257,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def delete_work_item_property(
         project_id: str,
-        type_id: str,
+        work_item_type_id: str,
         work_item_property_id: str,
     ) -> None:
         """
@@ -264,13 +266,116 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            type_id: UUID of the work item type
+            work_item_type_id: UUID of the work item type
             work_item_property_id: UUID of the property
         """
         client, workspace_slug = get_plane_client_context()
         client.work_item_properties.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            type_id=type_id,
+            type_id=work_item_type_id,
             work_item_property_id=work_item_property_id,
+        )
+
+    @mcp.tool()
+    def get_work_item_property_value(
+        project_id: str,
+        work_item_id: str,
+        property_id: str,
+    ) -> WorkItemPropertyValueDetail | list[WorkItemPropertyValueDetail]:
+        """
+        Get the value(s) of a custom property on a work item.
+
+        Use list_work_item_properties to find the property_id for a given
+        property name (e.g. "Acceptance Criteria").
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+            property_id: UUID of the work item property
+
+        Returns:
+            Single WorkItemPropertyValueDetail for non-multi properties,
+            or list of WorkItemPropertyValueDetail for multi-value properties
+        """
+        client, workspace_slug = get_plane_client_context()
+        return client.work_item_properties.values.retrieve(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            property_id=property_id,
+        )
+
+    @mcp.tool()
+    def set_work_item_property_value(
+        project_id: str,
+        work_item_id: str,
+        property_id: str,
+        value: str | bool | int | float | list[str],
+        external_id: str | None = None,
+        external_source: str | None = None,
+    ) -> WorkItemPropertyValueDetail | list[WorkItemPropertyValueDetail]:
+        """
+        Set (create or update) the value of a custom property on a work item.
+
+        Acts as an upsert — creates the value if it does not exist, updates it
+        if it does. For multi-value properties (is_multi=True), replaces all
+        existing values with the new ones.
+
+        Value types by property type:
+            TEXT/URL/EMAIL/FILE: string
+            DATETIME: string (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
+            DECIMAL: int or float
+            BOOLEAN: true or false
+            OPTION/RELATION (single): UUID string
+            OPTION/RELATION (multi, is_multi=True): list of UUID strings
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+            property_id: UUID of the work item property
+            value: The value to set (type depends on the property type — see above)
+            external_id: Optional external identifier for syncing
+            external_source: Optional external source name (e.g. "github", "jira")
+
+        Returns:
+            Single WorkItemPropertyValueDetail for non-multi properties,
+            or list of WorkItemPropertyValueDetail for multi-value properties
+        """
+        client, workspace_slug = get_plane_client_context()
+        data = CreateWorkItemPropertyValue(
+            value=value,
+            external_id=external_id,
+            external_source=external_source,
+        )
+        return client.work_item_properties.values.create(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            property_id=property_id,
+            data=data,
+        )
+
+    @mcp.tool()
+    def delete_work_item_property_value(
+        project_id: str,
+        work_item_id: str,
+        property_id: str,
+    ) -> None:
+        """
+        Delete the value(s) of a custom property on a work item.
+
+        For multi-value properties, deletes all values for that property.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+            property_id: UUID of the work item property
+        """
+        client, workspace_slug = get_plane_client_context()
+        client.work_item_properties.values.delete(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            property_id=property_id,
         )
