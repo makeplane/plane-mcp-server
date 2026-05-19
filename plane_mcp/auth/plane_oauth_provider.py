@@ -320,8 +320,8 @@ class PlaneOAuthProvider(OAuthProxy):
         plane_base_url_final = settings.plane_base_url or os.getenv("PLANE_BASE_URL", DEFAULT_PLANE_BASE_URL)
         # Internal URL for server-to-server calls (token exchange, API verification)
         # Falls back to external URL if not set
-        plane_internal_url = settings.plane_internal_base_url or os.getenv(
-            "PLANE_INTERNAL_BASE_URL", plane_base_url_final
+        plane_internal_url = (
+            settings.plane_internal_base_url or os.getenv("PLANE_INTERNAL_BASE_URL") or plane_base_url_final
         )
 
         # Create Plane token verifier (uses internal URL for server-to-server calls)
