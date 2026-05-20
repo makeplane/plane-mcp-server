@@ -22,7 +22,6 @@ from starlette.testclient import TestClient
 
 from plane_mcp.auth import PlaneOAuthProvider
 
-
 # Exact allowed patterns from plane_mcp/server.py
 ALLOWED_REDIRECT_URI_PATTERNS = [
     "http://localhost:*",
