@@ -12,31 +12,6 @@ def register_work_log_tools(mcp: FastMCP) -> None:
     """Register all work log-related tools with the MCP server."""
 
     @mcp.tool()
-    def list_work_logs(
-        project_id: str,
-        work_item_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[WorkItemWorkLog]:
-        """
-        List work logs for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of WorkItemWorkLog objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.work_items.work_logs.list(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-            params=params,
-        )
-
-    @mcp.tool()
     def create_work_log(
         project_id: str,
         work_item_id: str,

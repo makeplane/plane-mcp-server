@@ -1,12 +1,9 @@
 """Label-related tools for Plane MCP Server."""
 
-from typing import Any
-
 from fastmcp import FastMCP
 from plane.models.labels import (
     CreateLabel,
     Label,
-    PaginatedLabelResponse,
     UpdateLabel,
 )
 
@@ -15,27 +12,6 @@ from plane_mcp.client import get_plane_client_context
 
 def register_label_tools(mcp: FastMCP) -> None:
     """Register all label-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_labels(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[Label]:
-        """
-        List all labels in a project.
-
-        Args:
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of Label objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedLabelResponse = client.labels.list(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
-        return response.results
 
     @mcp.tool()
     def create_label(
@@ -77,21 +53,6 @@ def register_label_tools(mcp: FastMCP) -> None:
         )
 
         return client.labels.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
-
-    @mcp.tool()
-    def retrieve_label(project_id: str, label_id: str) -> Label:
-        """
-        Retrieve a label by ID.
-
-        Args:
-            project_id: UUID of the project
-            label_id: UUID of the label
-
-        Returns:
-            Label object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.labels.retrieve(workspace_slug=workspace_slug, project_id=project_id, label_id=label_id)
 
     @mcp.tool()
     def update_label(

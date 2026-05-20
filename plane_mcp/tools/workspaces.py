@@ -1,7 +1,6 @@
 """Workspace-related tools for Plane MCP Server."""
 
 from fastmcp import FastMCP
-from plane.models.users import UserLite
 from plane.models.workspaces import WorkspaceFeature
 
 from plane_mcp.client import get_plane_client_context
@@ -9,17 +8,6 @@ from plane_mcp.client import get_plane_client_context
 
 def register_workspace_tools(mcp: FastMCP) -> None:
     """Register all workspace-related tools with the MCP server."""
-
-    @mcp.tool()
-    def get_workspace_members() -> list[UserLite]:
-        """
-        Get all members of the current workspace.
-
-        Returns:
-            List of UserLite objects representing workspace members
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.workspaces.get_members(workspace_slug=workspace_slug)
 
     @mcp.tool()
     def get_workspace_features() -> WorkspaceFeature:

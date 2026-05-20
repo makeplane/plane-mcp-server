@@ -1,13 +1,10 @@
 """Initiative-related tools for Plane MCP Server."""
 
-from typing import Any
-
 from fastmcp import FastMCP
 from plane.models.enums import InitiativeState
 from plane.models.initiatives import (
     CreateInitiative,
     Initiative,
-    PaginatedInitiativeResponse,
     UpdateInitiative,
 )
 
@@ -16,24 +13,6 @@ from plane_mcp.client import get_plane_client_context
 
 def register_initiative_tools(mcp: FastMCP) -> None:
     """Register all initiative-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_initiatives(
-        params: dict[str, Any] | None = None,
-    ) -> list[Initiative]:
-        """
-        List all initiatives in a workspace.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            params: Optional query parameters as a dictionary (e.g., per_page, cursor)
-
-        Returns:
-            List of Initiative objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedInitiativeResponse = client.initiatives.list(workspace_slug=workspace_slug, params=params)
-        return response.results
 
     @mcp.tool()
     def create_initiative(
@@ -74,21 +53,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         )
 
         return client.initiatives.create(workspace_slug=workspace_slug, data=data)
-
-    @mcp.tool()
-    def retrieve_initiative(initiative_id: str) -> Initiative:
-        """
-        Retrieve an initiative by ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            initiative_id: UUID of the initiative
-
-        Returns:
-            Initiative object
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.initiatives.retrieve(workspace_slug=workspace_slug, initiative_id=initiative_id)
 
     @mcp.tool()
     def update_initiative(

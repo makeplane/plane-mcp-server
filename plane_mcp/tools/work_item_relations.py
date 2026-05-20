@@ -7,7 +7,6 @@ from plane.models.enums import WorkItemRelationTypeEnum
 from plane.models.work_items import (
     CreateWorkItemRelation,
     RemoveWorkItemRelation,
-    WorkItemRelationResponse,
 )
 
 from plane_mcp.client import get_plane_client_context
@@ -15,36 +14,6 @@ from plane_mcp.client import get_plane_client_context
 
 def register_work_item_relation_tools(mcp: FastMCP) -> None:
     """Register all work item relation-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_work_item_relations(
-        project_id: str,
-        work_item_id: str,
-    ) -> WorkItemRelationResponse:
-        """
-        List relations for a work item.
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item
-
-        Returns:
-            WorkItemRelationResponse containing lists of related work items by relation type:
-            - blocking: Work items that are blocking this item
-            - blocked_by: Work items that this item is blocked by
-            - duplicate: Work items that are duplicates of this item
-            - relates_to: Work items that relate to this item
-            - start_after: Work items that start after this item
-            - start_before: Work items that start before this item
-            - finish_after: Work items that finish after this item
-            - finish_before: Work items that finish before this item
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.work_items.relations.list(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-        )
 
     @mcp.tool()
     def create_work_item_relation(
