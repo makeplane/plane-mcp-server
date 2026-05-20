@@ -284,6 +284,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
+        # Always expand assignees to get UserLite objects instead of bare UUIDs.
+        if expand:
+            if "assignees" not in expand:
+                expand = f"{expand},assignees"
+        else:
+            expand = "assignees"
+
         params = RetrieveQueryParams(
             expand=expand,
             fields=fields,
@@ -326,6 +333,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             WorkItemDetail object with expanded relationships
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Always expand assignees to get UserLite objects instead of bare UUIDs.
+        if expand:
+            if "assignees" not in expand:
+                expand = f"{expand},assignees"
+        else:
+            expand = "assignees"
 
         params = RetrieveQueryParams(
             expand=expand,
