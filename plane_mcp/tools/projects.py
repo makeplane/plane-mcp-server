@@ -4,7 +4,14 @@ from typing import Any, get_args
 
 from fastmcp import FastMCP
 from plane.models.enums import TimezoneEnum
-from plane.models.estimates import Estimate, EstimatePoint
+from plane.models.estimates import (
+    CreateEstimate,
+    CreateEstimatePoint,
+    Estimate,
+    EstimatePoint,
+    UpdateEstimate,
+    UpdateEstimatePoint,
+)
 from plane.models.projects import (
     CreateProject,
     PaginatedProjectResponse,
@@ -425,4 +432,203 @@ def register_project_tools(mcp: FastMCP) -> None:
             workspace_slug=workspace_slug,
             project_id=project_id,
             estimate_id=estimate_id,
+        )
+
+    @mcp.tool()
+    def create_project_estimate(
+        project_id: str,
+        name: str,
+        type: str | None = None,
+        description: str | None = None,
+        last_used: bool = True,
+        external_id: str | None = None,
+        external_source: str | None = None,
+    ) -> Estimate:
+        """
+        Create a new estimate for a project.
+
+        Args:
+            project_id: UUID of the project
+            name: Name of the estimate (e.g., "Story Points", "T-Shirt Sizes")
+            type: Estimate type — "categories", "points", or "time"
+            description: Optional description
+            last_used: Whether this becomes the active estimate (default True)
+            external_id: External system identifier
+            external_source: External system source name
+
+        Returns:
+            Created Estimate object
+        """
+        client, workspace_slug = get_plane_client_context()
+        data = CreateEstimate(
+            name=name,
+            type=type,
+            description=description,
+            last_used=last_used,
+            external_id=external_id,
+            external_source=external_source,
+        )
+        return client.estimates.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
+
+    @mcp.tool()
+    def update_project_estimate(
+        project_id: str,
+        name: str | None = None,
+        description: str | None = None,
+        external_id: str | None = None,
+        external_source: str | None = None,
+    ) -> Estimate:
+        """
+        Update the estimate for a project.
+
+        Args:
+            project_id: UUID of the project
+            name: New name for the estimate
+            description: New description
+            external_id: External system identifier
+            external_source: External system source name
+
+        Returns:
+            Updated Estimate object
+        """
+        client, workspace_slug = get_plane_client_context()
+        data = UpdateEstimate(
+            name=name,
+            description=description,
+            external_id=external_id,
+            external_source=external_source,
+        )
+        return client.estimates.update(workspace_slug=workspace_slug, project_id=project_id, data=data)
+
+    @mcp.tool()
+    def delete_project_estimate(project_id: str) -> None:
+        """
+        Delete the estimate for a project.
+
+        Args:
+            project_id: UUID of the project
+        """
+        client, workspace_slug = get_plane_client_context()
+        client.estimates.delete(workspace_slug=workspace_slug, project_id=project_id)
+
+    @mcp.tool()
+    def link_estimate_to_project(project_id: str, estimate_id: str) -> Project:
+        """
+        Link an estimate to a project, making it the active estimate system.
+
+        Args:
+            project_id: UUID of the project
+            estimate_id: UUID of the estimate to activate
+
+        Returns:
+            Updated Project object
+        """
+        client, workspace_slug = get_plane_client_context()
+        return client.estimates.link_to_project(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            estimate_id=estimate_id,
+        )
+
+    @mcp.tool()
+    def create_project_estimate_points(
+        project_id: str,
+        estimate_id: str,
+        points: list[dict],
+    ) -> list[EstimatePoint]:
+        """
+        Create estimate points for a project estimate.
+
+        Each point dict may have: value (required, max 20 chars), key (int),
+        description, external_id, external_source.
+
+        Example:
+            points=[
+                {"value": "1", "key": 0},
+                {"value": "2", "key": 1},
+                {"value": "3", "key": 2},
+                {"value": "5", "key": 3},
+                {"value": "8", "key": 4},
+            ]
+
+        Args:
+            project_id: UUID of the project
+            estimate_id: UUID of the estimate
+            points: List of point definitions
+
+        Returns:
+            List of created EstimatePoint objects
+        """
+        client, workspace_slug = get_plane_client_context()
+        data = [CreateEstimatePoint(**p) for p in points]
+        return client.estimates.create_points(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            estimate_id=estimate_id,
+            data=data,
+        )
+
+    @mcp.tool()
+    def update_project_estimate_point(
+        project_id: str,
+        estimate_id: str,
+        estimate_point_id: str,
+        value: str | None = None,
+        key: int | None = None,
+        description: str | None = None,
+        external_id: str | None = None,
+        external_source: str | None = None,
+    ) -> EstimatePoint:
+        """
+        Update a single estimate point.
+
+        Args:
+            project_id: UUID of the project
+            estimate_id: UUID of the estimate
+            estimate_point_id: UUID of the estimate point to update
+            value: New display value (max 20 chars, e.g. "XL", "13")
+            key: New sort key (integer)
+            description: New description
+            external_id: External system identifier
+            external_source: External system source name
+
+        Returns:
+            Updated EstimatePoint object
+        """
+        client, workspace_slug = get_plane_client_context()
+        data = UpdateEstimatePoint(
+            value=value,
+            key=key,
+            description=description,
+            external_id=external_id,
+            external_source=external_source,
+        )
+        return client.estimates.update_point(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            estimate_id=estimate_id,
+            estimate_point_id=estimate_point_id,
+            data=data,
+        )
+
+    @mcp.tool()
+    def delete_project_estimate_point(
+        project_id: str,
+        estimate_id: str,
+        estimate_point_id: str,
+    ) -> None:
+        """
+        Delete a single estimate point.
+
+        Args:
+            project_id: UUID of the project
+            estimate_id: UUID of the estimate
+            estimate_point_id: UUID of the estimate point to delete
+        """
+        client, workspace_slug = get_plane_client_context()
+        client.estimates.delete_point(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            estimate_id=estimate_id,
+            estimate_point_id=estimate_point_id,
         )
