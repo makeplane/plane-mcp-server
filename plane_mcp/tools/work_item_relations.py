@@ -59,8 +59,15 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
         Args:
             project_id: UUID of the project
             work_item_id: UUID of the work item
-            relation_type: Type of relationship (blocking, blocked_by, duplicate,
-                          relates_to, start_before, start_after, finish_before, finish_after)
+            relation_type: Type of relationship. Must be one of:
+                - "relates_to"    — general relationship (default when unsure)
+                - "blocking"      — this item is blocking the listed items
+                - "blocked_by"    — this item is blocked by the listed items
+                - "duplicate"     — this item duplicates the listed items
+                - "start_after"   — this item starts after the listed items
+                - "start_before"  — this item starts before the listed items
+                - "finish_after"  — this item finishes after the listed items
+                - "finish_before" — this item finishes before the listed items
             issues: List of work item IDs to create relations with
         """
         client, workspace_slug = get_plane_client_context()
