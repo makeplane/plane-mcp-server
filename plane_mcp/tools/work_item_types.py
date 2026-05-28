@@ -17,26 +17,26 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_work_item_types(
-        project_id: str,
+        project_id: str | None = None,
         params: dict[str, Any] | None = None,
     ) -> list[WorkItemType]:
         """
-        List all work item types in a project.
+        List work item types. Omit project_id for workspace-level types.
 
-        Args:
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of WorkItemType objects
+        Each result's `id` is the `work_item_type_id` needed by list_work_item_properties
+        to look up custom property and option UUIDs for PQL cf[] filters.
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id, params=params)
+        if project_id:
+            return client.work_item_types.list(
+                workspace_slug=workspace_slug, project_id=project_id, params=params
+            )
+        return client.workspace_work_item_types.list(workspace_slug=workspace_slug)
 
     @mcp.tool()
     def create_work_item_type(
-        project_id: str,
         name: str,
+        project_id: str | None = None,
         description: str | None = None,
         project_ids: list[str] | None = None,
         is_epic: bool | None = None,
@@ -48,8 +48,8 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Create a new work item type.
 
         Args:
-            project_id: UUID of the project
             name: Work item type name
+            project_id: UUID of the project. Omit for workspace-level type.
             description: Work item type description
             project_ids: List of project IDs this type applies to
             is_epic: Whether this is an epic type
@@ -72,34 +72,43 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.work_item_types.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
+        if project_id:
+            return client.work_item_types.create(
+                workspace_slug=workspace_slug, project_id=project_id, data=data
+            )
+        return client.workspace_work_item_types.create(workspace_slug=workspace_slug, data=data)
 
     @mcp.tool()
     def retrieve_work_item_type(
-        project_id: str,
         work_item_type_id: str,
+        project_id: str | None = None,
     ) -> WorkItemType:
         """
         Retrieve a work item type by ID.
 
         Args:
-            project_id: UUID of the project
             work_item_type_id: UUID of the work item type
+            project_id: UUID of the project. Omit for workspace scope.
 
         Returns:
             WorkItemType object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_types.retrieve(
+        if project_id:
+            return client.work_item_types.retrieve(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_type_id=work_item_type_id,
+            )
+        return client.workspace_work_item_types.retrieve(
             workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_type_id=work_item_type_id,
+            type_id=work_item_type_id,
         )
 
     @mcp.tool()
     def update_work_item_type(
-        project_id: str,
         work_item_type_id: str,
+        project_id: str | None = None,
         name: str | None = None,
         description: str | None = None,
         project_ids: list[str] | None = None,
@@ -112,8 +121,8 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Update a work item type by ID.
 
         Args:
-            project_id: UUID of the project
             work_item_type_id: UUID of the work item type
+            project_id: UUID of the project. Omit for workspace scope.
             name: Work item type name
             description: Work item type description
             project_ids: List of project IDs this type applies to
@@ -137,28 +146,40 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.work_item_types.update(
+        if project_id:
+            return client.work_item_types.update(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_type_id=work_item_type_id,
+                data=data,
+            )
+        return client.workspace_work_item_types.update(
             workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_type_id=work_item_type_id,
+            type_id=work_item_type_id,
             data=data,
         )
 
     @mcp.tool()
     def delete_work_item_type(
-        project_id: str,
         work_item_type_id: str,
+        project_id: str | None = None,
     ) -> None:
         """
         Delete a work item type by ID.
 
         Args:
-            project_id: UUID of the project
             work_item_type_id: UUID of the work item type
+            project_id: UUID of the project. Omit for workspace scope.
         """
         client, workspace_slug = get_plane_client_context()
-        client.work_item_types.delete(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_type_id=work_item_type_id,
-        )
+        if project_id:
+            client.work_item_types.delete(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_type_id=work_item_type_id,
+            )
+        else:
+            client.workspace_work_item_types.delete(
+                workspace_slug=workspace_slug,
+                type_id=work_item_type_id,
+            )
