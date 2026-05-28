@@ -1,5 +1,6 @@
 """Cycle-related tools for Plane MCP Server."""
 
+from datetime import date
 from typing import Any
 
 from fastmcp import FastMCP
@@ -289,8 +290,11 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         """
         Archive a cycle.
 
+        Plane requires the cycle end_date to be in the past before archiving.
+        This tool automatically sets end_date to today if the cycle is still
+        active (end_date is missing or in the future), then archives it.
+
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cycle_id: UUID of the cycle
 
@@ -298,7 +302,44 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             True if the cycle was archived successfully
         """
         client, workspace_slug = get_plane_client_context()
+        today = date.today().isoformat()
+
+        cycle = client.cycles.retrieve(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
+        end_date = cycle.end_date if hasattr(cycle, "end_date") else None
+        if not end_date or end_date > today:
+            client.cycles.update(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                cycle_id=cycle_id,
+                data=UpdateCycle(end_date=today),
+            )
+
         return client.cycles.archive(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
+
+    @mcp.tool()
+    def complete_cycle(project_id: str, cycle_id: str) -> Cycle:
+        """
+        Complete (close) a cycle by setting its end date to today.
+
+        Plane has no explicit "complete" action — a cycle is considered complete
+        when its end_date is in the past. This tool sets end_date to today,
+        effectively closing the cycle.
+
+        Args:
+            project_id: UUID of the project
+            cycle_id: UUID of the cycle to complete
+
+        Returns:
+            Updated Cycle object
+        """
+        client, workspace_slug = get_plane_client_context()
+        today = date.today().isoformat()
+        return client.cycles.update(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            cycle_id=cycle_id,
+            data=UpdateCycle(end_date=today),
+        )
 
     @mcp.tool()
     def unarchive_cycle(project_id: str, cycle_id: str) -> bool:

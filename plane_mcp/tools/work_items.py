@@ -29,7 +29,6 @@ def _build_advanced_search_filters(
     type_ids: list[str] | None = None,
     cycle_ids: list[str] | None = None,
     module_ids: list[str] | None = None,
-    is_archived: bool | None = None,
     created_by_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Build an AND filter dict from flat filter params."""
@@ -50,8 +49,6 @@ def _build_advanced_search_filters(
         conditions.append({"cycle_id__in": cycle_ids})
     if module_ids:
         conditions.append({"module_id__in": module_ids})
-    if is_archived is not None:
-        conditions.append({"is_archived": is_archived})
     if created_by_ids:
         conditions.append({"created_by_id__in": created_by_ids})
     if not conditions:
@@ -76,7 +73,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         type_ids: list[str] | None = None,
         cycle_ids: list[str] | None = None,
         module_ids: list[str] | None = None,
-        is_archived: bool | None = None,
         created_by_ids: list[str] | None = None,
         workspace_search: bool = False,
         limit: int | None = None,
@@ -92,7 +88,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         List work items in a project or search across the workspace.
 
         When any filter parameter is provided (assignee_ids, state_ids, state_groups,
-        priorities, label_ids, type_ids, cycle_ids, module_ids, is_archived,
+        priorities, label_ids, type_ids, cycle_ids, module_ids,
         created_by_ids, or query), this uses the advanced search endpoint which
         supports powerful filtering. Otherwise it uses the standard list endpoint.
 
@@ -110,7 +106,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type_ids: List of work item type UUIDs to filter by type
             cycle_ids: List of cycle UUIDs to filter by cycle
             module_ids: List of module UUIDs to filter by module
-            is_archived: Filter by archived status (true/false)
             created_by_ids: List of user UUIDs to filter by creator
             workspace_search: When true, search across all projects in the workspace.
                 Only used with filters. Defaults to false.
@@ -138,7 +133,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type_ids=type_ids,
             cycle_ids=cycle_ids,
             module_ids=module_ids,
-            is_archived=is_archived,
             created_by_ids=created_by_ids,
         )
 
@@ -441,6 +435,185 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
         client.work_items.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
+
+    @mcp.tool()
+    def add_work_item_assignee(project_id: str, work_item_id: str, user_id: str) -> WorkItem:
+        """
+        Add an assignee to a work item without removing existing assignees.
+
+        Use this instead of update_work_item when you only want to add one
+        assignee — update_work_item replaces the full assignees list.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+            user_id: UUID of the user to add as assignee
+
+        Returns:
+            Updated WorkItem object
+        """
+        client, workspace_slug = get_plane_client_context()
+        current = client.work_items.retrieve(
+            workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+        )
+        current_ids = [u.id for u in (current.assignees or []) if u.id]
+        if user_id not in current_ids:
+            current_ids.append(user_id)
+        return client.work_items.update(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            data=UpdateWorkItem(assignees=current_ids),
+        )
+
+    @mcp.tool()
+    def remove_work_item_assignee(project_id: str, work_item_id: str, user_id: str) -> WorkItem:
+        """
+        Remove an assignee from a work item without affecting other assignees.
+
+        Use this instead of update_work_item when you only want to remove one
+        assignee — update_work_item replaces the full assignees list.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+            user_id: UUID of the user to remove
+
+        Returns:
+            Updated WorkItem object
+        """
+        client, workspace_slug = get_plane_client_context()
+        current = client.work_items.retrieve(
+            workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+        )
+        current_ids = [u.id for u in (current.assignees or []) if u.id and u.id != user_id]
+        return client.work_items.update(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            data=UpdateWorkItem(assignees=current_ids),
+        )
+
+    @mcp.tool()
+    def add_work_item_label(project_id: str, work_item_id: str, label_id: str) -> WorkItem:
+        """
+        Add a label to a work item without removing existing labels.
+
+        Use this instead of update_work_item when you only want to add one
+        label — update_work_item replaces the full labels list.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+            label_id: UUID of the label to add
+
+        Returns:
+            Updated WorkItem object
+        """
+        client, workspace_slug = get_plane_client_context()
+        current = client.work_items.retrieve(
+            workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+        )
+        current_ids = [lb.id for lb in (current.labels or []) if lb.id]
+        if label_id not in current_ids:
+            current_ids.append(label_id)
+        return client.work_items.update(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            data=UpdateWorkItem(labels=current_ids),
+        )
+
+    @mcp.tool()
+    def remove_work_item_label(project_id: str, work_item_id: str, label_id: str) -> WorkItem:
+        """
+        Remove a label from a work item without affecting other labels.
+
+        Use this instead of update_work_item when you only want to remove one
+        label — update_work_item replaces the full labels list.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item
+            label_id: UUID of the label to remove
+
+        Returns:
+            Updated WorkItem object
+        """
+        client, workspace_slug = get_plane_client_context()
+        current = client.work_items.retrieve(
+            workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+        )
+        current_ids = [lb.id for lb in (current.labels or []) if lb.id and lb.id != label_id]
+        return client.work_items.update(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            data=UpdateWorkItem(labels=current_ids),
+        )
+
+    @mcp.tool()
+    def list_archived_work_items(
+        project_id: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[WorkItem]:
+        """
+        List archived work items in a project.
+
+        Args:
+            project_id: UUID of the project
+            params: Optional query parameters as a dictionary (e.g., per_page, cursor, priority, state)
+
+        Returns:
+            List of archived WorkItem objects
+        """
+        client, workspace_slug = get_plane_client_context()
+        query_params = None
+        if params:
+            query_params = WorkItemQueryParams(**params)
+        response = client.work_items.list_archived(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            params=query_params,
+        )
+        return response.results
+
+    @mcp.tool()
+    def archive_work_item(project_id: str, work_item_id: str) -> None:
+        """
+        Archive a work item.
+
+        Only work items in a completed or cancelled state can be archived.
+        The work item will no longer appear in active work item lists.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item to archive
+        """
+        client, workspace_slug = get_plane_client_context()
+        client.work_items.archive(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+        )
+
+    @mcp.tool()
+    def unarchive_work_item(project_id: str, work_item_id: str) -> None:
+        """
+        Unarchive a work item.
+
+        Restores an archived work item back to active status.
+
+        Args:
+            project_id: UUID of the project
+            work_item_id: UUID of the work item to unarchive
+        """
+        client, workspace_slug = get_plane_client_context()
+        client.work_items.unarchive(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=work_item_id,
+        )
 
     @mcp.tool()
     def search_work_items(
