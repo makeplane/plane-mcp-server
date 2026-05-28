@@ -1,6 +1,7 @@
 """Unit tests for plane_mcp.aws_secrets and the Redis token-store resolver."""
 
 import json
+import time
 
 import boto3
 import pytest
@@ -88,6 +89,71 @@ def test_get_secret_returns_copy(monkeypatch):
     first["authToken"] = "mutated"
     second = get_secret(ARN, REGION)
     assert second["authToken"] == "p1"
+
+
+def test_parse_default_ttl_valid(monkeypatch):
+    monkeypatch.setenv("AWS_SECRET_CACHE_TTL", "60")
+    assert aws_secrets._parse_default_ttl() == 60
+
+
+def test_parse_default_ttl_unset(monkeypatch):
+    monkeypatch.delenv("AWS_SECRET_CACHE_TTL", raising=False)
+    assert aws_secrets._parse_default_ttl() == 300
+
+
+def test_parse_default_ttl_invalid_falls_back(monkeypatch, caplog):
+    monkeypatch.setenv("AWS_SECRET_CACHE_TTL", "not-a-number")
+    with caplog.at_level("WARNING", logger="plane_mcp.aws_secrets"):
+        assert aws_secrets._parse_default_ttl() == 300
+    assert any("not an integer" in rec.message for rec in caplog.records)
+
+
+def test_get_secret_concurrent_race_uses_existing_fresh_entry(monkeypatch):
+    """If another thread populates the cache while we're fetching, prefer the
+    existing fresh entry rather than overwriting it."""
+    stubber = _stub_secrets(monkeypatch, [{"authToken": "ours"}])
+
+    # Simulate a racing thread that wrote a fresh entry while our fetch was in
+    # flight, by pre-populating the cache after we've passed the fast-path check
+    # but before the write-back. We do that by patching json.loads to inject.
+    original_loads = aws_secrets.json.loads
+
+    def _injecting_loads(s):
+        # Another thread "won" the race and wrote first.
+        aws_secrets._SECRET_CACHE[(ARN, REGION)] = {
+            "value": {"authToken": "theirs"},
+            "fetched_at": time.time(),
+        }
+        return original_loads(s)
+
+    monkeypatch.setattr(aws_secrets.json, "loads", _injecting_loads)
+
+    result = get_secret(ARN, REGION)
+    assert result == {"authToken": "theirs"}
+    assert aws_secrets._SECRET_CACHE[(ARN, REGION)]["value"] == {"authToken": "theirs"}
+    stubber.assert_no_pending_responses()
+
+
+def test_get_secret_force_refresh_overwrites_race_winner(monkeypatch):
+    """force_refresh=True always installs the freshly-fetched value, ignoring
+    any racing writer."""
+    stubber = _stub_secrets(monkeypatch, [{"authToken": "forced"}])
+
+    original_loads = aws_secrets.json.loads
+
+    def _injecting_loads(s):
+        aws_secrets._SECRET_CACHE[(ARN, REGION)] = {
+            "value": {"authToken": "stale-racer"},
+            "fetched_at": time.time(),
+        }
+        return original_loads(s)
+
+    monkeypatch.setattr(aws_secrets.json, "loads", _injecting_loads)
+
+    result = get_secret(ARN, REGION, force_refresh=True)
+    assert result == {"authToken": "forced"}
+    assert aws_secrets._SECRET_CACHE[(ARN, REGION)]["value"] == {"authToken": "forced"}
+    stubber.assert_no_pending_responses()
 
 
 def test_credential_provider_returns_password(monkeypatch):

@@ -17,30 +17,54 @@ from redis import CredentialProvider
 _SECRET_CACHE: dict[tuple[str, str], dict] = {}
 _cache_lock = threading.Lock()
 _logger = logging.getLogger(__name__)
-_DEFAULT_TTL = int(os.environ.get("AWS_SECRET_CACHE_TTL", 300))
+
+
+def _parse_default_ttl() -> int:
+    raw = os.getenv("AWS_SECRET_CACHE_TTL")
+    if raw is None:
+        return 300
+    try:
+        return int(raw)
+    except ValueError:
+        _logger.warning("AWS_SECRET_CACHE_TTL=%r is not an integer; using default 300", raw)
+        return 300
+
+
+_DEFAULT_TTL = _parse_default_ttl()
 
 
 def get_secret(secret_arn: str, region: str, force_refresh: bool = False) -> dict:
     """Fetch and TTL-cache a secret from AWS Secrets Manager.
 
     Returns a copy of the parsed JSON secret dict so callers cannot mutate the
-    cached value.
+    cached value. The boto3 call is issued outside the cache lock so concurrent
+    readers of fresh entries are not blocked during a refresh; a second check
+    under the lock resolves any race between concurrent refreshers.
     """
     cache_key = (secret_arn, region)
-    with _cache_lock:
-        if not force_refresh and cache_key in _SECRET_CACHE:
-            entry = _SECRET_CACHE[cache_key]
-            if time.time() - entry["fetched_at"] < _DEFAULT_TTL:
+
+    if not force_refresh:
+        with _cache_lock:
+            entry = _SECRET_CACHE.get(cache_key)
+            if entry and time.time() - entry["fetched_at"] < _DEFAULT_TTL:
                 return entry["value"].copy()
-        client = boto3.client("secretsmanager", region_name=region)
-        response = client.get_secret_value(SecretId=secret_arn)
-        value = json.loads(response["SecretString"])
+
+    client = boto3.client("secretsmanager", region_name=region)
+    response = client.get_secret_value(SecretId=secret_arn)
+    value = json.loads(response["SecretString"])
+    _logger.info(
+        "Refreshed secret from Secrets Manager",
+        extra={"secret_arn": secret_arn},
+    )
+
+    with _cache_lock:
+        if not force_refresh:
+            entry = _SECRET_CACHE.get(cache_key)
+            if entry and time.time() - entry["fetched_at"] < _DEFAULT_TTL:
+                return entry["value"].copy()
         _SECRET_CACHE[cache_key] = {"value": value, "fetched_at": time.time()}
-        _logger.info(
-            "Refreshed secret from Secrets Manager",
-            extra={"secret_arn": secret_arn},
-        )
-        return value.copy()
+
+    return value.copy()
 
 
 class ElastiCacheCredentialProvider(CredentialProvider):
