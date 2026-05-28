@@ -1,5 +1,6 @@
 """Plane MCP Server implementation."""
 
+import logging
 import os
 
 from fastmcp import FastMCP
@@ -11,23 +12,71 @@ from mcp.types import Icon
 from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
 from plane_mcp.tools import register_tools
 
+logger = logging.getLogger(__name__)
 
-def get_oauth_mcp(base_path: str = "/"):
-    import logging
 
-    logger = logging.getLogger(__name__)
+def _has_aws_credentials() -> bool:
+    # True when either IRSA (AWS_ROLE_ARN) or EKS Pod Identity
+    # (AWS_CONTAINER_CREDENTIALS_FULL_URI) is present. Mirrors plane-ee api service.
+    return bool(os.environ.get("AWS_ROLE_ARN", "") or os.environ.get("AWS_CONTAINER_CREDENTIALS_FULL_URI", ""))
 
+
+def _build_token_store():
     redis_host = os.getenv("REDIS_HOST")
     redis_port = os.getenv("REDIS_PORT")
+    password = os.getenv("REDIS_PASSWORD")
+    secret_arn = os.getenv("ELASTICACHE_SECRET_ARN")
+
+    if password:
+        if not (redis_host and redis_port):
+            raise RuntimeError("REDIS_PASSWORD is set but REDIS_HOST/REDIS_PORT are not — set both to use Redis.")
+        logger.info("Using Redis for token storage (password auth)")
+        return RedisStore(host=redis_host, port=int(redis_port), password=password)
+
+    if secret_arn and _has_aws_credentials():
+        if not (redis_host and redis_port):
+            raise RuntimeError(
+                "ELASTICACHE_SECRET_ARN is set but REDIS_HOST/REDIS_PORT are not — set both to use Redis."
+            )
+
+        from redis.asyncio import Redis
+
+        from plane_mcp.aws_secrets import ElastiCacheCredentialProvider, get_secret
+
+        region = os.getenv("AWS_REGION", "us-east-1")
+        token_key = os.getenv("REDIS_AUTH_TOKEN_KEY", "authToken")
+
+        secret = get_secret(secret_arn, region)
+        if token_key not in secret:
+            raise RuntimeError(f"REDIS_AUTH_TOKEN_KEY {token_key!r} not present in secret {secret_arn}")
+
+        logger.info("Using Redis for token storage (auth token from Secrets Manager)")
+        client = Redis(
+            host=redis_host,
+            port=int(redis_port),
+            credential_provider=ElastiCacheCredentialProvider(secret_arn, region, token_key),
+            decode_responses=True,
+        )
+        return RedisStore(client=client)
+
+    if secret_arn:
+        logger.warning(
+            "ELASTICACHE_SECRET_ARN is set but IRSA/Pod Identity env vars "
+            "(AWS_ROLE_ARN or AWS_CONTAINER_CREDENTIALS_FULL_URI) are missing — skipping Secrets Manager auth."
+        )
 
     if redis_host and redis_port:
         logger.info("Using Redis for token storage")
-        client_storage = RedisStore(host=redis_host, port=int(redis_port))
-    else:
-        logger.warning(
-            "Using in-memory storage - tokens will be lost on restart! " "Set REDIS_HOST and REDIS_PORT for production."
-        )
-        client_storage = MemoryStore()
+        return RedisStore(host=redis_host, port=int(redis_port))
+
+    logger.warning(
+        "Using in-memory storage - tokens will be lost on restart! Set REDIS_HOST and REDIS_PORT for production."
+    )
+    return MemoryStore()
+
+
+def get_oauth_mcp(base_path: str = "/"):
+    client_storage = _build_token_store()
 
     # Initialize the MCP server
     oauth_mcp = FastMCP(
