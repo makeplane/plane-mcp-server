@@ -10,9 +10,11 @@
 PQL_FIELD_HINT = (
     "Optional Plane Query Language (PQL) filter. Examples: "
     '`priority = "urgent" AND assignee = currentUser()`, '
-    "`stateGroup IN openStates() AND isOverdue()`. Call "
-    "`get_pql_reference` for full syntax (fields, operators, date/user/cycle "
-    "functions, predicates, relations, examples) before composing complex queries."
+    "`stateGroup IN openStates() AND isOverdue()`. "
+    "UUID fields (project, assignee, state, label, cycle, module, type, milestone, createdBy) "
+    "need UUIDs — call the relevant `list_*` tool first if you only have a name or short "
+    "identifier (e.g. `LSS` → call `list_projects` and match `identifier` to get `id`). "
+    "Call `get_pql_reference` for full PQL syntax before composing complex queries."
 )
 
 # ---------------------------------------------------------------------------
