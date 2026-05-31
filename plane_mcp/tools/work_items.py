@@ -18,7 +18,7 @@ from plane.models.work_items import (
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.pql_reference import PQL_FIELD_DESCRIPTION, PQL_FULL_REFERENCE
+from plane_mcp.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
 
@@ -29,7 +29,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_work_items(
         project_id: str,
-        pql: Annotated[str | None, Field(description=PQL_FIELD_DESCRIPTION)] = None,
+        pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
         order_by: str | None = None,
         per_page: int | None = None,
         cursor: str | None = None,
@@ -105,7 +105,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_workspace_work_items(
-        pql: Annotated[str | None, Field(description=PQL_FIELD_DESCRIPTION)] = None,
+        pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
         order_by: str | None = None,
         per_page: int | None = None,
         cursor: str | None = None,
@@ -569,7 +569,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_archived_work_items(
         project_id: str,
-        pql: Annotated[str | None, Field(description=PQL_FIELD_DESCRIPTION)] = None,
+        pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
         order_by: str | None = None,
         per_page: int | None = None,
         cursor: str | None = None,

@@ -1,7 +1,24 @@
 # ---------------------------------------------------------------------------
+# PQL_FIELD_HINT
+# ---------------------------------------------------------------------------
+# One-line schema hint embedded in Field(description=...) of the `pql`
+# parameter on the 5 PQL-enabled list tools. Keeps the manifest small.
+# The LLM should call get_pql_reference() for full syntax before composing
+# complex queries; the error-recovery payload also returns PQL_FULL_REFERENCE
+# inline so a failed query is still self-correctable in one round-trip.
+# ---------------------------------------------------------------------------
+PQL_FIELD_HINT = (
+    "Optional Plane Query Language (PQL) filter. Examples: "
+    '`priority = "urgent" AND assignee = currentUser()`, '
+    "`stateGroup IN openStates() AND isOverdue()`. Call "
+    "`get_pql_reference` for full syntax (fields, operators, date/user/cycle "
+    "functions, predicates, relations, examples) before composing complex queries."
+)
+
+# ---------------------------------------------------------------------------
 # PQL_FIELD_DESCRIPTION
 # ---------------------------------------------------------------------------
-# Embedded in Field(description=...) of the `pql` parameter on filter tools.
+# Compact reference returned by `get_pql_reference(detail="brief")`.
 # ---------------------------------------------------------------------------
 PQL_FIELD_DESCRIPTION = """\
 Plane Query Language (PQL) filter string for work items in a project. Output ONLY valid PQL.

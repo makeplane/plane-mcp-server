@@ -18,7 +18,7 @@ from plane.models.cycles import (
 from plane.models.query_params import WorkItemQueryParams
 from pydantic import Field
 
-from plane_mcp.pql_reference import PQL_FIELD_DESCRIPTION, PQL_FULL_REFERENCE
+from plane_mcp.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
 
@@ -243,7 +243,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
     def list_cycle_work_items(
         project_id: str,
         cycle_id: str,
-        pql: Annotated[str | None, Field(description=PQL_FIELD_DESCRIPTION)] = None,
+        pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
         order_by: str | None = None,
         per_page: int | None = None,
         cursor: str | None = None,
