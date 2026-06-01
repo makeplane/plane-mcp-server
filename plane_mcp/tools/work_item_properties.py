@@ -10,7 +10,9 @@ from plane.models.work_item_properties import (
     CreateWorkItemPropertyValue,
     PropertySettings,
     UpdateWorkItemProperty,
+    UpdateWorkItemPropertyOption,
     WorkItemProperty,
+    WorkItemPropertyOption,
     WorkItemPropertyValueDetail,
 )
 from plane.models.work_item_property_configurations import (
@@ -26,36 +28,82 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_work_item_properties(
-        project_id: str,
         work_item_type_id: str,
+        project_id: str | None = None,
         params: dict[str, Any] | None = None,
     ) -> list[WorkItemProperty]:
         """
-        List work item properties for a work item type.
+        List custom properties for a work item type.
 
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_type_id: UUID of the work item type
-            params: Optional query parameters as a dictionary
+        Lookup order when project_id provided:
+          1. Type-scoped endpoint (properties explicitly linked to the type)
+          2. Flat project endpoint (properties created without type association)
+          3. Workspace-level endpoint (workspace-wide properties)
 
-        Returns:
-            List of WorkItemProperty objects
+        Omit project_id to query workspace scope directly.
+
+        Each result includes:
+        - id: property UUID — use as cf["<id>"] in PQL filters
+        - property_type: TEXT | OPTION | DECIMAL | BOOLEAN | DATETIME | RELATION | URL | EMAIL
+        - options: for OPTION type, each option has id + name; use option id in PQL
+
+        PQL workflow for filtering by custom property:
+          1. list_work_item_types(project_id)               → get type UUIDs
+          2. list_work_item_properties(work_item_type_id, project_id) → get property + option UUIDs
+          3. list_work_items(pql='cf["<prop-uuid>"] = "<opt-uuid>"')
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_properties.list(
+
+        def _get_workspace_props_for_type(type_id: str) -> list:
+            """Fetch workspace-level properties associated with a type. Returns [] on any error."""
+            try:
+                # API returns flat list of UUID strings, not full property objects
+                property_ids = client.workspace_work_item_types.properties.list(
+                    workspace_slug=workspace_slug,
+                    type_id=type_id,
+                )
+                if not property_ids:
+                    return []
+                id_set = {str(pid) for pid in property_ids}
+                all_props = client.workspace_work_item_properties.list(workspace_slug=workspace_slug)
+                return [p for p in all_props if str(p.id) in id_set]
+            except Exception:
+                return []
+
+        if not project_id:
+            return _get_workspace_props_for_type(work_item_type_id)
+
+        # Try type-scoped project endpoint first
+        project_props = client.work_item_properties.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
             type_id=work_item_type_id,
             params=params,
         )
+        if project_props:
+            return project_props
+
+        # Fall back to flat project endpoint (properties created without type association)
+        try:
+            flat_props = client.work_item_properties.list_project(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=params,
+            )
+            if flat_props:
+                return flat_props
+        except Exception:
+            pass
+
+        # Last resort: workspace-level
+        return _get_workspace_props_for_type(work_item_type_id)
 
     @mcp.tool()
     def create_work_item_property(
-        project_id: str,
-        work_item_type_id: str,
         display_name: str,
         property_type: str,
+        project_id: str | None = None,
+        work_item_type_id: str | None = None,
         relation_type: str | None = None,
         description: str | None = None,
         is_required: bool | None = None,
@@ -71,42 +119,41 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         """
         Create a new work item property.
 
+        Scope resolution:
+          - project_id + work_item_type_id → type-scoped project property (legacy)
+          - project_id only               → project-level property (not yet linked to a type)
+          - neither                        → workspace-level property
+
         Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_type_id: UUID of the work item type
             display_name: Display name for the property
-            property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN,
-                OPTION, RELATION, URL, EMAIL, FILE, FORMULA)
-            relation_type: Relation type (ISSUE, USER) - required for RELATION properties
+            property_type: TEXT | DATETIME | DECIMAL | BOOLEAN | OPTION | RELATION | URL | EMAIL | FILE | FORMULA
+            project_id: UUID of the project. Omit for workspace-level property.
+            work_item_type_id: UUID of the work item type — omit to create at project level
+            relation_type: ISSUE | USER — required when property_type=RELATION
             description: Property description
             is_required: Whether the property is required
             default_value: Default value(s) for the property
-            settings: Settings dictionary - required for TEXT and DATETIME properties
-                     For TEXT: {"display_format": "single-line"|"multi-line"|"readonly"}
-                     For DATETIME: {"display_format":
-                     "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
+            settings: Required for TEXT/DATETIME.
+                TEXT:     {"display_format": "single-line"|"multi-line"|"readonly"}
+                DATETIME: {"display_format": "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
             is_active: Whether the property is active
             is_multi: Whether the property supports multiple values
             validation_rules: Validation rules dictionary
             external_source: External system source name
             external_id: External system identifier
-            options: List of option dictionaries for OPTION properties
+            options: List of {name, color?, is_default?} dicts — for OPTION type
 
         Returns:
             Created WorkItemProperty object
         """
         client, workspace_slug = get_plane_client_context()
 
-        # Convert string to PropertyType enum
         validated_property_type = PropertyType(property_type)
 
-        # Convert string to RelationType enum if provided
         validated_relation_type: RelationType | None = None
         if relation_type:
             validated_relation_type = RelationType(relation_type)
 
-        # Convert settings dict to appropriate settings object if needed
         processed_settings: PropertySettings = None
         if settings:
             if property_type == "TEXT":
@@ -114,7 +161,6 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             elif property_type == "DATETIME":
                 processed_settings = DateAttributeSettings(**settings)
 
-        # Convert options dicts to CreateWorkItemPropertyOption objects
         processed_options: list[CreateWorkItemPropertyOption] | None = None
         if options:
             processed_options = [CreateWorkItemPropertyOption(**opt) for opt in options]
@@ -135,41 +181,64 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             options=processed_options,
         )
 
-        return client.work_item_properties.create(
-            workspace_slug=workspace_slug, project_id=project_id, type_id=work_item_type_id, data=data
+        if project_id and work_item_type_id:
+            return client.work_item_properties.create(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                type_id=work_item_type_id,
+                data=data,
+            )
+        if project_id:
+            return client.work_item_properties.create_project(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                data=data,
+            )
+        return client.workspace_work_item_properties.create(
+            workspace_slug=workspace_slug, data=data
         )
 
     @mcp.tool()
     def retrieve_work_item_property(
-        project_id: str,
-        work_item_type_id: str,
         work_item_property_id: str,
+        project_id: str | None = None,
+        work_item_type_id: str | None = None,
     ) -> WorkItemProperty:
         """
         Retrieve a work item property by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_type_id: UUID of the work item type
             work_item_property_id: UUID of the property
+            project_id: UUID of the project. Omit for workspace scope.
+            work_item_type_id: UUID of the work item type — omit to use project-level endpoint
 
         Returns:
             WorkItemProperty object
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_properties.retrieve(
+        if project_id and work_item_type_id:
+            return client.work_item_properties.retrieve(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                type_id=work_item_type_id,
+                work_item_property_id=work_item_property_id,
+            )
+        if project_id:
+            return client.work_item_properties.retrieve_project(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                property_id=work_item_property_id,
+            )
+        return client.workspace_work_item_properties.retrieve(
             workspace_slug=workspace_slug,
-            project_id=project_id,
-            type_id=work_item_type_id,
-            work_item_property_id=work_item_property_id,
+            property_id=work_item_property_id,
         )
 
     @mcp.tool()
     def update_work_item_property(
-        project_id: str,
-        work_item_type_id: str,
         work_item_property_id: str,
+        project_id: str | None = None,
+        work_item_type_id: str | None = None,
         display_name: str | None = None,
         property_type: str | None = None,
         relation_type: str | None = None,
@@ -187,21 +256,18 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         Update a work item property by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_type_id: UUID of the work item type
             work_item_property_id: UUID of the property
+            project_id: UUID of the project. Omit for workspace scope.
+            work_item_type_id: UUID of the work item type — required when project_id is provided
             display_name: Display name for the property
-            property_type: Type of property (TEXT, DATETIME, DECIMAL, BOOLEAN,
-                OPTION, RELATION, URL, EMAIL, FILE, FORMULA)
-            relation_type: Relation type (ISSUE, USER) - required when updating to RELATION
+            property_type: TEXT | DATETIME | DECIMAL | BOOLEAN | OPTION | RELATION | URL | EMAIL | FILE | FORMULA
+            relation_type: ISSUE | USER — required when updating to RELATION
             description: Property description
             is_required: Whether the property is required
             default_value: Default value(s) for the property
-            settings: Settings dictionary - required when updating to TEXT or DATETIME
-                     For TEXT: {"display_format": "single-line"|"multi-line"|"readonly"}
-                     For DATETIME: {"display_format":
-                     "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
+            settings: Required when changing type to TEXT/DATETIME.
+                TEXT:     {"display_format": "single-line"|"multi-line"|"readonly"}
+                DATETIME: {"display_format": "MMM dd, yyyy"|"dd/MM/yyyy"|"MM/dd/yyyy"|"yyyy/MM/dd"}
             is_active: Whether the property is active
             is_multi: Whether the property supports multiple values
             validation_rules: Validation rules dictionary
@@ -213,17 +279,14 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
-        # Convert string to PropertyType enum if provided
         validated_property_type: PropertyType | None = None
         if property_type:
             validated_property_type = PropertyType(property_type)
 
-        # Convert string to RelationType enum if provided
         validated_relation_type: RelationType | None = None
         if relation_type:
             validated_relation_type = RelationType(relation_type)
 
-        # Convert settings dict to appropriate settings object if needed
         processed_settings: PropertySettings = None
         if settings and property_type:
             if property_type == "TEXT":
@@ -246,36 +309,302 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
             external_id=external_id,
         )
 
-        return client.work_item_properties.update(
+        if project_id and work_item_type_id:
+            return client.work_item_properties.update(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                type_id=work_item_type_id,
+                work_item_property_id=work_item_property_id,
+                data=data,
+            )
+        if project_id:
+            return client.work_item_properties.update_project(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                property_id=work_item_property_id,
+                data=data,
+            )
+        return client.workspace_work_item_properties.update(
             workspace_slug=workspace_slug,
-            project_id=project_id,
-            type_id=work_item_type_id,
-            work_item_property_id=work_item_property_id,
+            property_id=work_item_property_id,
             data=data,
         )
 
     @mcp.tool()
     def delete_work_item_property(
-        project_id: str,
-        work_item_type_id: str,
         work_item_property_id: str,
+        project_id: str | None = None,
+        work_item_type_id: str | None = None,
     ) -> None:
         """
         Delete a work item property by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_type_id: UUID of the work item type
             work_item_property_id: UUID of the property
+            project_id: UUID of the project. Omit for workspace scope.
+            work_item_type_id: UUID of the work item type — omit to use project-level endpoint
         """
         client, workspace_slug = get_plane_client_context()
-        client.work_item_properties.delete(
+        if project_id and work_item_type_id:
+            client.work_item_properties.delete(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                type_id=work_item_type_id,
+                work_item_property_id=work_item_property_id,
+            )
+        elif project_id:
+            client.work_item_properties.delete_project(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                property_id=work_item_property_id,
+            )
+        else:
+            client.workspace_work_item_properties.delete(
+                workspace_slug=workspace_slug,
+                property_id=work_item_property_id,
+            )
+
+    @mcp.tool()
+    def attach_properties_to_work_item_type(
+        project_id: str,
+        work_item_type_id: str,
+        property_ids: list[str],
+    ) -> list[str]:
+        """
+        Attach one or more existing project-level properties to a work item type.
+
+        Use after creating properties via create_work_item_property (project-level)
+        to associate them with a specific type.
+
+        Args:
+            project_id: UUID of the project
+            work_item_type_id: UUID of the work item type
+            property_ids: List of property UUIDs to attach
+
+        Returns:
+            List of attached property UUIDs
+        """
+        client, workspace_slug = get_plane_client_context()
+        return client.work_item_properties.attach_to_type(
             workspace_slug=workspace_slug,
             project_id=project_id,
             type_id=work_item_type_id,
-            work_item_property_id=work_item_property_id,
+            property_ids=property_ids,
         )
+
+    @mcp.tool()
+    def detach_property_from_work_item_type(
+        project_id: str,
+        work_item_type_id: str,
+        work_item_property_id: str,
+    ) -> None:
+        """
+        Detach a property from a work item type (does not delete the property).
+
+        Args:
+            project_id: UUID of the project
+            work_item_type_id: UUID of the work item type
+            work_item_property_id: UUID of the property to detach
+        """
+        client, workspace_slug = get_plane_client_context()
+        client.work_item_properties.detach_from_type(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            type_id=work_item_type_id,
+            property_id=work_item_property_id,
+        )
+
+    @mcp.tool()
+    def list_work_item_property_options(
+        property_id: str,
+        project_id: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> list[WorkItemPropertyOption]:
+        """
+        List options for a work item property.
+
+        Args:
+            property_id: UUID of the work item property
+            project_id: UUID of the project. Omit for workspace scope.
+            params: Optional query parameters
+
+        Returns:
+            List of WorkItemPropertyOption objects
+        """
+        client, workspace_slug = get_plane_client_context()
+        if project_id:
+            return client.work_item_properties.options.list(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                property_id=property_id,
+                params=params,
+            )
+        return client.workspace_work_item_properties.options.list(
+            workspace_slug=workspace_slug,
+            property_id=property_id,
+        )
+
+    @mcp.tool()
+    def retrieve_work_item_property_option(
+        property_id: str,
+        option_id: str,
+        project_id: str | None = None,
+    ) -> WorkItemPropertyOption:
+        """
+        Retrieve a single option from a work item property.
+
+        Args:
+            property_id: UUID of the work item property
+            option_id: UUID of the option
+            project_id: UUID of the project. Omit for workspace scope.
+
+        Returns:
+            WorkItemPropertyOption object
+        """
+        client, workspace_slug = get_plane_client_context()
+        if project_id:
+            return client.work_item_properties.options.retrieve(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                property_id=property_id,
+                option_id=option_id,
+            )
+        return client.workspace_work_item_properties.options.retrieve(
+            workspace_slug=workspace_slug,
+            property_id=property_id,
+            option_id=option_id,
+        )
+
+    @mcp.tool()
+    def create_work_item_property_option(
+        property_id: str,
+        name: str,
+        project_id: str | None = None,
+        description: str | None = None,
+        color: str | None = None,
+        is_default: bool | None = None,
+        external_source: str | None = None,
+        external_id: str | None = None,
+    ) -> WorkItemPropertyOption:
+        """
+        Create an option on a work item property.
+
+        Args:
+            property_id: UUID of the work item property
+            name: Display name for the option
+            project_id: UUID of the project. Omit for workspace scope.
+            description: Option description
+            color: Hex color string e.g. "#FF5733"
+            is_default: Whether this is the default option
+            external_source: External system source name
+            external_id: External system identifier
+
+        Returns:
+            Created WorkItemPropertyOption object
+        """
+        client, workspace_slug = get_plane_client_context()
+        data = CreateWorkItemPropertyOption(
+            name=name,
+            description=description,
+            color=color,
+            is_default=is_default,
+            external_source=external_source,
+            external_id=external_id,
+        )
+        if project_id:
+            return client.work_item_properties.options.create(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                property_id=property_id,
+                data=data,
+            )
+        return client.workspace_work_item_properties.options.create(
+            workspace_slug=workspace_slug,
+            property_id=property_id,
+            data=data,
+        )
+
+    @mcp.tool()
+    def update_work_item_property_option(
+        property_id: str,
+        option_id: str,
+        project_id: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        color: str | None = None,
+        is_default: bool | None = None,
+        external_source: str | None = None,
+        external_id: str | None = None,
+    ) -> WorkItemPropertyOption:
+        """
+        Update an option on a work item property.
+
+        Args:
+            property_id: UUID of the work item property
+            option_id: UUID of the option
+            project_id: UUID of the project. Omit for workspace scope.
+            name: Display name for the option
+            description: Option description
+            color: Hex color string e.g. "#FF5733"
+            is_default: Whether this is the default option
+            external_source: External system source name
+            external_id: External system identifier
+
+        Returns:
+            Updated WorkItemPropertyOption object
+        """
+        client, workspace_slug = get_plane_client_context()
+        data = UpdateWorkItemPropertyOption(
+            name=name,
+            description=description,
+            color=color,
+            is_default=is_default,
+            external_source=external_source,
+            external_id=external_id,
+        )
+        if project_id:
+            return client.work_item_properties.options.update(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                property_id=property_id,
+                option_id=option_id,
+                data=data,
+            )
+        return client.workspace_work_item_properties.options.update(
+            workspace_slug=workspace_slug,
+            property_id=property_id,
+            option_id=option_id,
+            data=data,
+        )
+
+    @mcp.tool()
+    def delete_work_item_property_option(
+        property_id: str,
+        option_id: str,
+        project_id: str | None = None,
+    ) -> None:
+        """
+        Delete an option from a work item property.
+
+        Args:
+            property_id: UUID of the work item property
+            option_id: UUID of the option
+            project_id: UUID of the project. Omit for workspace scope.
+        """
+        client, workspace_slug = get_plane_client_context()
+        if project_id:
+            client.work_item_properties.options.delete(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                property_id=property_id,
+                option_id=option_id,
+            )
+        else:
+            client.workspace_work_item_properties.options.delete(
+                workspace_slug=workspace_slug,
+                property_id=property_id,
+                option_id=option_id,
+            )
 
     @mcp.tool()
     def get_work_item_property_value(

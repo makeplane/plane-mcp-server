@@ -1,13 +1,13 @@
 """Work item-related tools for Plane MCP Server."""
 
-from typing import Any, get_args
+from typing import Annotated, Any, get_args
 
 from fastmcp import FastMCP
+from fastmcp.utilities.logging import get_logger
+from plane.errors.errors import HttpError
 from plane.models.enums import PriorityEnum
 from plane.models.query_params import RetrieveQueryParams, WorkItemQueryParams
 from plane.models.work_items import (
-    AdvancedSearchResult,
-    AdvancedSearchWorkItem,
     CreateWorkItem,
     PaginatedWorkItemResponse,
     UpdateWorkItem,
@@ -15,47 +15,12 @@ from plane.models.work_items import (
     WorkItemDetail,
     WorkItemSearch,
 )
+from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
-
-def _build_advanced_search_filters(
-    *,
-    assignee_ids: list[str] | None = None,
-    state_ids: list[str] | None = None,
-    state_groups: list[str] | None = None,
-    priorities: list[str] | None = None,
-    label_ids: list[str] | None = None,
-    type_ids: list[str] | None = None,
-    cycle_ids: list[str] | None = None,
-    module_ids: list[str] | None = None,
-    created_by_ids: list[str] | None = None,
-) -> dict[str, Any] | None:
-    """Build an AND filter dict from flat filter params."""
-    conditions: list[dict[str, Any]] = []
-    if assignee_ids:
-        conditions.append({"assignee_id__in": assignee_ids})
-    if state_ids:
-        conditions.append({"state_id__in": state_ids})
-    if state_groups:
-        conditions.append({"state_group__in": state_groups})
-    if priorities:
-        conditions.append({"priority__in": priorities})
-    if label_ids:
-        conditions.append({"label_id__in": label_ids})
-    if type_ids:
-        conditions.append({"type_id__in": type_ids})
-    if cycle_ids:
-        conditions.append({"cycle_id__in": cycle_ids})
-    if module_ids:
-        conditions.append({"module_id__in": module_ids})
-    if created_by_ids:
-        conditions.append({"created_by_id__in": created_by_ids})
-    if not conditions:
-        return None
-    if len(conditions) == 1:
-        return conditions[0]
-    return {"and": conditions}
+logger = get_logger(__name__)
 
 
 def register_work_item_tools(mcp: FastMCP) -> None:
@@ -63,112 +28,150 @@ def register_work_item_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_work_items(
-        project_id: str | None = None,
-        query: str | None = None,
-        assignee_ids: list[str] | None = None,
-        state_ids: list[str] | None = None,
-        state_groups: list[str] | None = None,
-        priorities: list[str] | None = None,
-        label_ids: list[str] | None = None,
-        type_ids: list[str] | None = None,
-        cycle_ids: list[str] | None = None,
-        module_ids: list[str] | None = None,
-        created_by_ids: list[str] | None = None,
-        workspace_search: bool = False,
-        limit: int | None = None,
-        cursor: str | None = None,
+        project_id: str,
+        pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
+        order_by: str | None = None,
         per_page: int | None = None,
+        cursor: str | None = None,
         expand: str | None = None,
         fields: str | None = None,
-        order_by: str | None = None,
         external_id: str | None = None,
         external_source: str | None = None,
-    ) -> list[WorkItem] | list[AdvancedSearchResult]:
+    ) -> dict[str, Any]:
         """
-        List work items in a project or search across the workspace.
+        List work items in a project with optional PQL filtering.
+        For workspace-wide filtering use list_workspace_work_items instead.
 
-        When any filter parameter is provided (assignee_ids, state_ids, state_groups,
-        priorities, label_ids, type_ids, cycle_ids, module_ids,
-        created_by_ids, or query), this uses the advanced search endpoint which
-        supports powerful filtering. Otherwise it uses the standard list endpoint.
+        For UUID fields (assignee, state, label, cycle, module, type,
+        milestone) call the relevant list tool first to get the UUID.
 
         Args:
-            project_id: UUID of the project. Required when no filters are provided.
-                Optional when using filters (omit for workspace-wide search).
-            query: Free-form text search across work item name and description
-            assignee_ids: List of user UUIDs to filter by assignee
-            state_ids: List of state UUIDs to filter by state
-            state_groups: List of state groups to filter by
-                (backlog, unstarted, started, completed, cancelled)
-            priorities: List of priority values to filter by
-                (urgent, high, medium, low, none)
-            label_ids: List of label UUIDs to filter by label
-            type_ids: List of work item type UUIDs to filter by type
-            cycle_ids: List of cycle UUIDs to filter by cycle
-            module_ids: List of module UUIDs to filter by module
-            created_by_ids: List of user UUIDs to filter by creator
-            workspace_search: When true, search across all projects in the workspace.
-                Only used with filters. Defaults to false.
-            limit: Maximum number of results (only used with filters, default 25)
-            cursor: Pagination cursor for getting next set of results (list only)
-            per_page: Number of results per page, 1-100 (list only)
-            expand: Comma-separated list of related fields to expand in response
-                (list only, e.g. "assignees,labels,state")
-            fields: Comma-separated list of fields to include in response (list only)
-            order_by: Field to order results by, prefix with '-' for descending (list only)
-            external_id: External system identifier for filtering (list only)
-            external_source: External system source name for filtering (list only)
-
+            project_id: UUID of the project.
+            pql: PQL filter. See field description for syntax.
+            order_by: Sort field; prefix `-` for descending (e.g. `-created_at`).
+            per_page: 1-100, default 25.
+            cursor: From previous response's next_cursor.
+            expand: Comma-separated relations to expand (e.g. assignees,labels,state).
+            fields: Sparse fieldset — id, name, sequence_id, priority, state,
+                project, assignees, labels, type_id, start_date, target_date,
+                created_at, updated_at, created_by, is_draft. Use `project` not
+                `project_id`.
+            external_id / external_source: Filter by external system.
         Returns:
-            List of WorkItem objects (unfiltered) or AdvancedSearchResult objects (filtered)
+            results: Paginated list of work items.
+            total_count: True DB total, not page-bounded — use for counts.
+            next_cursor: Cursor for the next page.
+            prev_cursor: Cursor for the previous page.
         """
         client, workspace_slug = get_plane_client_context()
 
-        filters = _build_advanced_search_filters(
-            assignee_ids=assignee_ids,
-            state_ids=state_ids,
-            state_groups=state_groups,
-            priorities=priorities,
-            label_ids=label_ids,
-            type_ids=type_ids,
-            cycle_ids=cycle_ids,
-            module_ids=module_ids,
-            created_by_ids=created_by_ids,
-        )
-
-        if filters is not None or query is not None:
-            data = AdvancedSearchWorkItem(
-                query=query,
-                filters=filters,
-                limit=limit,
-                project_id=project_id,
-                workspace_search=workspace_search or None,
-            )
-            return client.work_items.advanced_search(
-                workspace_slug=workspace_slug,
-                data=data,
-            )
-
-        if project_id is None:
-            raise ValueError("project_id is required when no filters are provided")
-
         params = WorkItemQueryParams(
-            cursor=cursor,
+            pql=pql,
+            order_by=order_by,
             per_page=per_page,
+            cursor=cursor,
             expand=expand,
             fields=fields,
-            order_by=order_by,
             external_id=external_id,
             external_source=external_source,
         )
 
-        response: PaginatedWorkItemResponse = client.work_items.list(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            params=params,
+        try:
+            response: PaginatedWorkItemResponse = client.work_items.list(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=params,
+            )
+        except HttpError as e:
+            if pql and e.status_code == 400 and isinstance(e.response, dict) and "pql" in e.response:
+                logger.warning("list_work_items: invalid PQL %r → %s", pql, e.response)
+                return {
+                    "error": e.response["pql"],
+                    "failed_pql": pql,
+                    "pql_reference": PQL_FULL_REFERENCE,
+                    "hint": "The PQL above failed. Fix it using the reference and retry list_work_items.",
+                }
+            raise
+
+        return {
+            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
+            "total_count": response.total_count,
+            "count": response.count,
+            "next_cursor": response.next_cursor,
+            "prev_cursor": response.prev_cursor,
+            "next_page_results": response.next_page_results,
+            "prev_page_results": response.prev_page_results,
+        }
+
+    @mcp.tool()
+    def list_workspace_work_items(
+        pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
+        order_by: str | None = None,
+        per_page: int | None = None,
+        cursor: str | None = None,
+        expand: str | None = None,
+        fields: str | None = None,
+        external_id: str | None = None,
+        external_source: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        List work items across all projects with optional PQL filtering.
+
+        Spans every project the caller can view. 
+        Use project= UUID in PQL to scope to one project.
+        For single-project filtering use list_work_items instead.
+
+        Args:
+            pql: PQL filter. See field description for syntax.
+            order_by / per_page / cursor / expand: Same as list_work_items.
+            fields: id, name, sequence_id, priority, state, project,
+                assignees, labels, type_id, start_date, target_date,
+                created_at, updated_by, created_by, is_draft.
+            external_id / external_source: Filter by external system.
+        Returns:
+            results: Paginated list of work items.
+            total_count: True DB total, not page-bounded — use for counts.
+            next_cursor: Cursor for the next page.
+            prev_cursor: Cursor for the previous page.
+        """
+        client, workspace_slug = get_plane_client_context()
+
+        params = WorkItemQueryParams(
+            pql=pql,
+            order_by=order_by,
+            per_page=per_page,
+            cursor=cursor,
+            expand=expand,
+            fields=fields,
+            external_id=external_id,
+            external_source=external_source,
         )
 
-        return response.results
+        try:
+            response: PaginatedWorkItemResponse = client.work_items.list_workspace(
+                workspace_slug=workspace_slug,
+                params=params,
+            )
+        except HttpError as e:
+            if pql and e.status_code == 400 and isinstance(e.response, dict) and "pql" in e.response:
+                logger.warning("list_workspace_work_items: invalid PQL %r → %s", pql, e.response)
+                return {
+                    "error": e.response["pql"],
+                    "failed_pql": pql,
+                    "pql_reference": PQL_FULL_REFERENCE,
+                    "hint": "The PQL above failed. Fix it using the reference and retry list_workspace_work_items.",
+                }
+            raise
+
+        return {
+            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
+            "total_count": response.total_count,
+            "count": response.count,
+            "next_cursor": response.next_cursor,
+            "prev_cursor": response.prev_cursor,
+            "next_page_results": response.next_page_results,
+            "prev_page_results": response.prev_page_results,
+        }
 
     @mcp.tool()
     def create_work_item(
@@ -196,7 +199,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Create a new work item.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             name: Work item name (required)
             assignees: List of user IDs to assign to the work item
@@ -222,7 +224,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
-        # Validate priority against allowed literal values
         validated_priority: PriorityEnum | None = (
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
@@ -264,14 +265,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Retrieve a work item by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             work_item_id: UUID of the work item
             expand: Comma-separated fields to expand (e.g., "assignees,labels,state")
             fields: Comma-separated fields to include in response
             external_id: External system identifier for filtering
             external_source: External system source name for filtering
-            order_by: Field to order results by (typically not used for single item retrieval)
+            order_by: Field to order results by
 
         Returns:
             WorkItemDetail object with expanded relationships
@@ -295,8 +295,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def retrieve_work_item_by_identifier(
-        project_identifier: str,
-        issue_identifier: int,
+        work_item_identifier: str,
         expand: str | None = None,
         fields: str | None = None,
         external_id: str | None = None,
@@ -304,21 +303,39 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         order_by: str | None = None,
     ) -> WorkItemDetail:
         """
-        Retrieve a work item by project identifier and issue sequence number.
+        Retrieve a work item by its full identifier (project prefix + sequence number).
+
+        The identifier must be in PROJECT-N format where PROJECT is the project's
+        identifier string and N is the sequence number. Both parts are required.
+
+        Valid sparse `fields` values include: id, name, sequence_id, priority,
+        state, project, workspace, parent, assignees, labels, type_id,
+        start_date, target_date, created_at, updated_at, created_by,
+        updated_by, is_draft, external_source, external_id, estimate_point.
+        Use `project` (not `project_id`) to get the project UUID.
+
+        If you need the project UUID from a short identifier like "SHO",
+        use `list_projects()` instead — it returns `id` and `identifier`
+        for every project.
 
         Args:
-            workspace_slug: The workspace slug identifier
-            project_identifier: Project identifier string (e.g., "MP" for "My Project")
-            issue_identifier: Issue sequence number (e.g., 1, 2, 3)
+            work_item_identifier: Full work item identifier in PROJECT-N format
             expand: Comma-separated fields to expand (e.g., "assignees,labels,state")
-            fields: Comma-separated list of fields to include in response
+            fields: Comma-separated sparse fieldset (see valid values above)
             external_id: External system identifier for filtering
             external_source: External system source name for filtering
-            order_by: Field to order results by (typically not used for single item retrieval)
+            order_by: Field to order results by
 
         Returns:
             WorkItemDetail object with expanded relationships
         """
+        parts = work_item_identifier.rsplit("-", 1)
+        if len(parts) != 2 or not parts[1].isdigit():
+            raise ValueError(
+                f"Invalid work item identifier {work_item_identifier!r}. "
+                "Expected PROJECT-N format where N is the sequence number."
+            )
+        project_identifier, sequence_str = parts
         client, workspace_slug = get_plane_client_context()
 
         params = RetrieveQueryParams(
@@ -332,7 +349,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         return client.work_items.retrieve_by_identifier(
             workspace_slug=workspace_slug,
             project_identifier=project_identifier,
-            issue_identifier=issue_identifier,
+            issue_identifier=int(sequence_str),
             params=params,
         )
 
@@ -363,7 +380,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Update a work item by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             work_item_id: UUID of the work item
             name: Work item name
@@ -390,7 +406,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
-        # Validate priority against allowed literal values
         validated_priority: PriorityEnum | None = (
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
@@ -429,7 +444,6 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Delete a work item by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             work_item_id: UUID of the work item
         """
@@ -555,28 +569,63 @@ def register_work_item_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_archived_work_items(
         project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[WorkItem]:
+        pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
+        order_by: str | None = None,
+        per_page: int | None = None,
+        cursor: str | None = None,
+        expand: str | None = None,
+        fields: str | None = None,
+    ) -> dict[str, Any]:
         """
-        List archived work items in a project.
+        List archived work items in a project with optional PQL filtering.
 
         Args:
             project_id: UUID of the project
-            params: Optional query parameters as a dictionary (e.g., per_page, cursor, priority, state)
+            pql: PQL filter expression. Omit to list all archived items.
+            order_by: Field to sort by; prefix with `-` for descending
+                (default `-archived_at`).
+            per_page: Results per page, 1-100 (default 100).
+            cursor: Pagination cursor from a previous response's `next_cursor`.
+            expand: Comma-separated related fields to expand.
+            fields: Comma-separated sparse fieldset.
 
         Returns:
-            List of archived WorkItem objects
+            Paginated envelope with results, total_count, next_cursor, prev_cursor.
         """
         client, workspace_slug = get_plane_client_context()
-        query_params = None
-        if params:
-            query_params = WorkItemQueryParams(**params)
-        response = client.work_items.list_archived(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            params=query_params,
+        params = WorkItemQueryParams(
+            pql=pql,
+            order_by=order_by,
+            per_page=per_page,
+            cursor=cursor,
+            expand=expand,
+            fields=fields,
         )
-        return response.results
+        try:
+            response = client.work_items.list_archived(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=params,
+            )
+        except HttpError as e:
+            if pql and e.status_code == 400 and isinstance(e.response, dict) and "pql" in e.response:
+                logger.warning("list_archived_work_items: invalid PQL %r → %s", pql, e.response)
+                return {
+                    "error": e.response["pql"],
+                    "failed_pql": pql,
+                    "pql_reference": PQL_FULL_REFERENCE,
+                    "hint": "The PQL above failed. Fix it using the reference and retry list_archived_work_items.",
+                }
+            raise
+        return {
+            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
+            "total_count": response.total_count,
+            "count": response.count,
+            "next_cursor": response.next_cursor,
+            "prev_cursor": response.prev_cursor,
+            "next_page_results": response.next_page_results,
+            "prev_page_results": response.prev_page_results,
+        }
 
     @mcp.tool()
     def archive_work_item(project_id: str, work_item_id: str) -> None:
@@ -625,17 +674,19 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         order_by: str | None = None,
     ) -> WorkItemSearch:
         """
-        Search work items across a workspace.
+        Search work items by text across a workspace.
+
+        Use this for free-text name/description search. For structured
+        filtering (priority, state, assignee, dates, etc.) use
+        `list_work_items` or `list_workspace_work_items` with a PQL expression.
 
         Args:
-            workspace_slug: The workspace slug identifier
-            query: This is a free-form text search and will be used to search the work items
-                    by name, description etc.
+            query: Free-text search string across work item name and description
             expand: Comma-separated list of related fields to expand in response
             fields: Comma-separated list of fields to include in response
             external_id: External system identifier for filtering
             external_source: External system source name for filtering
-            order_by: Field to order results by. Prefix with '-' for descending order
+            order_by: Field to order results by. Prefix with '-' for descending
 
         Returns:
             WorkItemSearch object containing search results
