@@ -6,17 +6,17 @@ that reads the current password from the cache on every new Redis connection.
 """
 
 import json
-import logging
 import os
 import threading
 import time
 
 import boto3
+from fastmcp.utilities.logging import get_logger
 from redis import CredentialProvider
 
 _SECRET_CACHE: dict[tuple[str, str], dict] = {}
 _cache_lock = threading.Lock()
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 
 def _parse_default_ttl() -> int:

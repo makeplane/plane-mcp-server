@@ -1,6 +1,7 @@
 """Unit tests for plane_mcp.aws_secrets and the Redis token-store resolver."""
 
 import json
+import logging
 import time
 
 import boto3
@@ -9,7 +10,7 @@ from botocore.stub import Stubber
 from key_value.aio.stores.memory import MemoryStore
 from key_value.aio.stores.redis import RedisStore
 
-from plane_mcp import aws_secrets
+from plane_mcp import aws_secrets, server
 from plane_mcp.aws_secrets import ElastiCacheCredentialProvider, get_secret
 from plane_mcp.server import _build_token_store
 
@@ -24,6 +25,7 @@ def _reset_state(monkeypatch):
         "REDIS_HOST",
         "REDIS_PORT",
         "REDIS_PASSWORD",
+        "REDIS_SSL",
         "ELASTICACHE_SECRET_ARN",
         "REDIS_AUTH_TOKEN_KEY",
         "AWS_REGION",
@@ -59,6 +61,29 @@ def _forbid_boto3(monkeypatch):
         raise AssertionError("Unexpected boto3.client() call")
 
     monkeypatch.setattr(aws_secrets.boto3, "client", _explode)
+
+
+@pytest.fixture
+def no_verify(monkeypatch):
+    """Skip the eager Redis PING so store-resolution tests need no live Redis."""
+    monkeypatch.setattr(server, "_verify_redis_connection", lambda store: None)
+
+
+@pytest.fixture
+def capture_log(caplog):
+    """Capture records from a fastmcp-namespaced logger.
+
+    The ``fastmcp`` logger sets ``propagate=False``, so caplog's root handler
+    never sees these records — attach it directly to the target logger instead.
+    """
+
+    def _capture(logger_name: str):
+        target = logging.getLogger(logger_name)
+        target.addHandler(caplog.handler)
+        target.setLevel(logging.WARNING)
+        return caplog
+
+    return _capture
 
 
 def test_get_secret_caches_within_ttl(monkeypatch):
@@ -101,10 +126,10 @@ def test_parse_default_ttl_unset(monkeypatch):
     assert aws_secrets._parse_default_ttl() == 300
 
 
-def test_parse_default_ttl_invalid_falls_back(monkeypatch, caplog):
+def test_parse_default_ttl_invalid_falls_back(monkeypatch, capture_log):
+    caplog = capture_log("fastmcp.plane_mcp.aws_secrets")
     monkeypatch.setenv("AWS_SECRET_CACHE_TTL", "not-a-number")
-    with caplog.at_level("WARNING", logger="plane_mcp.aws_secrets"):
-        assert aws_secrets._parse_default_ttl() == 300
+    assert aws_secrets._parse_default_ttl() == 300
     assert any("not an integer" in rec.message for rec in caplog.records)
 
 
@@ -179,14 +204,14 @@ def test_build_token_store_no_env_returns_memory_store():
     assert isinstance(_build_token_store(), MemoryStore)
 
 
-def test_build_token_store_host_port_only_returns_redis(monkeypatch):
+def test_build_token_store_host_port_only_returns_redis(monkeypatch, no_verify):
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
     _forbid_boto3(monkeypatch)
     assert isinstance(_build_token_store(), RedisStore)
 
 
-def test_build_token_store_password_wins_over_arn(monkeypatch):
+def test_build_token_store_password_wins_over_arn(monkeypatch, no_verify):
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
     monkeypatch.setenv("REDIS_PASSWORD", "pw")
@@ -209,20 +234,20 @@ def test_build_token_store_arn_without_host_port_raises(monkeypatch):
         _build_token_store()
 
 
-def test_build_token_store_arn_without_irsa_skips_sm(monkeypatch, caplog):
+def test_build_token_store_arn_without_irsa_skips_sm(monkeypatch, capture_log, no_verify):
+    caplog = capture_log("fastmcp.plane_mcp.server")
     monkeypatch.setenv("ELASTICACHE_SECRET_ARN", ARN)
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
     _forbid_boto3(monkeypatch)
 
-    with caplog.at_level("WARNING", logger="plane_mcp.server"):
-        store = _build_token_store()
+    store = _build_token_store()
 
     assert isinstance(store, RedisStore)
     assert any("IRSA/Pod Identity" in rec.message for rec in caplog.records)
 
 
-def test_build_token_store_arn_with_aws_role_arn_activates_sm(monkeypatch):
+def test_build_token_store_arn_with_aws_role_arn_activates_sm(monkeypatch, no_verify):
     monkeypatch.setenv("ELASTICACHE_SECRET_ARN", ARN)
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
@@ -232,7 +257,7 @@ def test_build_token_store_arn_with_aws_role_arn_activates_sm(monkeypatch):
     stubber.assert_no_pending_responses()
 
 
-def test_build_token_store_arn_with_pod_identity_activates_sm(monkeypatch):
+def test_build_token_store_arn_with_pod_identity_activates_sm(monkeypatch, no_verify):
     monkeypatch.setenv("ELASTICACHE_SECRET_ARN", ARN)
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
@@ -252,7 +277,7 @@ def test_build_token_store_arn_missing_token_key_raises(monkeypatch):
         _build_token_store()
 
 
-def test_build_token_store_custom_token_key(monkeypatch):
+def test_build_token_store_custom_token_key(monkeypatch, no_verify):
     monkeypatch.setenv("ELASTICACHE_SECRET_ARN", ARN)
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
@@ -260,3 +285,88 @@ def test_build_token_store_custom_token_key(monkeypatch):
     monkeypatch.setenv("REDIS_AUTH_TOKEN_KEY", "token")
     _stub_secrets(monkeypatch, [{"token": "secret-pw"}])
     assert isinstance(_build_token_store(), RedisStore)
+
+
+def _capture_async_redis_kwargs(monkeypatch) -> dict:
+    """Patch redis.asyncio.Redis to record the kwargs the secret path builds it with."""
+    import redis.asyncio as aioredis
+
+    captured: dict = {}
+
+    class _FakeAsyncRedis:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(aioredis, "Redis", _FakeAsyncRedis)
+    return captured
+
+
+def test_build_token_store_secret_path_uses_tls_by_default(monkeypatch, no_verify):
+    monkeypatch.setenv("ELASTICACHE_SECRET_ARN", ARN)
+    monkeypatch.setenv("REDIS_HOST", "localhost")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.setenv("AWS_ROLE_ARN", "arn:aws:iam::123:role/test")
+    _stub_secrets(monkeypatch, [{"authToken": "secret-pw"}])
+    captured = _capture_async_redis_kwargs(monkeypatch)
+
+    _build_token_store()
+    assert captured["ssl"] is True
+
+
+def test_build_token_store_secret_path_ssl_can_be_disabled(monkeypatch, no_verify):
+    monkeypatch.setenv("ELASTICACHE_SECRET_ARN", ARN)
+    monkeypatch.setenv("REDIS_HOST", "localhost")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.setenv("AWS_ROLE_ARN", "arn:aws:iam::123:role/test")
+    monkeypatch.setenv("REDIS_SSL", "false")
+    _stub_secrets(monkeypatch, [{"authToken": "secret-pw"}])
+    captured = _capture_async_redis_kwargs(monkeypatch)
+
+    _build_token_store()
+    assert captured["ssl"] is False
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (None, True),
+        ("true", True),
+        ("True", True),
+        ("1", True),
+        ("yes", True),
+        ("on", True),
+        ("false", False),
+        ("0", False),
+        ("no", False),
+        ("", False),
+    ],
+)
+def test_redis_ssl_enabled(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("REDIS_SSL", raising=False)
+    else:
+        monkeypatch.setenv("REDIS_SSL", value)
+    assert server._redis_ssl_enabled() is expected
+
+
+def test_verify_redis_connection_succeeds():
+    class _Client:
+        async def ping(self):
+            return True
+
+    class _Store:
+        _client = _Client()
+
+    server._verify_redis_connection(_Store())  # should not raise
+
+
+def test_verify_redis_connection_raises_on_failure():
+    class _Client:
+        async def ping(self):
+            raise OSError("connection refused")
+
+    class _Store:
+        _client = _Client()
+
+    with pytest.raises(RuntimeError, match="Redis connection failed during startup PING"):
+        server._verify_redis_connection(_Store())

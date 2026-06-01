@@ -1,10 +1,10 @@
 """Plane MCP Server implementation."""
 
-import logging
 import os
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
+from fastmcp.utilities.logging import get_logger
 from key_value.aio.stores.memory import MemoryStore
 from key_value.aio.stores.redis import RedisStore
 from mcp.types import Icon
@@ -12,13 +12,32 @@ from mcp.types import Icon
 from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
 from plane_mcp.tools import register_tools
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _has_aws_credentials() -> bool:
     # True when either IRSA (AWS_ROLE_ARN) or EKS Pod Identity
     # (AWS_CONTAINER_CREDENTIALS_FULL_URI) is present. Mirrors plane-ee api service.
     return bool(os.environ.get("AWS_ROLE_ARN", "") or os.environ.get("AWS_CONTAINER_CREDENTIALS_FULL_URI", ""))
+
+
+def _redis_ssl_enabled() -> bool:
+    # ElastiCache requires in-transit encryption (TLS) whenever Redis AUTH tokens
+    # are used, so default to True. Set REDIS_SSL=false to opt out for a plaintext
+    # self-managed Redis.
+    return os.getenv("REDIS_SSL", "true").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _verify_redis_connection(store) -> None:
+    """PING Redis eagerly so a misconfigured/unreachable backend fails loud at
+    startup instead of silently degrading on the first (lazy) token operation."""
+    import asyncio
+
+    try:
+        asyncio.run(store._client.ping())
+    except Exception as exc:
+        raise RuntimeError(f"Redis connection failed during startup PING: {exc}") from exc
+    logger.info("Redis connection verified (PING succeeded)")
 
 
 def _build_token_store():
@@ -31,7 +50,9 @@ def _build_token_store():
         if not (redis_host and redis_port):
             raise RuntimeError("REDIS_PASSWORD is set but REDIS_HOST/REDIS_PORT are not — set both to use Redis.")
         logger.info("Using Redis for token storage (password auth)")
-        return RedisStore(host=redis_host, port=int(redis_port), password=password)
+        store = RedisStore(host=redis_host, port=int(redis_port), password=password)
+        _verify_redis_connection(store)
+        return store
 
     if secret_arn and _has_aws_credentials():
         if not (redis_host and redis_port):
@@ -50,14 +71,18 @@ def _build_token_store():
         if token_key not in secret:
             raise RuntimeError(f"REDIS_AUTH_TOKEN_KEY {token_key!r} not present in secret {secret_arn}")
 
-        logger.info("Using Redis for token storage (auth token from Secrets Manager)")
+        use_ssl = _redis_ssl_enabled()
+        logger.info("Using Redis for token storage (auth token from Secrets Manager, ssl=%s)", use_ssl)
         client = Redis(
             host=redis_host,
             port=int(redis_port),
             credential_provider=ElastiCacheCredentialProvider(secret_arn, region, token_key),
             decode_responses=True,
+            ssl=use_ssl,
         )
-        return RedisStore(client=client)
+        store = RedisStore(client=client)
+        _verify_redis_connection(store)
+        return store
 
     if secret_arn:
         logger.warning(
@@ -67,7 +92,9 @@ def _build_token_store():
 
     if redis_host and redis_port:
         logger.info("Using Redis for token storage")
-        return RedisStore(host=redis_host, port=int(redis_port))
+        store = RedisStore(host=redis_host, port=int(redis_port))
+        _verify_redis_connection(store)
+        return store
 
     logger.warning(
         "Using in-memory storage - tokens will be lost on restart! Set REDIS_HOST and REDIS_PORT for production."
