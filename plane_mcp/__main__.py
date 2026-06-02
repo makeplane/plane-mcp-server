@@ -11,7 +11,9 @@ from enum import Enum
 import uvicorn
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Mount
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
 
 from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
 
@@ -60,6 +62,23 @@ class ServerMode(Enum):
     HTTP = "http"
 
 
+def resolve_bind() -> tuple[str, int]:
+    """Resolve the HTTP host/port to bind from the environment.
+
+    ``MCP_HOST`` (default ``0.0.0.0``) and ``MCP_PORT`` (default ``8211``). Platforms
+    such as Cloud Run inject ``$PORT``; when set it takes precedence over ``MCP_PORT``
+    so the service always binds the platform-assigned port.
+    """
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("PORT") or os.getenv("MCP_PORT", "8211"))
+    return host, port
+
+
+async def healthz(request: Request) -> JSONResponse:
+    """Liveness/readiness probe for container orchestration (Cloud Run, k8s)."""
+    return JSONResponse({"status": "ok"})
+
+
 @asynccontextmanager
 async def combined_lifespan(oauth_app, header_app, sse_app):
     """Combine lifespans from both OAuth and Header MCP apps."""
@@ -87,7 +106,7 @@ def main() -> None:
         return
 
     if server_mode == ServerMode.HTTP:
-
+        host, port = resolve_bind()
         prefix = os.getenv("MCP_PATH_PREFIX") or ""
 
         oauth_mcp = get_oauth_mcp(prefix + "/http")
@@ -105,6 +124,7 @@ def main() -> None:
 
         app = Starlette(
             routes=[
+                Route("/healthz", healthz),
                 # Well-known routes for OAuth and Header HTTP
                 *oauth_well_known,
                 *sse_well_known,
@@ -133,11 +153,11 @@ def main() -> None:
             uv_handler.setFormatter(JSONFormatter())
             uv_logger.addHandler(uv_handler)
 
-        logger.info("Starting HTTP server at URLs: /mcp and /header/mcp")
+        logger.info("Starting HTTP server on %s:%s", host, port)
         uvicorn.run(
             app,
-            host="0.0.0.0",
-            port=8211,
+            host=host,
+            port=port,
             log_level="info",
             access_log=False,
         )
