@@ -109,6 +109,59 @@ Connect to the hosted Plane MCP server using OAuth authentication via Server-Sen
 **Note**: OAuth authentication will be handled automatically when connecting to the remote server. This transport is deprecated in favor of the HTTP transport.
 
 
+### 5. Self-hosting the HTTP server
+
+The sections above connect to Plane's **hosted** MCP service. You can also **run the HTTP server yourself** against a self-hosted Plane: it exposes the same OAuth (`/http/mcp`) and per-user PAT (`/http/api-key/mcp`) mounts, is configured entirely via environment variables, and is stateless and container/Cloud-Run-ready.
+
+#### Run it
+
+```bash
+export PLANE_BASE_URL="https://your-plane-instance.example.com"   # your self-hosted Plane
+# For the OAuth mount, register a Plane OAuth app and set:
+export PLANE_OAUTH_PROVIDER_CLIENT_ID="..."
+export PLANE_OAUTH_PROVIDER_CLIENT_SECRET="..."
+export PLANE_OAUTH_PROVIDER_BASE_URL="https://your-mcp-host.example.com"
+export MCP_PORT="8211"            # MCP_HOST defaults to 0.0.0.0
+
+uvx plane-mcp-server http         # or: python -m plane_mcp http
+# OAuth MCP : http://localhost:8211/http/mcp
+# PAT  MCP  : http://localhost:8211/http/api-key/mcp   (Authorization: Bearer <PAT> + X-Workspace-slug)
+# Health    : http://localhost:8211/healthz
+```
+
+Per-user **PAT** access needs no OAuth app — clients call `/http/api-key/mcp` with `Authorization: Bearer <PAT>` and `X-Workspace-slug` headers.
+
+#### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PLANE_BASE_URL` | `https://api.plane.so` | Base URL of your Plane API (point at your self-hosted instance). |
+| `PLANE_INTERNAL_BASE_URL` | — | Optional server-to-server URL; takes precedence over `PLANE_BASE_URL`. |
+| `MCP_HOST` | `0.0.0.0` | Bind address for HTTP mode. |
+| `MCP_PORT` | `8211` | Bind port. Overridden by `PORT` when set (e.g. Cloud Run). |
+| `MCP_PATH_PREFIX` | — | Optional URL path prefix for all mounts. |
+| `PLANE_OAUTH_PROVIDER_CLIENT_ID` / `_SECRET` / `_BASE_URL` | — | OAuth app credentials for the `/http/mcp` mount. |
+| `REDIS_HOST` / `REDIS_PORT` | — | Optional OAuth token storage (falls back to in-memory). |
+
+#### Docker / Docker Compose
+
+```bash
+docker build -t plane-mcp-server .
+docker run --rm -p 8211:8211 -e PLANE_BASE_URL="https://your-plane-instance.example.com" plane-mcp-server http
+```
+
+A ready-to-edit Compose file is provided as [`docker-compose.example.yml`](docker-compose.example.yml) and a sample environment as [`.env.example`](.env.example).
+
+#### Cloud Run
+
+The server is stateless and Cloud Run-ready: it **respects the injected `$PORT`** (which takes precedence over `MCP_PORT`) and exposes `GET /healthz` (returns `200 {"status":"ok"}`) for startup/liveness probes.
+
+```bash
+gcloud run deploy plane-mcp-server --source . --region <REGION> \
+  --set-env-vars PLANE_BASE_URL=https://your-plane-instance.example.com
+```
+
+
 ## Configuration
 
 ### Authentication
@@ -127,7 +180,7 @@ export PLANE_API_KEY="your-api-key"
 export PLANE_WORKSPACE_SLUG="your-workspace-slug"
 ```
 
-**Note**: For remote HTTP transports (OAuth or PAT), authentication is handled via the connection method (OAuth flow or PAT headers) and does not require these environment variables.
+**Note**: For the **hosted** remote HTTP transports (OAuth or PAT), authentication is handled via the connection method (OAuth flow or PAT headers) and does not require these environment variables. When **self-hosting the HTTP server** (section 5), configuration is env-driven — see the environment-variable table there.
 
 ## Available Tools
 
