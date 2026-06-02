@@ -23,8 +23,9 @@ RUN uv pip install --system --no-cache .
 # Expose port for HTTP transports (SSE, streamable-http, http)
 EXPOSE 8211
 
-# Set environment variables with defaults
-ENV FASTMCP_PORT=8211
+# Default bind port. Override with MCP_PORT, or with PORT (injected by Cloud Run
+# and similar platforms, which takes precedence). MCP_HOST defaults to 0.0.0.0.
+ENV MCP_PORT=8211
 
 # Default to streamable-http transport, but allow override via command
 # Users can override by passing different transport as CMD
