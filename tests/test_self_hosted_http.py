@@ -79,7 +79,13 @@ class TestHeaderAuthPreserved:
     def test_header_app_rejects_request_without_workspace_slug(self):
         app = get_header_mcp().http_app(stateless_http=True)
         client = TestClient(app, raise_server_exceptions=False)
-        response = client.post("/mcp", json={"jsonrpc": "2.0", "method": "initialize", "id": 1})
+        # Send a bearer token but omit X-Workspace-slug so the PAT-specific
+        # workspace-slug gate is exercised (not just generic unauthenticated handling).
+        response = client.post(
+            "/mcp",
+            headers={"Authorization": "Bearer dummy-pat"},
+            json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+        )
         assert response.status_code in (401, 403)
 
 
