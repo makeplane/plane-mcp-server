@@ -18,7 +18,7 @@ from plane.models.work_items import (
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
+from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
 
