@@ -36,7 +36,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         List all cycles in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             params: Optional query parameters as a dictionary
 
@@ -65,7 +64,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         Create a new cycle.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             name: Cycle name
             owned_by: UUID of the user who owns the cycle
@@ -101,7 +99,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         Retrieve a cycle by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cycle_id: UUID of the cycle
 
@@ -128,7 +125,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         Update a cycle by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cycle_id: UUID of the cycle
             name: Cycle name
@@ -164,7 +160,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         Delete a cycle by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cycle_id: UUID of the cycle
         """
@@ -180,7 +175,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         List archived cycles in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             params: Optional query parameters as a dictionary
 
@@ -225,7 +219,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         Remove a work item from a cycle.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cycle_id: UUID of the cycle
             work_item_id: UUID of the work item to remove
@@ -312,7 +305,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         Transfer work items from one cycle to another.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cycle_id: UUID of the source cycle
             new_cycle_id: UUID of the target cycle to transfer issues to
@@ -390,7 +382,6 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         Unarchive a cycle.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             cycle_id: UUID of the cycle
 

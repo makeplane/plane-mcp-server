@@ -41,7 +41,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         List all projects in a workspace.
 
         Args:
-            workspace_slug: The workspace slug identifier
             cursor: Pagination cursor for getting next set of results
             per_page: Number of results per page (1-100)
             expand: Comma-separated list of related fields to expand in response
@@ -94,7 +93,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Create a new project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             name: Project name
             identifier: Project identifier (e.g., "MP" for "My Project")
             description: Project description
@@ -155,7 +153,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Retrieve a project by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
 
         Returns:
@@ -195,7 +192,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Update a project by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             name: Project name
             description: Project description
@@ -268,7 +264,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Delete a project by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
         """
         client, workspace_slug = get_plane_client_context()
@@ -305,7 +300,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Get work log summary for a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
 
         Returns:
@@ -320,7 +314,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Get all members of a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             params: Optional query parameters as a dictionary
 
@@ -336,7 +329,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Get features of a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
 
         Returns:
@@ -360,7 +352,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Update features of a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             epics: Enable/disable epics feature
             modules: Enable/disable modules feature

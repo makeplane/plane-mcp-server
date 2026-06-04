@@ -25,7 +25,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         List all initiatives in a workspace.
 
         Args:
-            workspace_slug: The workspace slug identifier
             params: Optional query parameters as a dictionary (e.g., per_page, cursor)
 
         Returns:
@@ -49,7 +48,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         Create a new initiative in the workspace.
 
         Args:
-            workspace_slug: The workspace slug identifier
             name: Initiative name
             description_html: HTML description of the initiative
             start_date: Initiative start date (ISO 8601 format)
@@ -81,7 +79,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         Retrieve an initiative by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             initiative_id: UUID of the initiative
 
         Returns:
@@ -105,7 +102,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         Update an initiative by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             initiative_id: UUID of the initiative
             name: Initiative name
             description_html: HTML description of the initiative
@@ -138,7 +134,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         Delete an initiative by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             initiative_id: UUID of the initiative
         """
         client, workspace_slug = get_plane_client_context()
