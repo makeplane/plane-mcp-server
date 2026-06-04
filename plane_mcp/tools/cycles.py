@@ -18,11 +18,10 @@ from plane.models.cycles import (
 from plane.models.query_params import WorkItemQueryParams
 from pydantic import Field
 
-from plane_mcp.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
+from plane_mcp.client import get_plane_client_context
+from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
-
-from plane_mcp.client import get_plane_client_context
 
 
 def register_cycle_tools(mcp: FastMCP) -> None:

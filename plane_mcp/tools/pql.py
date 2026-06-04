@@ -16,7 +16,7 @@ from typing import Literal
 
 from fastmcp import FastMCP
 
-from plane_mcp.pql_reference import PQL_FIELD_DESCRIPTION, PQL_FULL_REFERENCE
+from plane_mcp.tools.pql_reference import PQL_FIELD_DESCRIPTION, PQL_FULL_REFERENCE
 
 
 def register_pql_tools(mcp: FastMCP) -> None:
