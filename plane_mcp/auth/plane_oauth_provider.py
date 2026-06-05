@@ -351,6 +351,7 @@ class PlaneOAuthProvider(OAuthProxy):
             jwt_signing_key=settings.jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
             valid_scopes=["read", "write"],
+            enable_cimd=False,
         )
 
         logger.info(
