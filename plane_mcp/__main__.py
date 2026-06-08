@@ -9,11 +9,36 @@ from datetime import datetime, timezone
 from enum import Enum
 
 import uvicorn
+from fastmcp.server.dependencies import get_access_token
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
 from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
+
+
+class UserContextFilter(logging.Filter):
+    """Attach the authenticated user's id/display_name to every log record.
+
+    Pulls the current request's access token via FastMCP's dependency, which
+    returns None (never raises) outside a request context — so startup logs and
+    stdio mode simply carry no user info.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        user_id = None
+        display_name = None
+        try:
+            token = get_access_token()
+            if token:
+                user_id = token.claims.get("sub")
+                display_name = token.claims.get("display_name")
+        except Exception:
+            # Never let logging enrichment break a request.
+            pass
+        record.user_id = user_id
+        record.display_name = display_name
+        return True
 
 
 class JSONFormatter(logging.Formatter):
@@ -26,6 +51,12 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        user_id = getattr(record, "user_id", None)
+        if user_id:
+            log_entry["user_id"] = user_id
+        display_name = getattr(record, "display_name", None)
+        if display_name:
+            log_entry["display_name"] = display_name
         if record.exc_info and record.exc_info[1]:
             log_entry["error"] = {
                 "type": type(record.exc_info[1]).__name__,
@@ -44,6 +75,7 @@ def configure_json_logging():
 
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(JSONFormatter())
+    handler.addFilter(UserContextFilter())
     fastmcp_logger.addHandler(handler)
     fastmcp_logger.setLevel(logging.INFO)
     fastmcp_logger.propagate = False
@@ -87,7 +119,6 @@ def main() -> None:
         return
 
     if server_mode == ServerMode.HTTP:
-
         prefix = os.getenv("MCP_PATH_PREFIX") or ""
 
         oauth_mcp = get_oauth_mcp(prefix + "/http")
@@ -131,6 +162,7 @@ def main() -> None:
                 uv_logger.removeHandler(h)
             uv_handler = logging.StreamHandler(sys.stderr)
             uv_handler.setFormatter(JSONFormatter())
+            uv_handler.addFilter(UserContextFilter())
             uv_logger.addHandler(uv_handler)
 
         logger.info("Starting HTTP server at URLs: /mcp and /header/mcp")
