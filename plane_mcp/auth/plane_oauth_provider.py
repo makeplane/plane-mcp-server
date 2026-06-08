@@ -91,7 +91,7 @@ class PlaneOAuthProviderSettings(BaseSettings):
     jwt_signing_key: str | None = None
     plane_base_url: str | None = None
     plane_internal_base_url: str | None = None  # Internal URL for server-to-server calls
-    enable_cimd: bool | None = None
+    enable_cimd: bool = False
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -328,7 +328,6 @@ class PlaneOAuthProvider(OAuthProxy):
         plane_internal_url = (
             settings.plane_internal_base_url or os.getenv("PLANE_INTERNAL_BASE_URL") or plane_base_url_final
         )
-        enable_cimd_final = settings.enable_cimd if settings.enable_cimd is not None else False
 
         # Create Plane token verifier (uses internal URL for server-to-server calls)
         token_verifier = PlaneOAuthTokenVerifier(
@@ -357,7 +356,7 @@ class PlaneOAuthProvider(OAuthProxy):
             jwt_signing_key=settings.jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
             valid_scopes=["read", "write"],
-            enable_cimd=enable_cimd_final,
+            enable_cimd=settings.enable_cimd,
         )
 
         logger.info(
