@@ -25,6 +25,7 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
             base_url=f"{os.getenv('PLANE_OAUTH_PROVIDER_BASE_URL')}{base_path}",
             plane_base_url=os.getenv("PLANE_BASE_URL", ""),
             plane_internal_base_url=os.getenv("PLANE_INTERNAL_BASE_URL", ""),
+            enable_cimd=os.getenv("PLANE_OAUTH_PROVIDER_ENABLE_CIMD", "false").lower() == "true",
             client_storage=build_token_store(),
             required_scopes=["read", "write"],
             allowed_client_redirect_uris=[
