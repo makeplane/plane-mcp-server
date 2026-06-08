@@ -40,6 +40,8 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
                 "vscode-insiders://*",
                 "windsurf://*",
                 "claude://*",
+                # Claude.ai web client
+                "https://claude.ai/*",
             ],
         ),
     )
