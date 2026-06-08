@@ -26,7 +26,6 @@ def register_intake_tools(mcp: FastMCP) -> None:
         List all intake work items in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             params: Optional query parameters as a dictionary (e.g., per_page, cursor)
 
@@ -53,7 +52,6 @@ def register_intake_tools(mcp: FastMCP) -> None:
         Create a new intake work item in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             data: Intake work item data as a dictionary
 
@@ -76,7 +74,6 @@ def register_intake_tools(mcp: FastMCP) -> None:
         Retrieve an intake work item by work item ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             work_item_id: UUID of the work item (use the issue field from
                 IntakeWorkItem response, not the intake work item ID)
@@ -164,7 +161,6 @@ def register_intake_tools(mcp: FastMCP) -> None:
         Delete an intake work item by work item ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             work_item_id: UUID of the work item (use the issue field from
                 IntakeWorkItem response, not the intake work item ID)

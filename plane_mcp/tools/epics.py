@@ -88,7 +88,6 @@ def register_epic_tools(mcp: FastMCP) -> None:
         Create a new epic.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             name: Epic name (required)
             assignees: List of user IDs to assign to the epic

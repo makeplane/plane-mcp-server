@@ -35,7 +35,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         List all modules in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             params: Optional query parameters as a dictionary
 
@@ -65,7 +64,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         Create a new module.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             name: Module name
             description: Module description
@@ -107,7 +105,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         Retrieve a module by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             module_id: UUID of the module
 
@@ -135,7 +132,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         Update a module by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             module_id: UUID of the module
             name: Module name
@@ -180,7 +176,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         Delete a module by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             module_id: UUID of the module
         """
@@ -196,7 +191,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         List archived modules in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             params: Optional query parameters as a dictionary
 
@@ -241,7 +235,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         Remove a work item from a module.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             module_id: UUID of the module
             work_item_id: UUID of the work item to remove
@@ -324,7 +317,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         Archive a module.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             module_id: UUID of the module
         """
@@ -337,7 +329,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         Unarchive a module.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             module_id: UUID of the module
         """
