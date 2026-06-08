@@ -33,9 +33,9 @@ class UserContextFilter(logging.Filter):
             if token:
                 user_id = token.claims.get("sub")
                 display_name = token.claims.get("display_name")
-        except Exception:
-            # Never let logging enrichment break a request.
-            pass
+        except Exception as exc:
+            # Never let logging enrichment break a request, but leave a signal.
+            record.user_context_enrichment_error = type(exc).__name__
         record.user_id = user_id
         record.display_name = display_name
         return True
@@ -57,6 +57,9 @@ class JSONFormatter(logging.Formatter):
         display_name = getattr(record, "display_name", None)
         if display_name:
             log_entry["display_name"] = display_name
+        err = getattr(record, "user_context_enrichment_error", None)
+        if err:
+            log_entry["user_context_enrichment_error"] = err
         if record.exc_info and record.exc_info[1]:
             log_entry["error"] = {
                 "type": type(record.exc_info[1]).__name__,
