@@ -18,26 +18,24 @@ from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
 
 
 class UserContextFilter(logging.Filter):
-    """Attach the authenticated user's id/display_name to every log record.
+    """Attach the authenticated user's id to every log record.
 
     Pulls the current request's access token via FastMCP's dependency, which
     returns None (never raises) outside a request context — so startup logs and
-    stdio mode simply carry no user info.
+    stdio mode simply carry no user info. Only the opaque user id is recorded;
+    PII such as the display name / email is intentionally never logged.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
         user_id = None
-        display_name = None
         try:
             token = get_access_token()
             if token:
                 user_id = token.claims.get("sub")
-                display_name = token.claims.get("display_name")
         except Exception as exc:
             # Never let logging enrichment break a request, but leave a signal.
             record.user_context_enrichment_error = type(exc).__name__
         record.user_id = user_id
-        record.display_name = display_name
         return True
 
 
@@ -54,9 +52,6 @@ class JSONFormatter(logging.Formatter):
         user_id = getattr(record, "user_id", None)
         if user_id:
             log_entry["user_id"] = user_id
-        display_name = getattr(record, "display_name", None)
-        if display_name:
-            log_entry["display_name"] = display_name
         err = getattr(record, "user_context_enrichment_error", None)
         if err:
             log_entry["user_context_enrichment_error"] = err
