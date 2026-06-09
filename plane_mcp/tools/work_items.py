@@ -145,10 +145,21 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
         params = WorkItemCountQueryParams(pql=pql, group_by=group_by, sub_group_by=sub_group_by)
-        response: WorkItemGroupedCountResponse = client.work_items.count_workspace(
-            workspace_slug=workspace_slug,
-            params=params,
-        )
+        try:
+            response: WorkItemGroupedCountResponse = client.work_items.count_workspace(
+                workspace_slug=workspace_slug,
+                params=params,
+            )
+        except HttpError as e:
+            if pql and e.status_code == 400 and isinstance(e.response, dict) and "pql" in e.response:
+                logger.warning("count_work_items: invalid PQL %r → %s", pql, e.response)
+                return {
+                    "error": e.response["pql"],
+                    "failed_pql": pql,
+                    "pql_reference": PQL_FULL_REFERENCE,
+                    "hint": "The PQL above failed. Fix it using the reference and retry count_work_items.",
+                }
+            raise
         return response.model_dump()
 
     @mcp.tool()
