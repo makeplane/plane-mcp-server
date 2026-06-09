@@ -6,13 +6,14 @@ from fastmcp import FastMCP
 from fastmcp.utilities.logging import get_logger
 from plane.errors.errors import HttpError
 from plane.models.enums import PriorityEnum
-from plane.models.query_params import RetrieveQueryParams, WorkItemQueryParams
+from plane.models.query_params import RetrieveQueryParams, WorkItemCountQueryParams, WorkItemQueryParams
 from plane.models.work_items import (
     CreateWorkItem,
     PaginatedWorkItemResponse,
     UpdateWorkItem,
     WorkItem,
     WorkItemDetail,
+    WorkItemGroupedCountResponse,
     WorkItemSearch,
 )
 from pydantic import Field
@@ -28,7 +29,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_work_items(
-        project_id: str,
+        project_id: str | None = None,
         pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
         order_by: str | None = None,
         per_page: int | None = None,
@@ -39,14 +40,16 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         external_source: str | None = None,
     ) -> dict[str, Any]:
         """
-        List work items in a project with optional PQL filtering.
-        For workspace-wide filtering use list_workspace_work_items instead.
+        List work items with optional PQL filtering.
+
+        Omit project_id to list across the entire workspace.
+        Pass project_id to scope results to a single project.
 
         For UUID fields (assignee, state, label, cycle, module, type,
         milestone) call the relevant list tool first to get the UUID.
 
         Args:
-            project_id: UUID of the project.
+            project_id: UUID of the project. Omit for workspace-wide results.
             pql: PQL filter. See field description for syntax.
             order_by: Sort field; prefix `-` for descending (e.g. `-created_at`).
             per_page: 1-100, default 25.
@@ -57,6 +60,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 created_at, updated_at, created_by, is_draft. Use `project` not
                 `project_id`.
             external_id / external_source: Filter by external system.
+
         Returns:
             results: Paginated list of work items.
             total_count: True DB total, not page-bounded — use for counts.
@@ -77,11 +81,17 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         )
 
         try:
-            response: PaginatedWorkItemResponse = client.work_items.list(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                params=params,
-            )
+            if project_id:
+                response: PaginatedWorkItemResponse = client.work_items.list(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    params=params,
+                )
+            else:
+                response = client.work_items.list_workspace(
+                    workspace_slug=workspace_slug,
+                    params=params,
+                )
         except HttpError as e:
             if pql and e.status_code == 400 and isinstance(e.response, dict) and "pql" in e.response:
                 logger.warning("list_work_items: invalid PQL %r → %s", pql, e.response)
@@ -104,74 +114,53 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    def list_workspace_work_items(
+    def count_work_items(
         pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
-        order_by: str | None = None,
-        per_page: int | None = None,
-        cursor: str | None = None,
-        expand: str | None = None,
-        fields: str | None = None,
-        external_id: str | None = None,
-        external_source: str | None = None,
+        group_by: str | None = None,
+        sub_group_by: str | None = None,
     ) -> dict[str, Any]:
         """
-        List work items across all projects with optional PQL filtering.
+        Count work items across the workspace with optional grouping.
 
-        Spans every project the caller can view. 
-        Use project= UUID in PQL to scope to one project.
-        For single-project filtering use list_work_items instead.
+        Use this for analytics — "how many urgent items?", "distribution by state?" —
+        without fetching full work item payloads.
 
         Args:
-            pql: PQL filter. See field description for syntax.
-            order_by / per_page / cursor / expand: Same as list_work_items.
-            fields: id, name, sequence_id, priority, state, project,
-                assignees, labels, type_id, start_date, target_date,
-                created_at, updated_by, created_by, is_draft.
-            external_id / external_source: Filter by external system.
+            pql: PQL filter to scope the count (e.g. 'priority = "urgent"').
+            group_by: Dimension to group counts by. Supported values:
+                state_id, state__group, priority, project_id, type_id,
+                labels__id, assignees__id, issue_module__module_id,
+                release_work_items__release_id, cycle_id, milestone_id,
+                created_by, target_date, start_date.
+            sub_group_by: Second dimension for nested grouping (requires group_by).
+
         Returns:
-            results: Paginated list of work items.
-            total_count: True DB total, not page-bounded — use for counts.
-            next_cursor: Cursor for the next page.
-            prev_cursor: Cursor for the previous page.
+            grouped_by: The group_by field used (null if none).
+            sub_grouped_by: The sub_group_by field used (null if none).
+            total_count: Total matching work items.
+            grouped_counts: Dict of group_key → {count} or
+                {total_count, sub_grouped_counts} when sub_group_by is set.
+                Keys are UUIDs for FK fields, plain strings for priority/state__group,
+                ISO dates for target_date/start_date, "None" for unset values.
         """
         client, workspace_slug = get_plane_client_context()
-
-        params = WorkItemQueryParams(
-            pql=pql,
-            order_by=order_by,
-            per_page=per_page,
-            cursor=cursor,
-            expand=expand,
-            fields=fields,
-            external_id=external_id,
-            external_source=external_source,
-        )
-
+        params = WorkItemCountQueryParams(pql=pql, group_by=group_by, sub_group_by=sub_group_by)
         try:
-            response: PaginatedWorkItemResponse = client.work_items.list_workspace(
+            response: WorkItemGroupedCountResponse = client.work_items.count_workspace(
                 workspace_slug=workspace_slug,
                 params=params,
             )
         except HttpError as e:
             if pql and e.status_code == 400 and isinstance(e.response, dict) and "pql" in e.response:
-                logger.warning("list_workspace_work_items: invalid PQL %r → %s", pql, e.response)
+                logger.warning("count_work_items: invalid PQL %r → %s", pql, e.response)
                 return {
                     "error": e.response["pql"],
                     "failed_pql": pql,
                     "pql_reference": PQL_FULL_REFERENCE,
-                    "hint": "The PQL above failed. Fix it using the reference and retry list_workspace_work_items.",
+                    "hint": "The PQL above failed. Fix it using the reference and retry count_work_items.",
                 }
             raise
-
-        return {
-            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
-            "total_count": response.total_count,
-            "count": response.count,
-            "next_cursor": response.next_cursor,
-            "prev_cursor": response.prev_cursor,
-            "next_page_results": response.next_page_results,
-            "prev_page_results": response.prev_page_results,
-        }
+        return response.model_dump()
 
     @mcp.tool()
     def create_work_item(
@@ -678,7 +667,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
 
         Use this for free-text name/description search. For structured
         filtering (priority, state, assignee, dates, etc.) use
-        `list_work_items` or `list_workspace_work_items` with a PQL expression.
+        `list_work_items` with a PQL expression.
 
         Args:
             query: Free-text search string across work item name and description
