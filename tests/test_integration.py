@@ -22,9 +22,7 @@ def get_config():
     mcp_url = os.getenv("PLANE_TEST_MCP_URL", "http://localhost:8211")
 
     if not api_key or not workspace_slug:
-        raise RuntimeError(
-            "Missing required env vars: PLANE_TEST_API_KEY, PLANE_TEST_WORKSPACE_SLUG"
-        )
+        raise RuntimeError("Missing required env vars: PLANE_TEST_API_KEY, PLANE_TEST_WORKSPACE_SLUG")
 
     return {
         "api_key": api_key,
@@ -54,20 +52,20 @@ async def run_integration_test():
     Full integration test:
     1. Create a project
     2. Create work item 1
-    3. Create work item 2 
-    4. Update work item 2 with work item 1 as parent 
-    5. Create epic with work item 1 as the underlying work item 
-    6. Update work item 2 to be under the epic 
-    7. List all epics 
+    3. Create work item 2
+    4. Update work item 2 with work item 1 as parent
+    5. Create epic with work item 1 as the underlying work item
+    6. Update work item 2 to be under the epic
+    7. List all epics
     8. Create a milestone and associate it with the project and work items
     9. Update the milestone to change its name and description
     10. List all milestones in the project
     11. Delete the milestone
     12. Delete the epic
-    13. Delete work items 
-    14. Delete project 
-    """ 
-    config = get_config() 
+    13. Delete work items
+    14. Delete project
+    """
+    config = get_config()
     unique_id = uuid.uuid4().hex[:6]
 
     transport = StreamableHttpTransport(
@@ -131,6 +129,61 @@ async def run_integration_test():
         )
         print("Set work item 1 as parent of work item 2")
 
+        # Work item attachment lifecycle (create metadata → list → retrieve → mark uploaded → delete)
+        print("Creating work item attachment...")
+        attachment_result = await client.call_tool(
+            "create_work_item_attachment",
+            {
+                "project_id": project_id,
+                "work_item_id": work_item_1_id,
+                "name": f"test-{unique_id}.txt",
+                "size": 12,
+                "mime_type": "text/plain",
+            },
+        )
+        attachment_wrapper = extract_result(attachment_result)
+        # create_work_item_attachment returns WorkItemAttachmentCreated wrapper:
+        # {attachment, upload_data, asset_id, asset_url}
+        attachment_id = attachment_wrapper["attachment"]["id"]
+        print(f"Created attachment: {attachment_id}")
+
+        # Plane filters list/retrieve to is_uploaded=True only — mark first.
+        print("Marking attachment as uploaded...")
+        await client.call_tool(
+            "update_work_item_attachment",
+            {
+                "project_id": project_id,
+                "work_item_id": work_item_1_id,
+                "attachment_id": attachment_id,
+                "is_uploaded": True,
+            },
+        )
+        print("Marked attachment as uploaded")
+
+        print("Listing work item attachments...")
+        attachments_list_result = await client.call_tool(
+            "list_work_item_attachments",
+            {
+                "project_id": project_id,
+                "work_item_id": work_item_1_id,
+            },
+        )
+        attachments_list = extract_result(attachments_list_result)
+        attachment_ids = [a["id"] for a in attachments_list if isinstance(a, dict) and "id" in a]
+        print(f"Attachments on work item 1: {attachment_ids}")
+        assert attachment_id in attachment_ids, "Created attachment was not returned by list_work_item_attachments"
+
+        print("Deleting attachment...")
+        await client.call_tool(
+            "delete_work_item_attachment",
+            {
+                "project_id": project_id,
+                "work_item_id": work_item_1_id,
+                "attachment_id": attachment_id,
+            },
+        )
+        print("Deleted attachment")
+
         # 5. Create epic with work item 1 as the underlying work item
         print("Creating epic...")
 
@@ -178,7 +231,7 @@ async def run_integration_test():
             {
                 "project_id": project_id,
                 "name": f"Milestone {unique_id}",
-                "description": "Integration test milestone",   
+                "description": "Integration test milestone",
                 "associated_work_item_ids": [epic_id, work_item_1_id, work_item_2_id],
             },
         )
@@ -199,18 +252,18 @@ async def run_integration_test():
         print(f"Work items associated with milestone: {[wi['id'] for wi in milestone_work_items]}")
 
         print(f"Created milestone: {milestone_id}")
-        
+
         # 9. Update the milestone to change its name and description
         print("Updating milestone...")
         await client.call_tool(
-            "update_milestone", 
-            { 
-                "project_id": project_id, 
-                "milestone_id": milestone_id, 
-                "name": f"Updated Milestone {unique_id}", 
-                "description": "Updated description for integration test milestone" 
+            "update_milestone",
+            {
+                "project_id": project_id,
+                "milestone_id": milestone_id,
+                "name": f"Updated Milestone {unique_id}",
+                "description": "Updated description for integration test milestone",
             },
-        ) 
+        )
 
         print("Updated milestone")
 
@@ -283,6 +336,11 @@ EXPECTED_TOOLS = [
     # Work item activity tools
     "list_work_item_activities",
     "retrieve_work_item_activity",
+    # Work item attachment tools
+    "list_work_item_attachments",
+    "create_work_item_attachment",
+    "update_work_item_attachment",
+    "delete_work_item_attachment",
     # Work item comment tools
     "list_work_item_comments",
     "retrieve_work_item_comment",
