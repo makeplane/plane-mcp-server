@@ -28,31 +28,41 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def list_work_item_properties(
-        work_item_type_id: str,
+        work_item_type_id: str | None = None,
         project_id: str | None = None,
         params: dict[str, Any] | None = None,
     ) -> list[WorkItemProperty]:
         """
-        List custom properties for a work item type.
+        List custom work item properties.
 
-        Lookup order when project_id provided:
-          1. Type-scoped endpoint (properties explicitly linked to the type)
-          2. Flat project endpoint (properties created without type association)
-          3. Workspace-level endpoint (workspace-wide properties)
+        Scope resolution (highest priority first):
+          - no args                              → ALL workspace-level properties (one API call)
+          - work_item_type_id only               → workspace-level properties linked to that type
+          - project_id only                      → all properties in that project (any type)
+          - project_id + work_item_type_id       → properties linked to that type in that project,
+                                                   falling back to project-flat then workspace if empty
 
-        Omit project_id to query workspace scope directly.
+        For PQL filtering by name, prefer calling with NO args — one workspace-wide
+        fetch beats iterating every work item type. Each result includes the
+        `display_name` you can match in-memory before composing `cf["<id>"]` in PQL.
 
         Each result includes:
         - id: property UUID — use as cf["<id>"] in PQL filters
+        - display_name: user-facing label (e.g. "Fed", "Acceptance Criteria")
         - property_type: TEXT | OPTION | DECIMAL | BOOLEAN | DATETIME | RELATION | URL | EMAIL
         - options: for OPTION type, each option has id + name; use option id in PQL
 
-        PQL workflow for filtering by custom property:
-          1. list_work_item_types(project_id)               → get type UUIDs
-          2. list_work_item_properties(work_item_type_id, project_id) → get property + option UUIDs
-          3. list_work_items(pql='cf["<prop-uuid>"] = "<opt-uuid>"')
+        PQL workflow for filtering by custom property (efficient path):
+          1. list_work_item_properties()                  → all workspace properties, one call
+          2. find the property by display_name in-memory  → property.id
+          3. list_work_items(pql='cf["<property.id>"] = "<option.id>"')
         """
         client, workspace_slug = get_plane_client_context()
+
+        # Fast path — no args: return every workspace-level property in ONE call.
+        # Use this when resolving property UUIDs by display_name for PQL composition.
+        if not work_item_type_id and not project_id:
+            return client.workspace_work_item_properties.list(workspace_slug=workspace_slug)
 
         def _get_workspace_props_for_type(type_id: str) -> list:
             """Fetch workspace-level properties associated with a type. Returns [] on any error."""
@@ -72,6 +82,17 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
 
         if not project_id:
             return _get_workspace_props_for_type(work_item_type_id)
+
+        if not work_item_type_id:
+            # project-flat endpoint: all properties in the project, any type
+            try:
+                return client.work_item_properties.list_project(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    params=params,
+                )
+            except Exception:
+                return []
 
         # Try type-scoped project endpoint first
         project_props = client.work_item_properties.list(
@@ -194,9 +215,7 @@ def register_work_item_property_tools(mcp: FastMCP) -> None:
                 project_id=project_id,
                 data=data,
             )
-        return client.workspace_work_item_properties.create(
-            workspace_slug=workspace_slug, data=data
-        )
+        return client.workspace_work_item_properties.create(workspace_slug=workspace_slug, data=data)
 
     @mcp.tool()
     def retrieve_work_item_property(
