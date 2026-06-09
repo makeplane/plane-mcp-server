@@ -91,6 +91,7 @@ class PlaneOAuthProviderSettings(BaseSettings):
     jwt_signing_key: str | None = None
     plane_base_url: str | None = None
     plane_internal_base_url: str | None = None  # Internal URL for server-to-server calls
+    enable_cimd: bool = False
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -248,6 +249,7 @@ class PlaneOAuthProvider(OAuthProxy):
         require_authorization_consent: bool = True,
         plane_base_url: str | NotSetT = NotSet,
         plane_internal_base_url: str | NotSetT = NotSet,
+        enable_cimd: bool | NotSetT = NotSet,
     ):
         """Initialize Plane OAuth provider.
 
@@ -285,6 +287,8 @@ class PlaneOAuthProvider(OAuthProxy):
                 testing environments.
             plane_base_url: Base URL for Plane API
                 (defaults to https://api.plane.so or PLANE_BASE_URL env var)
+            enable_cimd: Whether to enable CIMD (Client ID Metadata Document) support.
+                Defaults to False. Can be set via the PLANE_OAUTH_PROVIDER_ENABLE_CIMD environment variable.
         """
 
         settings = PlaneOAuthProviderSettings.model_validate(
@@ -302,6 +306,7 @@ class PlaneOAuthProvider(OAuthProxy):
                     "jwt_signing_key": jwt_signing_key,
                     "plane_base_url": plane_base_url,
                     "plane_internal_base_url": plane_internal_base_url,
+                    "enable_cimd": enable_cimd,
                 }.items()
                 if v is not NotSet
             }
@@ -351,6 +356,7 @@ class PlaneOAuthProvider(OAuthProxy):
             jwt_signing_key=settings.jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
             valid_scopes=["read", "write"],
+            enable_cimd=settings.enable_cimd,
         )
 
         logger.info(
