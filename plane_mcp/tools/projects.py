@@ -348,7 +348,6 @@ def register_project_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def update_project_features(
         project_id: str,
-        epics: bool | None = None,
         modules: bool | None = None,
         cycles: bool | None = None,
         views: bool | None = None,
@@ -362,7 +361,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         Args:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
-            epics: Enable/disable epics feature
             modules: Enable/disable modules feature
             cycles: Enable/disable cycles feature
             views: Enable/disable views feature
@@ -376,7 +374,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
 
         data = ProjectFeature(
-            epics=epics,
             modules=modules,
             cycles=cycles,
             views=views,
