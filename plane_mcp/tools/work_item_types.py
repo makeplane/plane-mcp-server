@@ -41,7 +41,6 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         description: str | None = None,
         project_ids: list[str] | None = None,
         is_active: bool | None = None,
-        level: int | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
     ) -> WorkItemType:
@@ -54,7 +53,6 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             description: Work item type description
             project_ids: List of project IDs this type applies to
             is_active: Whether the type is active
-            level: Hierarchy level (workspace-level types only; ignored for project-level types)
             external_source: External system source name
             external_id: External system identifier
 
@@ -68,7 +66,6 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             description=description,
             project_ids=project_ids,
             is_active=is_active,
-            level=level,
             external_source=external_source,
             external_id=external_id,
         )
@@ -103,7 +100,6 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
     def resolve_work_item_type(
         project_id: str,
         name: str,
-        level: int | None = None,
     ) -> WorkItemType:
         """
         Find a work item type by name for a project, create it if missing, and
@@ -124,9 +120,6 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Args:
             project_id: UUID of the project the type must be usable in
             name: Work item type name, e.g. "Epic" or "Initiative"
-            level: Hierarchy level to assign ONLY when creating a new workspace-level type.
-                   Ignored if the type already exists (use update_work_item_type to change
-                   an existing type's level). Has no effect on project-level types (Mode B).
 
         Returns:
             The WorkItemType. Its `id` is the `type_id` for create_work_item.
@@ -150,7 +143,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             )
             if at_workspace is None:
                 at_workspace = client.workspace_work_item_types.create(
-                    workspace_slug=workspace_slug, data=CreateWorkItemType(name=name, level=level)
+                    workspace_slug=workspace_slug, data=CreateWorkItemType(name=name)
                 )
             client.work_item_types.import_to_project(
                 workspace_slug=workspace_slug,
@@ -217,7 +210,6 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         description: str | None = None,
         project_ids: list[str] | None = None,
         is_active: bool | None = None,
-        level: int | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
     ) -> WorkItemType:
@@ -231,9 +223,6 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             description: Work item type description
             project_ids: List of project IDs this type applies to
             is_active: Whether the type is active
-            level: Hierarchy level (workspace-level types only; ignored for project-level types).
-                   Note: for Epic types (is_epic=true), only is_active can be changed — level
-                   and all other fields are immutable and the server will reject the request.
             external_source: External system source name
             external_id: External system identifier
 
@@ -247,7 +236,6 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             description=description,
             project_ids=project_ids,
             is_active=is_active,
-            level=level,
             external_source=external_source,
             external_id=external_id,
         )
