@@ -166,9 +166,10 @@ def register_page_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def create_workspace_page(
+    def create_page(
         name: str,
         description_html: str,
+        project_id: str | None = None,
         access: int | None = None,
         color: str | None = None,
         is_locked: bool | None = None,
@@ -179,11 +180,15 @@ def register_page_tools(mcp: FastMCP) -> None:
         external_source: str | None = None,
     ) -> Page:
         """
-        Create a workspace page.
+        Create a page.
+
+        Creates a project page if project_id is given, otherwise a
+        workspace-level page.
 
         Args:
             name: Page name
             description_html: Page content in HTML format
+            project_id: UUID of the project. Omit to create a workspace page.
             access: Access level for the page (integer)
             color: Page color
             is_locked: Whether the page is locked
@@ -211,61 +216,13 @@ def register_page_tools(mcp: FastMCP) -> None:
             external_source=external_source,
         )
 
+        if project_id is not None:
+            return client.pages.create_project_page(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                data=data,
+            )
         return client.pages.create_workspace_page(
             workspace_slug=workspace_slug,
-            data=data,
-        )
-
-    @mcp.tool()
-    def create_project_page(
-        project_id: str,
-        name: str,
-        description_html: str,
-        access: int | None = None,
-        color: str | None = None,
-        is_locked: bool | None = None,
-        archived_at: str | None = None,
-        view_props: dict[str, Any] | None = None,
-        logo_props: dict[str, Any] | None = None,
-        external_id: str | None = None,
-        external_source: str | None = None,
-    ) -> Page:
-        """
-        Create a project page.
-
-        Args:
-            project_id: UUID of the project
-            name: Page name
-            description_html: Page content in HTML format
-            access: Access level for the page (integer)
-            color: Page color
-            is_locked: Whether the page is locked
-            archived_at: Archive timestamp (ISO 8601 format)
-            view_props: View properties dictionary
-            logo_props: Logo properties dictionary
-            external_id: External system identifier
-            external_source: External system source name
-
-        Returns:
-            Created Page object
-        """
-        client, workspace_slug = get_plane_client_context()
-
-        data = CreatePage(
-            name=name,
-            description_html=description_html,
-            access=access,
-            color=color,
-            is_locked=is_locked,
-            archived_at=archived_at,
-            view_props=view_props,
-            logo_props=logo_props,
-            external_id=external_id,
-            external_source=external_source,
-        )
-
-        return client.pages.create_project_page(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
             data=data,
         )

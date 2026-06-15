@@ -210,49 +210,39 @@ def register_module_tools(mcp: FastMCP) -> None:
         return response.results
 
     @mcp.tool()
-    def add_work_items_to_module(
+    def manage_module_work_items(
         project_id: str,
         module_id: str,
-        work_item_ids: list[str],
+        add_ids: list[str] | None = None,
+        remove_ids: list[str] | None = None,
     ) -> None:
         """
-        Add work items to a module.
+        Add or remove work items on a module in a single call.
+
+        At least one of add_ids or remove_ids must be provided.
 
         Args:
             project_id: UUID of the project
             module_id: UUID of the module
-            work_item_ids: List of work item UUIDs to add to the module
+            add_ids: UUIDs of work items to add to the module
+            remove_ids: UUIDs of work items to remove from the module
         """
         client, workspace_slug = get_plane_client_context()
-        client.modules.add_work_items(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            module_id=module_id,
-            issue_ids=work_item_ids,
-        )
-
-    @mcp.tool()
-    def remove_work_item_from_module(
-        project_id: str,
-        module_id: str,
-        work_item_id: str,
-    ) -> None:
-        """
-        Remove a work item from a module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-            work_item_id: UUID of the work item to remove
-        """
-        client, workspace_slug = get_plane_client_context()
-        client.modules.remove_work_item(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            module_id=module_id,
-            work_item_id=work_item_id,
-        )
+        if add_ids:
+            client.modules.add_work_items(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                module_id=module_id,
+                issue_ids=add_ids,
+            )
+        if remove_ids:
+            for work_item_id in remove_ids:
+                client.modules.remove_work_item(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    module_id=module_id,
+                    work_item_id=work_item_id,
+                )
 
     @mcp.tool()
     def list_module_work_items(
@@ -319,27 +309,17 @@ def register_module_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    def archive_module(project_id: str, module_id: str) -> None:
+    def manage_module_archive(project_id: str, module_id: str, archive: bool) -> None:
         """
-        Archive a module.
+        Archive or unarchive a module.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             module_id: UUID of the module
+            archive: True to archive the module, False to unarchive it
         """
         client, workspace_slug = get_plane_client_context()
-        client.modules.archive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
-
-    @mcp.tool()
-    def unarchive_module(project_id: str, module_id: str) -> None:
-        """
-        Unarchive a module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-        """
-        client, workspace_slug = get_plane_client_context()
-        client.modules.unarchive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
+        if archive:
+            client.modules.archive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
+        else:
+            client.modules.unarchive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)

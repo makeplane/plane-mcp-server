@@ -311,8 +311,7 @@ EXPECTED_TOOLS = [
     # Page tools
     "retrieve_workspace_page",
     "retrieve_project_page",
-    "create_workspace_page",
-    "create_project_page",
+    "create_page",
     # Work item activity tools
     "list_work_item_activities",
     "retrieve_work_item_activity",
@@ -356,12 +355,10 @@ EXPECTED_TOOLS = [
     "update_cycle",
     "delete_cycle",
     "list_archived_cycles",
-    "add_work_items_to_cycle",
-    "remove_work_item_from_cycle",
+    "manage_cycle_work_items",
     "list_cycle_work_items",
     "transfer_cycle_work_items",
-    "archive_cycle",
-    "unarchive_cycle",
+    "manage_cycle_archive",
     # Module tools
     "list_modules",
     "create_module",
@@ -369,11 +366,9 @@ EXPECTED_TOOLS = [
     "update_module",
     "delete_module",
     "list_archived_modules",
-    "add_work_items_to_module",
-    "remove_work_item_from_module",
+    "manage_module_work_items",
     "list_module_work_items",
-    "archive_module",
-    "unarchive_module",
+    "manage_module_archive",
     # Initiative tools
     "list_initiatives",
     "create_initiative",
