@@ -3,7 +3,6 @@
 from fastmcp import FastMCP
 from plane.models.work_items import (
     CreateWorkItemDependency,
-    RemoveWorkItemDependency,
     WorkItemDependencyResponse,
     WorkItemWithRelationType,
 )
@@ -107,5 +106,5 @@ def register_work_item_dependency_tools(mcp: FastMCP) -> None:
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
-            data=RemoveWorkItemDependency(work_item_id=related_work_item_id),
+            related_work_item_id=related_work_item_id,
         )

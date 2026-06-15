@@ -3,7 +3,6 @@
 from fastmcp import FastMCP
 from plane.models.work_items import (
     CreateWorkItemCustomRelation,
-    RemoveWorkItemCustomRelation,
     WorkItemWithRelationType,
 )
 
@@ -100,5 +99,5 @@ def register_work_item_custom_relation_tools(mcp: FastMCP) -> None:
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
-            data=RemoveWorkItemCustomRelation(work_item_id=related_work_item_id),
+            related_work_item_id=related_work_item_id,
         )
