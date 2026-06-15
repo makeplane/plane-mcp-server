@@ -3,6 +3,7 @@
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from plane.models.enums import InitiativeState
 from plane.models.initiatives import (
     CreateInitiative,
@@ -25,7 +26,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         List all initiatives in a workspace.
 
         Args:
-            workspace_slug: The workspace slug identifier
             params: Optional query parameters as a dictionary (e.g., per_page, cursor)
 
         Returns:
@@ -49,7 +49,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         Create a new initiative in the workspace.
 
         Args:
-            workspace_slug: The workspace slug identifier
             name: Initiative name
             description_html: HTML description of the initiative
             start_date: Initiative start date (ISO 8601 format)
@@ -60,8 +59,24 @@ def register_initiative_tools(mcp: FastMCP) -> None:
 
         Returns:
             Created Initiative object
+
+        Raises:
+            ToolError: if the workspace's initiatives feature is disabled. Native
+                initiatives require the feature to be enabled in workspace settings.
+                When disabled, create an "Initiative" work item instead
+                (see the "Initiatives" server instructions).
         """
         client, workspace_slug = get_plane_client_context()
+
+        features = client.workspaces.get_features(workspace_slug=workspace_slug)
+        if not features.model_dump().get("initiatives"):
+            raise ToolError(
+                f"The initiatives feature is disabled for this workspace. "
+                f"Create {repr(name)} as an \"Initiative\" work item instead:\n"
+                f"1. Work items belong to a project — if not named, ask the user which project to use.\n"
+                f"2. type = resolve_work_item_type(project_id, \"Initiative\") — finds or creates the type at workspace or project level automatically.\n"
+                f"3. create_work_item(project_id=project_id, type_id=type.id, name={repr(name)})."
+            )
 
         data = CreateInitiative(
             name=name,
@@ -81,7 +96,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         Retrieve an initiative by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             initiative_id: UUID of the initiative
 
         Returns:
@@ -105,7 +119,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         Update an initiative by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             initiative_id: UUID of the initiative
             name: Initiative name
             description_html: HTML description of the initiative
@@ -138,7 +151,6 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         Delete an initiative by ID.
 
         Args:
-            workspace_slug: The workspace slug identifier
             initiative_id: UUID of the initiative
         """
         client, workspace_slug = get_plane_client_context()

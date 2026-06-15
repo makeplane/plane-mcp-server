@@ -222,16 +222,6 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `update_work_item_property` | Update a work item property with partial data |
 | `delete_work_item_property` | Delete a work item property by ID |
 
-### Epics
-
-| Tool Name | Description |
-|-----------|-------------|
-| `list_epics` | List all epics in a project |
-| `create_epic` | Create a new epic |
-| `retrieve_epic` | Retrieve an epic by ID |
-| `update_epic` | Update an epic by ID |
-| `delete_epic` | Delete an epic by ID |
-
 ### Milestones
 
 | Tool Name | Description |
@@ -294,6 +284,8 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `retrieve_work_item_type` | Retrieve a work item type by ID |
 | `update_work_item_type` | Update a work item type by ID |
 | `delete_work_item_type` | Delete a work item type by ID |
+| `import_work_item_types_to_project` | Bulk-link workspace-level work item types to a project |
+| `resolve_work_item_type` | Find or create a named type for a project, auto-handling workspace vs project scope and import |
 
 ### Work Item Relations
 
