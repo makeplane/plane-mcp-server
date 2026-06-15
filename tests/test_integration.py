@@ -178,7 +178,7 @@ async def run_integration_test():
                 "pql": f'type = "{epic_type_id}"',
             },
         )
-        epics = extract_result(epics_result)
+        epics = extract_result(epics_result)["results"]
         print(f"Epics in project: {[e['id'] for e in epics]}")
 
         # 8. Create a milestone and associate it with the project and work items

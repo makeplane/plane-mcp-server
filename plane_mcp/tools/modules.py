@@ -227,6 +227,8 @@ def register_module_tools(mcp: FastMCP) -> None:
             add_ids: UUIDs of work items to add to the module
             remove_ids: UUIDs of work items to remove from the module
         """
+        if not add_ids and not remove_ids:
+            raise ValueError("At least one of add_ids or remove_ids must be provided.")
         client, workspace_slug = get_plane_client_context()
         if add_ids:
             client.modules.add_work_items(
