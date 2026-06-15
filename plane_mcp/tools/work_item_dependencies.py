@@ -54,11 +54,25 @@ def register_work_item_dependency_tools(mcp: FastMCP) -> None:
         relation_type: str,
         work_item_ids: list[str],
     ) -> list[WorkItemWithRelationType]:
-        """Create one or more dependency relations for a work item.
+        """Use this tool ONLY when the requested relationship exactly matches one of
+        these six built-in dependency types:
 
-        relation_type controls directionality from this work item's perspective.
-        Allowed values: blocking, blocked_by, start_before, start_after,
-        finish_before, finish_after.
+        - blocking
+        - blocked_by
+        - start_before
+        - start_after
+        - finish_before
+        - finish_after
+
+        Do not infer, normalize, reinterpret, or map arbitrary natural-language
+        relationship names to a dependency type.
+
+        If the requested relationship does not exactly match one of the six
+        allowed dependency types, do not use this tool. Instead:
+
+        1. Call list_work_item_relation_definitions.
+        2. Match the user's intent against the available outward/inward labels.
+        3. Use create_work_item_custom_relation.
 
         Args:
             project_id: UUID of the project.

@@ -21,9 +21,17 @@ def register_work_item_relation_definition_tools(mcp: FastMCP) -> None:
     ) -> list[WorkItemRelationDefinition]:
         """List all workspace-level relation definitions.
 
-        These definitions describe custom relation types (each with an outward
-        and inward label). Use definition IDs and labels when creating custom
-        relations between work items. All pages are fetched automatically.
+        These definitions describe workspace-level custom relation types. Each
+        definition contains an outward and inward label that describe the
+        relationship between two work items.
+
+        Use this tool whenever the requested relationship does not exactly match
+        one of the six built-in dependency types.
+
+        The returned definitions can be used to identify, validate, or create
+        custom relationships between work items.
+
+        All pages are fetched automatically.
 
         Args:
             is_default: Filter to default or non-default definitions only.
