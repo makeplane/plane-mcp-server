@@ -133,28 +133,10 @@ async def run_integration_test():
 
         # 5. Find or create an "Epic" work item type, and create an epic work item
         print("Finding or creating 'Epic' work item type...")
-        created_workspace_epic_type = False
-
-        project_types_result = await client.call_tool("list_work_item_types", {"project_id": project_id})
-        project_types = extract_result(project_types_result)
-        epic_type = next((t for t in project_types if t.get("name", "").lower() == "epic"), None)
-
-        if epic_type is None:
-            workspace_types_result = await client.call_tool("list_work_item_types", {})
-            workspace_types = extract_result(workspace_types_result)
-            if workspace_types:
-                new_type_result = await client.call_tool("create_work_item_type", {"name": "Epic"})
-                epic_type = extract_result(new_type_result)
-                created_workspace_epic_type = True
-                await client.call_tool(
-                    "import_work_item_types_to_project",
-                    {"project_id": project_id, "work_item_type_ids": [epic_type["id"]]},
-                )
-            else:
-                new_type_result = await client.call_tool(
-                    "create_work_item_type", {"name": "Epic", "project_id": project_id}
-                )
-                epic_type = extract_result(new_type_result)
+        epic_type_result = await client.call_tool(
+            "resolve_work_item_type", {"project_id": project_id, "name": "Epic"}
+        )
+        epic_type = extract_result(epic_type_result)
 
         epic_type_id = epic_type["id"]
         print(f"Using 'Epic' work item type: {epic_type_id}")
@@ -196,7 +178,7 @@ async def run_integration_test():
                 "pql": f'type = "{epic_type_id}"',
             },
         )
-        epics = extract_result(epics_result)["results"]
+        epics = extract_result(epics_result)
         print(f"Epics in project: {[e['id'] for e in epics]}")
 
         # 8. Create a milestone and associate it with the project and work items
@@ -263,11 +245,6 @@ async def run_integration_test():
             {"project_id": project_id, "work_item_id": epic_id},
         )
         print("Deleted epic")
-
-        if created_workspace_epic_type:
-            print("Deleting workspace-level 'Epic' work item type...")
-            await client.call_tool("delete_work_item_type", {"work_item_type_id": epic_type_id})
-            print("Deleted workspace-level 'Epic' work item type")
 
         # 10. Delete project
         print("Deleting project...")
