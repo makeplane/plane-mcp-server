@@ -3,6 +3,7 @@
 from fastmcp import FastMCP
 from plane.models.work_item_relation_definitions import (
     CreateWorkItemRelationDefinition,
+    PaginatedWorkItemRelationDefinitionResponse,
     UpdateWorkItemRelationDefinition,
     WorkItemRelationDefinition,
 )
@@ -18,11 +19,11 @@ def register_work_item_relation_definition_tools(mcp: FastMCP) -> None:
         is_default: bool | None = None,
         is_active: bool | None = None,
     ) -> list[WorkItemRelationDefinition]:
-        """List workspace-level relation definitions.
+        """List all workspace-level relation definitions.
 
         These definitions describe custom relation types (each with an outward
         and inward label). Use definition IDs and labels when creating custom
-        relations between work items.
+        relations between work items. All pages are fetched automatically.
 
         Args:
             is_default: Filter to default or non-default definitions only.
@@ -32,11 +33,21 @@ def register_work_item_relation_definition_tools(mcp: FastMCP) -> None:
             List of WorkItemRelationDefinition objects.
         """
         client, workspace_slug = get_plane_client_context()
-        return client.work_item_relation_definitions.list(
-            workspace_slug=workspace_slug,
-            is_default=is_default,
-            is_active=is_active,
-        )
+        results: list[WorkItemRelationDefinition] = []
+        cursor: str | None = None
+        while True:
+            page: PaginatedWorkItemRelationDefinitionResponse = client.work_item_relation_definitions.list(
+                workspace_slug=workspace_slug,
+                is_default=is_default,
+                is_active=is_active,
+                per_page=100,
+                cursor=cursor,
+            )
+            results.extend(page.results)
+            if not page.next_page_results:
+                break
+            cursor = page.next_cursor
+        return results
 
     @mcp.tool()
     def create_work_item_relation_definition(
