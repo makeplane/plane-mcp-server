@@ -58,7 +58,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             fields: Sparse fieldset — id, name, sequence_id, priority, state,
                 project, assignees, labels, type_id, start_date, target_date,
                 created_at, updated_at, created_by, is_draft. Use `project` not
-                `project_id`.
+                `project_id`. Fields you omit come back null — to read an item's
+                type, include type_id (a null type_id on an omitted field does
+                NOT mean the item is untyped).
             external_id / external_source: Filter by external system.
 
         Returns:
@@ -665,12 +667,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         Search work items by text across a workspace.
 
-        Use this for free-text name/description search. For structured
-        filtering (priority, state, assignee, dates, etc.) use
-        `list_work_items` with a PQL expression.
+        Matches on work item name, sequence id, and project identifier (not
+        description). For structured filtering (priority, state, assignee,
+        dates, etc.) use `list_work_items` with a PQL expression.
 
         Args:
-            query: Free-text search string across work item name and description
+            query: Free-text string matched against name, sequence id, and project identifier
             expand: Comma-separated list of related fields to expand in response
             fields: Comma-separated list of fields to include in response
             external_id: External system identifier for filtering

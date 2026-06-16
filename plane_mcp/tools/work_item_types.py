@@ -47,6 +47,9 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         """
         Create a new work item type.
 
+        To get a usable type for a project (e.g. "Epic"), prefer resolve_work_item_type,
+        which finds-or-creates at the correct scope and never duplicates.
+
         Args:
             name: Work item type name
             project_id: UUID of the project. Omit for workspace-level type.
@@ -87,6 +90,9 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Imports one or more workspace-scoped work item types into a project so
         that they become available for use within that project.
 
+        For the common case of getting one named type usable in a project, prefer
+        resolve_work_item_type, which finds-or-creates and imports in one step.
+
         Args:
             project_id: UUID of the project
             work_item_type_ids: List of workspace-level work item type UUIDs to import
@@ -116,6 +122,10 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
           the project's work item types feature first if it is off.
 
         Matching is exact (case-sensitive, whitespace-stripped); an existing type is never duplicated.
+
+        Prefer this over manually combining get_workspace_features, list_work_item_types,
+        create_work_item_type, and import_work_item_types_to_project — it does all of
+        that deterministically.
 
         Args:
             project_id: UUID of the project the type must be usable in
