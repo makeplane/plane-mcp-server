@@ -29,20 +29,26 @@ def register_module_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_modules(
         project_id: str,
+        archived: bool = False,
         params: dict[str, Any] | None = None,
     ) -> list[Module]:
         """
-        List all modules in a project.
+        List modules in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
+            archived: Set True to list archived modules instead of active ones.
             params: Optional query parameters as a dictionary
 
         Returns:
             List of Module objects
         """
         client, workspace_slug = get_plane_client_context()
+        if archived:
+            archived_response: PaginatedArchivedModuleResponse = client.modules.list_archived(
+                workspace_slug=workspace_slug, project_id=project_id, params=params
+            )
+            return archived_response.results
         response: PaginatedModuleResponse = client.modules.list(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
@@ -188,71 +194,41 @@ def register_module_tools(mcp: FastMCP) -> None:
         client.modules.delete(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
 
     @mcp.tool()
-    def list_archived_modules(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[Module]:
-        """
-        List archived modules in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of archived Module objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedArchivedModuleResponse = client.modules.list_archived(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
-        return response.results
-
-    @mcp.tool()
-    def add_work_items_to_module(
+    def manage_module_work_items(
         project_id: str,
         module_id: str,
-        work_item_ids: list[str],
+        add_ids: list[str] | None = None,
+        remove_ids: list[str] | None = None,
     ) -> None:
         """
-        Add work items to a module.
+        Add or remove work items on a module in a single call.
+
+        At least one of add_ids or remove_ids must be provided.
 
         Args:
             project_id: UUID of the project
             module_id: UUID of the module
-            work_item_ids: List of work item UUIDs to add to the module
+            add_ids: UUIDs of work items to add to the module
+            remove_ids: UUIDs of work items to remove from the module
         """
+        if not add_ids and not remove_ids:
+            raise ValueError("At least one of add_ids or remove_ids must be provided.")
         client, workspace_slug = get_plane_client_context()
-        client.modules.add_work_items(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            module_id=module_id,
-            issue_ids=work_item_ids,
-        )
-
-    @mcp.tool()
-    def remove_work_item_from_module(
-        project_id: str,
-        module_id: str,
-        work_item_id: str,
-    ) -> None:
-        """
-        Remove a work item from a module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-            work_item_id: UUID of the work item to remove
-        """
-        client, workspace_slug = get_plane_client_context()
-        client.modules.remove_work_item(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            module_id=module_id,
-            work_item_id=work_item_id,
-        )
+        if add_ids:
+            client.modules.add_work_items(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                module_id=module_id,
+                issue_ids=add_ids,
+            )
+        if remove_ids:
+            for work_item_id in remove_ids:
+                client.modules.remove_work_item(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    module_id=module_id,
+                    work_item_id=work_item_id,
+                )
 
     @mcp.tool()
     def list_module_work_items(
@@ -309,7 +285,9 @@ def register_module_tools(mcp: FastMCP) -> None:
                 }
             raise
         return {
-            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
+            "results": [
+                item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])
+            ],
             "total_count": response.total_count,
             "count": response.count,
             "next_cursor": response.next_cursor,
@@ -319,27 +297,17 @@ def register_module_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    def archive_module(project_id: str, module_id: str) -> None:
+    def manage_module_archive(project_id: str, module_id: str, archive: bool) -> None:
         """
-        Archive a module.
+        Archive or unarchive a module.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
             module_id: UUID of the module
+            archive: True to archive the module, False to unarchive it
         """
         client, workspace_slug = get_plane_client_context()
-        client.modules.archive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
-
-    @mcp.tool()
-    def unarchive_module(project_id: str, module_id: str) -> None:
-        """
-        Unarchive a module.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            module_id: UUID of the module
-        """
-        client, workspace_slug = get_plane_client_context()
-        client.modules.unarchive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
+        if archive:
+            client.modules.archive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
+        else:
+            client.modules.unarchive(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)

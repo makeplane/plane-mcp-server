@@ -140,48 +140,40 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         client.milestones.delete(workspace_slug=workspace_slug, project_id=project_id, milestone_id=milestone_id)
 
     @mcp.tool()
-    def add_work_items_to_milestone(
+    def manage_milestone_work_items(
         project_id: str,
         milestone_id: str,
-        work_item_ids: list[str],
+        add_ids: list[str] | None = None,
+        remove_ids: list[str] | None = None,
     ) -> None:
         """
-        Add work items to a milestone.
+        Add or remove work items on a milestone in a single call.
+
+        At least one of add_ids or remove_ids must be provided.
 
         Args:
             project_id: UUID of the project
             milestone_id: UUID of the milestone
-            work_item_ids: List of work item UUIDs to add to the milestone
+            add_ids: UUIDs of work items to add to the milestone
+            remove_ids: UUIDs of work items to remove from the milestone
         """
+        if not add_ids and not remove_ids:
+            raise ValueError("At least one of add_ids or remove_ids must be provided.")
         client, workspace_slug = get_plane_client_context()
-        client.milestones.add_work_items(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            milestone_id=milestone_id,
-            issue_ids=work_item_ids,
-        )
-
-    @mcp.tool()
-    def remove_work_items_from_milestone(
-        project_id: str,
-        milestone_id: str,
-        work_item_ids: list[str],
-    ) -> None:
-        """
-        Remove work items from a milestone.
-
-        Args:
-            project_id: UUID of the project
-            milestone_id: UUID of the milestone
-            work_item_ids: List of work item UUIDs to remove from the milestone
-        """
-        client, workspace_slug = get_plane_client_context()
-        client.milestones.remove_work_items(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            milestone_id=milestone_id,
-            issue_ids=work_item_ids,
-        )
+        if add_ids:
+            client.milestones.add_work_items(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                milestone_id=milestone_id,
+                issue_ids=add_ids,
+            )
+        if remove_ids:
+            client.milestones.remove_work_items(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                milestone_id=milestone_id,
+                issue_ids=remove_ids,
+            )
 
     @mcp.tool()
     def list_milestone_work_items(

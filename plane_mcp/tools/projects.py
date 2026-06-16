@@ -275,29 +275,22 @@ def register_project_tools(mcp: FastMCP) -> None:
         client.projects.delete(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def archive_project(project_id: str) -> None:
+    def manage_project_archive(project_id: str, archive: bool) -> None:
         """
-        Archive a project.
+        Archive or unarchive a project.
 
         Archived projects are hidden from active project lists but not deleted.
         All work items, cycles, and modules are preserved.
 
         Args:
-            project_id: UUID of the project to archive
+            project_id: UUID of the project
+            archive: True to archive the project, False to unarchive it
         """
         client, workspace_slug = get_plane_client_context()
-        client.projects.archive(workspace_slug=workspace_slug, project_id=project_id)
-
-    @mcp.tool()
-    def unarchive_project(project_id: str) -> None:
-        """
-        Unarchive a project, restoring it to active status.
-
-        Args:
-            project_id: UUID of the project to unarchive
-        """
-        client, workspace_slug = get_plane_client_context()
-        client.projects.unarchive(workspace_slug=workspace_slug, project_id=project_id)
+        if archive:
+            client.projects.archive(workspace_slug=workspace_slug, project_id=project_id)
+        else:
+            client.projects.unarchive(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
     def get_project_worklog_summary(project_id: str) -> list[ProjectWorklogSummary]:
@@ -329,21 +322,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
         return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id, params=params)
-
-    @mcp.tool()
-    def get_project_features(project_id: str) -> ProjectFeature:
-        """
-        Get features of a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-
-        Returns:
-            ProjectFeature object containing enabled/disabled features
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
     def update_project_features(
