@@ -299,6 +299,11 @@ EXPECTED_TOOLS = [
     "list_work_item_relations",
     "create_work_item_relation",
     "remove_work_item_relation",
+    # Work item relation definition tools
+    "list_work_item_relation_definitions",
+    "create_work_item_relation_definition",
+    "update_work_item_relation_definition",
+    "delete_work_item_relation_definition",
     # Work item type tools
     "list_work_item_types",
     "create_work_item_type",

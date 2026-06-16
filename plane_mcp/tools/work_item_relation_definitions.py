@@ -1,5 +1,7 @@
 """Work item relation definition tools for Plane MCP Server."""
 
+from typing import Any, get_args
+
 from fastmcp import FastMCP
 from plane.models.work_item_relation_definitions import (
     CreateWorkItemRelationDefinition,
@@ -7,6 +9,7 @@ from plane.models.work_item_relation_definitions import (
     UpdateWorkItemRelationDefinition,
     WorkItemRelationDefinition,
 )
+from plane.models.work_items import DependencyTypeEnum
 
 from plane_mcp.client import get_plane_client_context
 
@@ -18,27 +21,22 @@ def register_work_item_relation_definition_tools(mcp: FastMCP) -> None:
     def list_work_item_relation_definitions(
         is_default: bool | None = None,
         is_active: bool | None = None,
-    ) -> list[WorkItemRelationDefinition]:
-        """List all workspace-level relation definitions.
+    ) -> dict[str, Any]:
+        """List every relation type usable with create_work_item_relation.
 
-        These definitions describe workspace-level custom relation types. Each
-        definition contains an outward and inward label that describe the
-        relationship between two work items.
-
-        Use this tool whenever the requested relationship does not exactly match
-        one of the six built-in dependency types.
-
-        The returned definitions can be used to identify, validate, or create
-        custom relationships between work items.
-
-        All pages are fetched automatically.
+        Match the user's wording against an entry here before creating a relation.
+        built_in_dependencies are fixed scheduling/blocking types; custom_definitions
+        are workspace-specific, each with an outward and inward label. custom_definitions
+        are also what create/update/delete_work_item_relation_definition manage.
 
         Args:
-            is_default: Filter to default or non-default definitions only.
-            is_active: Filter to active or inactive definitions only.
+            is_default: Filter custom definitions to default/non-default only.
+            is_active: Filter custom definitions to active/inactive only.
 
         Returns:
-            List of WorkItemRelationDefinition objects.
+            built_in_dependencies: relation_type values for the dependency path.
+            custom_definitions: workspace definitions; use the id plus the matched
+                outward or inward label.
         """
         client, workspace_slug = get_plane_client_context()
         results: list[WorkItemRelationDefinition] = []
@@ -52,10 +50,13 @@ def register_work_item_relation_definition_tools(mcp: FastMCP) -> None:
                 cursor=cursor,
             )
             results.extend(page.results)
-            if not page.next_page_results:
-                break
             cursor = page.next_cursor
-        return results
+            if not page.next_page_results or not cursor:
+                break
+        return {
+            "built_in_dependencies": list(get_args(DependencyTypeEnum)),
+            "custom_definitions": [d.model_dump() for d in results],
+        }
 
     @mcp.tool()
     def create_work_item_relation_definition(

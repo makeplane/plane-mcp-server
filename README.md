@@ -303,6 +303,15 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `create_work_item_relation` | Create relations for a work item |
 | `remove_work_item_relation` | Remove a relation from a work item |
 
+### Work Item Relation Definitions
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_item_relation_definitions` | List workspace custom relation definitions |
+| `create_work_item_relation_definition` | Create a workspace relation definition |
+| `update_work_item_relation_definition` | Update a relation definition |
+| `delete_work_item_relation_definition` | Delete a relation definition |
+
 ### Work Item Activities
 
 | Tool Name | Description |
