@@ -56,16 +56,16 @@ async def run_integration_test():
     2. Create work item 1
     3. Create work item 2 
     4. Update work item 2 with work item 1 as parent 
-    5. Create epic with work item 1 as the underlying work item 
-    6. Update work item 2 to be under the epic 
-    7. List all epics 
+    5. Find or create an "Epic" work item type, and create an epic work item
+    6. Update work item 2 to be under the epic
+    7. List all epics (work items of the "Epic" type)
     8. Create a milestone and associate it with the project and work items
     9. Update the milestone to change its name and description
     10. List all milestones in the project
     11. Delete the milestone
     12. Delete the epic
-    13. Delete work items 
-    14. Delete project 
+    13. Delete work items
+    14. Delete project
     """ 
     config = get_config() 
     unique_id = uuid.uuid4().hex[:6]
@@ -131,14 +131,41 @@ async def run_integration_test():
         )
         print("Set work item 1 as parent of work item 2")
 
-        # 5. Create epic with work item 1 as the underlying work item
-        print("Creating epic...")
+        # 5. Find or create an "Epic" work item type, and create an epic work item
+        print("Finding or creating 'Epic' work item type...")
+        created_workspace_epic_type = False
 
+        project_types_result = await client.call_tool("list_work_item_types", {"project_id": project_id})
+        project_types = extract_result(project_types_result)
+        epic_type = next((t for t in project_types if t.get("name", "").lower() == "epic"), None)
+
+        if epic_type is None:
+            workspace_types_result = await client.call_tool("list_work_item_types", {})
+            workspace_types = extract_result(workspace_types_result)
+            if workspace_types:
+                new_type_result = await client.call_tool("create_work_item_type", {"name": "Epic"})
+                epic_type = extract_result(new_type_result)
+                created_workspace_epic_type = True
+                await client.call_tool(
+                    "import_work_item_types_to_project",
+                    {"project_id": project_id, "work_item_type_ids": [epic_type["id"]]},
+                )
+            else:
+                new_type_result = await client.call_tool(
+                    "create_work_item_type", {"name": "Epic", "project_id": project_id}
+                )
+                epic_type = extract_result(new_type_result)
+
+        epic_type_id = epic_type["id"]
+        print(f"Using 'Epic' work item type: {epic_type_id}")
+
+        print("Creating epic...")
         epic_result = await client.call_tool(
-            "create_epic",
+            "create_work_item",
             {
                 "project_id": project_id,
                 "name": f"Epic {unique_id}",
+                "type_id": epic_type_id,
             },
         )
 
@@ -163,12 +190,13 @@ async def run_integration_test():
         # 7. List all epics
         print("Listing epics in project...")
         epics_result = await client.call_tool(
-            "list_epics",
+            "list_work_items",
             {
                 "project_id": project_id,
+                "pql": f'type = "{epic_type_id}"',
             },
         )
-        epics = extract_result(epics_result)
+        epics = extract_result(epics_result)["results"]
         print(f"Epics in project: {[e['id'] for e in epics]}")
 
         # 8. Create a milestone and associate it with the project and work items
@@ -231,10 +259,15 @@ async def run_integration_test():
         # 9. Delete epic
         print("Deleting epic...")
         await client.call_tool(
-            "delete_epic",
-            {"project_id": project_id, "epic_id": epic_id},
+            "delete_work_item",
+            {"project_id": project_id, "work_item_id": epic_id},
         )
         print("Deleted epic")
+
+        if created_workspace_epic_type:
+            print("Deleting workspace-level 'Epic' work item type...")
+            await client.call_tool("delete_work_item_type", {"work_item_type_id": epic_type_id})
+            print("Deleted workspace-level 'Epic' work item type")
 
         # 10. Delete project
         print("Deleting project...")
@@ -310,6 +343,8 @@ EXPECTED_TOOLS = [
     "retrieve_work_item_type",
     "update_work_item_type",
     "delete_work_item_type",
+    "import_work_item_types_to_project",
+    "resolve_work_item_type",
     # Work log tools
     "list_work_logs",
     "create_work_log",
@@ -364,12 +399,6 @@ EXPECTED_TOOLS = [
     "retrieve_work_item_property",
     "update_work_item_property",
     "delete_work_item_property",
-    # Epic tools
-    "list_epics",
-    "retrieve_epic",
-    "create_epic",
-    "update_epic",
-    "delete_epic",
 ]
 
 
