@@ -1,6 +1,7 @@
 """Workspace-related tools for Plane MCP Server."""
 
 from fastmcp import FastMCP
+from plane.models.projects import ProjectFeature
 from plane.models.users import UserLite
 from plane.models.workspaces import WorkspaceFeature
 
@@ -22,14 +23,22 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         return client.workspaces.get_members(workspace_slug=workspace_slug)
 
     @mcp.tool()
-    def get_workspace_features() -> WorkspaceFeature:
+    def get_features(project_id: str | None = None) -> WorkspaceFeature | ProjectFeature:
         """
-        Get features of the current workspace.
+        Get feature flags.
+
+        Returns a project's features if project_id is given, otherwise the
+        workspace's features.
+
+        Args:
+            project_id: UUID of the project. Omit for workspace features.
 
         Returns:
-            WorkspaceFeature object containing feature flags
+            ProjectFeature when project_id is given, otherwise WorkspaceFeature.
         """
         client, workspace_slug = get_plane_client_context()
+        if project_id is not None:
+            return client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
         return client.workspaces.get_features(workspace_slug=workspace_slug)
 
     @mcp.tool()

@@ -30,20 +30,26 @@ def register_cycle_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_cycles(
         project_id: str,
+        archived: bool = False,
         params: dict[str, Any] | None = None,
     ) -> list[Cycle]:
         """
-        List all cycles in a project.
+        List cycles in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
+            archived: Set True to list archived cycles instead of active ones.
             params: Optional query parameters as a dictionary
 
         Returns:
             List of Cycle objects
         """
         client, workspace_slug = get_plane_client_context()
+        if archived:
+            archived_response: PaginatedArchivedCycleResponse = client.cycles.list_archived(
+                workspace_slug=workspace_slug, project_id=project_id, params=params
+            )
+            return archived_response.results
         response: PaginatedCycleResponse = client.cycles.list(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
@@ -172,71 +178,41 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         client.cycles.delete(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
 
     @mcp.tool()
-    def list_archived_cycles(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[Cycle]:
-        """
-        List archived cycles in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of archived Cycle objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedArchivedCycleResponse = client.cycles.list_archived(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
-        return response.results
-
-    @mcp.tool()
-    def add_work_items_to_cycle(
+    def manage_cycle_work_items(
         project_id: str,
         cycle_id: str,
-        work_item_ids: list[str],
+        add_ids: list[str] | None = None,
+        remove_ids: list[str] | None = None,
     ) -> None:
         """
-        Add work items to a cycle.
+        Add or remove work items on a cycle in a single call.
+
+        At least one of add_ids or remove_ids must be provided.
 
         Args:
             project_id: UUID of the project
             cycle_id: UUID of the cycle
-            work_item_ids: List of work item UUIDs to add to the cycle
+            add_ids: UUIDs of work items to add to the cycle
+            remove_ids: UUIDs of work items to remove from the cycle
         """
+        if not add_ids and not remove_ids:
+            raise ValueError("At least one of add_ids or remove_ids must be provided.")
         client, workspace_slug = get_plane_client_context()
-        client.cycles.add_work_items(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            cycle_id=cycle_id,
-            issue_ids=work_item_ids,
-        )
-
-    @mcp.tool()
-    def remove_work_item_from_cycle(
-        project_id: str,
-        cycle_id: str,
-        work_item_id: str,
-    ) -> None:
-        """
-        Remove a work item from a cycle.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-            work_item_id: UUID of the work item to remove
-        """
-        client, workspace_slug = get_plane_client_context()
-        client.cycles.remove_work_item(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            cycle_id=cycle_id,
-            work_item_id=work_item_id,
-        )
+        if add_ids:
+            client.cycles.add_work_items(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                cycle_id=cycle_id,
+                issue_ids=add_ids,
+            )
+        if remove_ids:
+            for work_item_id in remove_ids:
+                client.cycles.remove_work_item(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    cycle_id=cycle_id,
+                    work_item_id=work_item_id,
+                )
 
     @mcp.tool()
     def list_cycle_work_items(
@@ -293,7 +269,9 @@ def register_cycle_tools(mcp: FastMCP) -> None:
                 }
             raise
         return {
-            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
+            "results": [
+                item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])
+            ],
             "total_count": response.total_count,
             "count": response.count,
             "next_cursor": response.next_cursor,
@@ -329,24 +307,28 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def archive_cycle(project_id: str, cycle_id: str) -> bool:
+    def manage_cycle_archive(project_id: str, cycle_id: str, archive: bool) -> bool:
         """
-        Archive a cycle.
+        Archive or unarchive a cycle.
 
         Plane requires the cycle end_date to be in the past before archiving.
-        This tool automatically sets end_date to today if the cycle is still
-        active (end_date is missing or in the future), then archives it.
+        When archive=True, this tool automatically sets end_date to today if
+        the cycle is still active (end_date is missing or in the future),
+        then archives it.
 
         Args:
             project_id: UUID of the project
             cycle_id: UUID of the cycle
+            archive: True to archive the cycle, False to unarchive it
 
         Returns:
-            True if the cycle was archived successfully
+            True if the operation completed successfully
         """
         client, workspace_slug = get_plane_client_context()
-        today = date.today().isoformat()
+        if not archive:
+            return client.cycles.unarchive(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
 
+        today = date.today().isoformat()
         cycle = client.cycles.retrieve(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
         end_date = cycle.end_date if hasattr(cycle, "end_date") else None
         if not end_date or end_date > today:
@@ -383,19 +365,3 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             cycle_id=cycle_id,
             data=UpdateCycle(end_date=today),
         )
-
-    @mcp.tool()
-    def unarchive_cycle(project_id: str, cycle_id: str) -> bool:
-        """
-        Unarchive a cycle.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            cycle_id: UUID of the cycle
-
-        Returns:
-            True if the cycle was unarchived successfully
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.cycles.unarchive(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)

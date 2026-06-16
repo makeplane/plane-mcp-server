@@ -133,28 +133,10 @@ async def run_integration_test():
 
         # 5. Find or create an "Epic" work item type, and create an epic work item
         print("Finding or creating 'Epic' work item type...")
-        created_workspace_epic_type = False
-
-        project_types_result = await client.call_tool("list_work_item_types", {"project_id": project_id})
-        project_types = extract_result(project_types_result)
-        epic_type = next((t for t in project_types if t.get("name", "").lower() == "epic"), None)
-
-        if epic_type is None:
-            workspace_types_result = await client.call_tool("list_work_item_types", {})
-            workspace_types = extract_result(workspace_types_result)
-            if workspace_types:
-                new_type_result = await client.call_tool("create_work_item_type", {"name": "Epic"})
-                epic_type = extract_result(new_type_result)
-                created_workspace_epic_type = True
-                await client.call_tool(
-                    "import_work_item_types_to_project",
-                    {"project_id": project_id, "work_item_type_ids": [epic_type["id"]]},
-                )
-            else:
-                new_type_result = await client.call_tool(
-                    "create_work_item_type", {"name": "Epic", "project_id": project_id}
-                )
-                epic_type = extract_result(new_type_result)
+        epic_type_result = await client.call_tool(
+            "resolve_work_item_type", {"project_id": project_id, "name": "Epic"}
+        )
+        epic_type = extract_result(epic_type_result)
 
         epic_type_id = epic_type["id"]
         print(f"Using 'Epic' work item type: {epic_type_id}")
@@ -264,11 +246,6 @@ async def run_integration_test():
         )
         print("Deleted epic")
 
-        if created_workspace_epic_type:
-            print("Deleting workspace-level 'Epic' work item type...")
-            await client.call_tool("delete_work_item_type", {"work_item_type_id": epic_type_id})
-            print("Deleted workspace-level 'Epic' work item type")
-
         # 10. Delete project
         print("Deleting project...")
         await client.call_tool("delete_project", {"project_id": project_id})
@@ -309,10 +286,9 @@ EXPECTED_TOOLS = [
     "update_state",
     "delete_state",
     # Page tools
-    "retrieve_workspace_page",
-    "retrieve_project_page",
-    "create_workspace_page",
-    "create_project_page",
+    "list_pages",
+    "retrieve_page",
+    "create_page",
     # Work item activity tools
     "list_work_item_activities",
     "retrieve_work_item_activity",
@@ -352,7 +328,7 @@ EXPECTED_TOOLS = [
     "delete_work_log",
     # Workspace tools
     "get_workspace_members",
-    "get_workspace_features",
+    "get_features",
     "update_workspace_features",
     # Cycle tools
     "list_cycles",
@@ -360,25 +336,19 @@ EXPECTED_TOOLS = [
     "retrieve_cycle",
     "update_cycle",
     "delete_cycle",
-    "list_archived_cycles",
-    "add_work_items_to_cycle",
-    "remove_work_item_from_cycle",
+    "manage_cycle_work_items",
     "list_cycle_work_items",
     "transfer_cycle_work_items",
-    "archive_cycle",
-    "unarchive_cycle",
+    "manage_cycle_archive",
     # Module tools
     "list_modules",
     "create_module",
     "retrieve_module",
     "update_module",
     "delete_module",
-    "list_archived_modules",
-    "add_work_items_to_module",
-    "remove_work_item_from_module",
+    "manage_module_work_items",
     "list_module_work_items",
-    "archive_module",
-    "unarchive_module",
+    "manage_module_archive",
     # Initiative tools
     "list_initiatives",
     "create_initiative",

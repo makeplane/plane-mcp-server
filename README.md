@@ -144,7 +144,6 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `delete_project` | Delete a project by ID |
 | `get_project_worklog_summary` | Get work log summary for a project |
 | `get_project_members` | Get all members of a project |
-| `get_project_features` | Get features configuration of a project |
 | `update_project_features` | Update features configuration of a project |
 
 ### Work Items
@@ -163,34 +162,28 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 
 | Tool Name | Description |
 |-----------|-------------|
-| `list_cycles` | List all cycles in a project |
+| `list_cycles` | List cycles in a project (set `archived=true` for archived) |
 | `create_cycle` | Create a new cycle with name, dates, and owner |
 | `retrieve_cycle` | Retrieve a cycle by ID |
 | `update_cycle` | Update a cycle with partial data |
 | `delete_cycle` | Delete a cycle by ID |
-| `list_archived_cycles` | List archived cycles in a project |
-| `add_work_items_to_cycle` | Add work items to a cycle |
-| `remove_work_item_from_cycle` | Remove a work item from a cycle |
+| `manage_cycle_work_items` | Add and/or remove work items on a cycle |
 | `list_cycle_work_items` | List work items in a cycle |
 | `transfer_cycle_work_items` | Transfer work items from one cycle to another |
-| `archive_cycle` | Archive a cycle |
-| `unarchive_cycle` | Unarchive a cycle |
+| `manage_cycle_archive` | Archive or unarchive a cycle |
 
 ### Modules
 
 | Tool Name | Description |
 |-----------|-------------|
-| `list_modules` | List all modules in a project |
+| `list_modules` | List modules in a project (set `archived=true` for archived) |
 | `create_module` | Create a new module with name, dates, status, and members |
 | `retrieve_module` | Retrieve a module by ID |
 | `update_module` | Update a module with partial data |
 | `delete_module` | Delete a module by ID |
-| `list_archived_modules` | List archived modules in a project |
-| `add_work_items_to_module` | Add work items to a module |
-| `remove_work_item_from_module` | Remove a work item from a module |
+| `manage_module_work_items` | Add and/or remove work items on a module |
 | `list_module_work_items` | List work items in a module |
-| `archive_module` | Archive a module |
-| `unarchive_module` | Unarchive a module |
+| `manage_module_archive` | Archive or unarchive a module |
 
 ### Initiatives
 
@@ -231,8 +224,7 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `retrieve_milestone` | Retrieve a milestone by ID |
 | `update_milestone` | Update a milestone by ID |
 | `delete_milestone` | Delete a milestone by ID |
-| `add_work_items_to_milestone` | Add work items to a milestone |
-| `remove_work_items_from_milestone` | Remove work items from a milestone |
+| `manage_milestone_work_items` | Add and/or remove work items on a milestone |
 | `list_milestone_work_items` | List work items in a milestone |
 
 ### Labels
@@ -324,17 +316,16 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 
 | Tool Name | Description |
 |-----------|-------------|
-| `retrieve_workspace_page` | Retrieve a workspace page by ID |
-| `retrieve_project_page` | Retrieve a project page by ID |
-| `create_workspace_page` | Create a workspace page |
-| `create_project_page` | Create a project page |
+| `list_pages` | List pages (workspace, or a project's if `project_id` given) |
+| `retrieve_page` | Retrieve a page by ID (workspace, or project's if `project_id` given) |
+| `create_page` | Create a workspace or project page |
 
 ### Workspaces
 
 | Tool Name | Description |
 |-----------|-------------|
 | `get_workspace_members` | Get all members of the current workspace |
-| `get_workspace_features` | Get features of the current workspace |
+| `get_features` | Get feature flags (workspace, or a project's if `project_id` given) |
 | `update_workspace_features` | Update features of the current workspace |
 
 ### Users
