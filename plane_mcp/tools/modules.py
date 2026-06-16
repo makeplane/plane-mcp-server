@@ -29,20 +29,26 @@ def register_module_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_modules(
         project_id: str,
+        archived: bool = False,
         params: dict[str, Any] | None = None,
     ) -> list[Module]:
         """
-        List all modules in a project.
+        List modules in a project.
 
         Args:
-            workspace_slug: The workspace slug identifier
             project_id: UUID of the project
+            archived: Set True to list archived modules instead of active ones.
             params: Optional query parameters as a dictionary
 
         Returns:
             List of Module objects
         """
         client, workspace_slug = get_plane_client_context()
+        if archived:
+            archived_response: PaginatedArchivedModuleResponse = client.modules.list_archived(
+                workspace_slug=workspace_slug, project_id=project_id, params=params
+            )
+            return archived_response.results
         response: PaginatedModuleResponse = client.modules.list(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
@@ -188,28 +194,6 @@ def register_module_tools(mcp: FastMCP) -> None:
         client.modules.delete(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
 
     @mcp.tool()
-    def list_archived_modules(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[Module]:
-        """
-        List archived modules in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
-
-        Returns:
-            List of archived Module objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response: PaginatedArchivedModuleResponse = client.modules.list_archived(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
-        return response.results
-
-    @mcp.tool()
     def manage_module_work_items(
         project_id: str,
         module_id: str,
@@ -301,7 +285,9 @@ def register_module_tools(mcp: FastMCP) -> None:
                 }
             raise
         return {
-            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
+            "results": [
+                item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])
+            ],
             "total_count": response.total_count,
             "count": response.count,
             "next_cursor": response.next_cursor,

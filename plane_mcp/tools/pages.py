@@ -13,39 +13,29 @@ def register_page_tools(mcp: FastMCP) -> None:
     """Register all page-related tools with the MCP server."""
 
     @mcp.tool()
-    def list_workspace_pages(
+    def list_pages(
+        project_id: str | None = None,
         params: dict[str, Any] | None = None,
     ) -> list[Page]:
         """
-        List all pages in a workspace.
+        List pages.
+
+        Lists a project's pages if project_id is given, otherwise workspace-level pages.
 
         Args:
+            project_id: UUID of the project. Omit to list workspace pages.
             params: Optional query parameters as a dictionary (e.g., per_page, cursor)
 
         Returns:
             List of Page objects
         """
         client, workspace_slug = get_plane_client_context()
-        response = client.pages.list_workspace_pages(workspace_slug=workspace_slug, params=params)
-        return response.results
-
-    @mcp.tool()
-    def list_project_pages(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[Page]:
-        """
-        List all pages in a project.
-
-        Args:
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary (e.g., per_page, cursor)
-
-        Returns:
-            List of Page objects
-        """
-        client, workspace_slug = get_plane_client_context()
-        response = client.pages.list_project_pages(workspace_slug=workspace_slug, project_id=project_id, params=params)
+        if project_id is not None:
+            response = client.pages.list_project_pages(
+                workspace_slug=workspace_slug, project_id=project_id, params=params
+            )
+        else:
+            response = client.pages.list_workspace_pages(workspace_slug=workspace_slug, params=params)
         return response.results
 
     @mcp.tool()
@@ -119,49 +109,32 @@ def register_page_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def retrieve_workspace_page(
+    def retrieve_page(
         page_id: str,
+        project_id: str | None = None,
     ) -> Page:
         """
-        Retrieve a workspace page by ID.
+        Retrieve a page by ID.
+
+        Retrieves a project page if project_id is given, otherwise a workspace page.
 
         Args:
             page_id: UUID of the page
-            expand: Optional comma-separated list of fields to expand
-            fields: Optional comma-separated list of fields to include
+            project_id: UUID of the project. Omit for a workspace page.
 
         Returns:
             Page object
         """
         client, workspace_slug = get_plane_client_context()
 
+        if project_id is not None:
+            return client.pages.retrieve_project_page(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                page_id=page_id,
+            )
         return client.pages.retrieve_workspace_page(
             workspace_slug=workspace_slug,
-            page_id=page_id,
-        )
-
-    @mcp.tool()
-    def retrieve_project_page(
-        project_id: str,
-        page_id: str,
-    ) -> Page:
-        """
-        Retrieve a project page by ID.
-
-        Args:
-            project_id: UUID of the project
-            page_id: UUID of the page
-            expand: Optional comma-separated list of fields to expand
-            fields: Optional comma-separated list of fields to include
-
-        Returns:
-            Page object
-        """
-        client, workspace_slug = get_plane_client_context()
-
-        return client.pages.retrieve_project_page(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
             page_id=page_id,
         )
 

@@ -144,7 +144,6 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `delete_project` | Delete a project by ID |
 | `get_project_worklog_summary` | Get work log summary for a project |
 | `get_project_members` | Get all members of a project |
-| `get_project_features` | Get features configuration of a project |
 | `update_project_features` | Update features configuration of a project |
 
 ### Work Items
@@ -163,12 +162,11 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 
 | Tool Name | Description |
 |-----------|-------------|
-| `list_cycles` | List all cycles in a project |
+| `list_cycles` | List cycles in a project (set `archived=true` for archived) |
 | `create_cycle` | Create a new cycle with name, dates, and owner |
 | `retrieve_cycle` | Retrieve a cycle by ID |
 | `update_cycle` | Update a cycle with partial data |
 | `delete_cycle` | Delete a cycle by ID |
-| `list_archived_cycles` | List archived cycles in a project |
 | `manage_cycle_work_items` | Add and/or remove work items on a cycle |
 | `list_cycle_work_items` | List work items in a cycle |
 | `transfer_cycle_work_items` | Transfer work items from one cycle to another |
@@ -178,12 +176,11 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 
 | Tool Name | Description |
 |-----------|-------------|
-| `list_modules` | List all modules in a project |
+| `list_modules` | List modules in a project (set `archived=true` for archived) |
 | `create_module` | Create a new module with name, dates, status, and members |
 | `retrieve_module` | Retrieve a module by ID |
 | `update_module` | Update a module with partial data |
 | `delete_module` | Delete a module by ID |
-| `list_archived_modules` | List archived modules in a project |
 | `manage_module_work_items` | Add and/or remove work items on a module |
 | `list_module_work_items` | List work items in a module |
 | `manage_module_archive` | Archive or unarchive a module |
@@ -310,8 +307,8 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 
 | Tool Name | Description |
 |-----------|-------------|
-| `retrieve_workspace_page` | Retrieve a workspace page by ID |
-| `retrieve_project_page` | Retrieve a project page by ID |
+| `list_pages` | List pages (workspace, or a project's if `project_id` given) |
+| `retrieve_page` | Retrieve a page by ID (workspace, or project's if `project_id` given) |
 | `create_page` | Create a workspace or project page |
 
 ### Workspaces
@@ -319,7 +316,7 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | Tool Name | Description |
 |-----------|-------------|
 | `get_workspace_members` | Get all members of the current workspace |
-| `get_workspace_features` | Get features of the current workspace |
+| `get_features` | Get feature flags (workspace, or a project's if `project_id` given) |
 | `update_workspace_features` | Update features of the current workspace |
 
 ### Users

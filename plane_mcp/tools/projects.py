@@ -324,21 +324,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id, params=params)
 
     @mcp.tool()
-    def get_project_features(project_id: str) -> ProjectFeature:
-        """
-        Get features of a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-
-        Returns:
-            ProjectFeature object containing enabled/disabled features
-        """
-        client, workspace_slug = get_plane_client_context()
-        return client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
-
-    @mcp.tool()
     def update_project_features(
         project_id: str,
         modules: bool | None = None,
