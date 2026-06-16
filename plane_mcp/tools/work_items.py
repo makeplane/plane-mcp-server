@@ -1,5 +1,6 @@
 """Work item-related tools for Plane MCP Server."""
 
+from html import escape
 from typing import Annotated, Any, get_args
 
 from fastmcp import FastMCP
@@ -22,6 +23,21 @@ from plane_mcp.client import get_plane_client_context
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
+
+
+def _resolve_description_html(description_html: str | None, description_stripped: str | None) -> str | None:
+    """Resolve the description_html to persist.
+
+    Plane recomputes description_stripped server-side from description_html on
+    every save, so a stripped value sent on write is silently discarded. When the
+    caller supplies only plain text, wrap it into minimal HTML so the description
+    actually lands. description_html always wins when both are given.
+    """
+    if description_html is not None:
+        return description_html
+    if description_stripped is not None:
+        return "<p>" + escape(description_stripped).replace("\n", "<br/>") + "</p>"
+    return None
 
 
 def register_work_item_tools(mcp: FastMCP) -> None:
@@ -56,9 +72,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             cursor: From previous response's next_cursor.
             expand: Comma-separated relations to expand (e.g. assignees,labels,state).
             fields: Sparse fieldset — id, name, sequence_id, priority, state,
-                project, assignees, labels, type_id, start_date, target_date,
-                created_at, updated_at, created_by, is_draft. Use `project` not
-                `project_id`.
+                project, assignees, labels, type_id, description_html, start_date,
+                target_date, created_at, updated_at, created_by, is_draft. Use
+                `project` (not `project_id`) and `description_html` (there is no
+                `description` field). Any field you omit or misname comes back
+                null — a null here does NOT mean the item lacks that value; it
+                means it was not requested. To read the description, include
+                description_html; for the type, include type_id.
             external_id / external_source: Filter by external system.
 
         Returns:
@@ -104,7 +124,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             raise
 
         return {
-            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
+            "results": [
+                item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])
+            ],
             "total_count": response.total_count,
             "count": response.count,
             "next_cursor": response.next_cursor,
@@ -195,7 +217,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type_id: UUID of the work item type
             point: Story point value
             description_html: HTML description of the work item
-            description_stripped: Plain text description (stripped of HTML)
+            description_stripped: Plain text description. Convenience only — it is
+                wrapped into HTML and stored as description_html (Plane derives
+                description_stripped server-side). Ignored if description_html is set.
             priority: Priority level (urgent, high, medium, low, none)
             start_date: Start date (ISO 8601 format)
             target_date: Target/end date (ISO 8601 format)
@@ -223,8 +247,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             labels=labels,
             type_id=type_id,
             point=point,
-            description_html=description_html,
-            description_stripped=description_stripped,
+            description_html=_resolve_description_html(description_html, description_stripped),
             priority=validated_priority,
             start_date=start_date,
             target_date=target_date,
@@ -377,7 +400,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type_id: UUID of the work item type
             point: Story point value
             description_html: HTML description of the work item
-            description_stripped: Plain text description (stripped of HTML)
+            description_stripped: Plain text description. Convenience only — it is
+                wrapped into HTML and stored as description_html (Plane derives
+                description_stripped server-side). Ignored if description_html is set.
             priority: Priority level (urgent, high, medium, low, none)
             start_date: Start date (ISO 8601 format)
             target_date: Target/end date (ISO 8601 format)
@@ -405,8 +430,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             labels=labels,
             type_id=type_id,
             point=point,
-            description_html=description_html,
-            description_stripped=description_stripped,
+            description_html=_resolve_description_html(description_html, description_stripped),
             priority=validated_priority,
             start_date=start_date,
             target_date=target_date,
@@ -569,7 +593,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 }
             raise
         return {
-            "results": [item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])],
+            "results": [
+                item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])
+            ],
             "total_count": response.total_count,
             "count": response.count,
             "next_cursor": response.next_cursor,
