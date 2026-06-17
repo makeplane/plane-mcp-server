@@ -40,6 +40,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = get_logger(__name__)
 
+# When true, user info (PII such as the display name) is included in logs.
+# Defaults to false so PII is never logged unless explicitly opted in.
+LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
+
 
 DEFAULT_PLANE_BASE_URL = "https://api.plane.so"
 
@@ -158,7 +162,11 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
 
                 expires_at = int(time.time() + 3600)
 
-                logger.info(f"User: ({user.id}) - {user.display_name}")
+                # display_name is PII — only log it when explicitly opted in.
+                if LOG_USER_INFO:
+                    logger.info(f"User verified: ({user.id}) - {user.display_name}")
+                else:
+                    logger.info(f"User verified: ({user.id})")
 
                 installations_response = await client.get(
                     f"{base_url}/auth/o/app-installation/",
