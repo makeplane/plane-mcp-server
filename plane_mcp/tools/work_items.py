@@ -161,7 +161,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             sub_grouped_by: The sub_group_by field used (null if none).
             total_count: Total matching work items.
             grouped_counts: Dict of group_key → {count} or
-                {total_count, sub_grouped_counts} when sub_group_by is set.
+                {count, sub_grouped_counts} when sub_group_by is set.
                 Keys are UUIDs for FK fields, plain strings for priority/state__group,
                 ISO dates for target_date/start_date, "None" for unset values.
         """
