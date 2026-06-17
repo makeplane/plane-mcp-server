@@ -59,8 +59,18 @@ class JSONFormatter(logging.Formatter):
             "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
         }
+        # The logging middleware emits a JSON object as its log message. Promote
+        # those keys to top-level fields (event, method, tool, duration_ms, ...)
+        raw_message = record.getMessage()
+        try:
+            parsed = json.loads(raw_message)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            log_entry.update(parsed)
+        else:
+            log_entry["message"] = raw_message
         user_id = getattr(record, "user_id", None)
         if user_id:
             log_entry["user_id"] = user_id
@@ -74,10 +84,8 @@ class JSONFormatter(logging.Formatter):
         if err:
             log_entry["user_context_enrichment_error"] = err
         if record.exc_info and record.exc_info[1]:
-            log_entry["error"] = {
-                "type": type(record.exc_info[1]).__name__,
-                "message": str(record.exc_info[1]),
-            }
+            log_entry["error"] = str(record.exc_info[1])
+            log_entry["error_type"] = type(record.exc_info[1]).__name__
         return json.dumps(log_entry)
 
 
