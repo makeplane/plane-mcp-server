@@ -1,5 +1,6 @@
 """Milestone-related tools for Plane MCP Server."""
 
+from functools import wraps
 from typing import Any
 
 from fastmcp import FastMCP
@@ -15,10 +16,30 @@ from plane.models.milestones import (
 from plane_mcp.client import get_plane_client_context
 
 
+def _handle_not_available_on_self_hosted(func):
+    """Decorator to handle milestones not being available on Plane self-hosted."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            error_str = str(e)
+            if "404" in error_str or "Page not found" in error_str:
+                raise ValueError(
+                    "Milestones are not available on Plane self-hosted instances. "
+                    "This feature is only available on Plane Cloud (app.plane.so)."
+                ) from e
+            raise
+
+    return wrapper
+
+
 def register_milestone_tools(mcp: FastMCP) -> None:
     """Register all milestone-related tools with the MCP server."""
 
     @mcp.tool()
+    @_handle_not_available_on_self_hosted
     def list_milestones(
         project_id: str,
         params: dict[str, Any] | None = None,
@@ -40,6 +61,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         return response.results
 
     @mcp.tool()
+    @_handle_not_available_on_self_hosted
     def create_milestone(
         project_id: str,
         title: str,
@@ -72,6 +94,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         return client.milestones.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
+    @_handle_not_available_on_self_hosted
     def retrieve_milestone(project_id: str, milestone_id: str) -> Milestone:
         """
         Retrieve a milestone by ID.
@@ -89,6 +112,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
+    @_handle_not_available_on_self_hosted
     def update_milestone(
         project_id: str,
         milestone_id: str,
@@ -128,6 +152,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
+    @_handle_not_available_on_self_hosted
     def delete_milestone(project_id: str, milestone_id: str) -> None:
         """
         Delete a milestone by ID.
@@ -140,6 +165,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         client.milestones.delete(workspace_slug=workspace_slug, project_id=project_id, milestone_id=milestone_id)
 
     @mcp.tool()
+    @_handle_not_available_on_self_hosted
     def manage_milestone_work_items(
         project_id: str,
         milestone_id: str,
@@ -176,6 +202,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             )
 
     @mcp.tool()
+    @_handle_not_available_on_self_hosted
     def list_milestone_work_items(
         project_id: str,
         milestone_id: str,
