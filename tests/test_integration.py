@@ -330,6 +330,9 @@ EXPECTED_TOOLS = [
     "get_workspace_members",
     "get_features",
     "update_workspace_features",
+    # Role tools
+    "list_roles",
+    "retrieve_role",
     # Cycle tools
     "list_cycles",
     "create_cycle",

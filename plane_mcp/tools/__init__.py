@@ -11,6 +11,7 @@ from plane_mcp.tools.modules import register_module_tools
 from plane_mcp.tools.pages import register_page_tools
 from plane_mcp.tools.pql import register_pql_tools
 from plane_mcp.tools.projects import register_project_tools
+from plane_mcp.tools.roles import register_role_tools
 from plane_mcp.tools.states import register_state_tools
 from plane_mcp.tools.users import register_user_tools
 from plane_mcp.tools.work_item_activities import register_work_item_activity_tools
@@ -49,4 +50,5 @@ def register_tools(mcp: FastMCP) -> None:
     register_state_tools(mcp)
     register_workspace_tools(mcp)
     register_milestone_tools(mcp)
+    register_role_tools(mcp)
     register_pql_tools(mcp)
