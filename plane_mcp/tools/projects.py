@@ -14,13 +14,13 @@ from plane.models.estimates import (
 )
 from plane.models.projects import (
     CreateProject,
-    PaginatedProjectResponse,
+    PaginatedProjectLiteResponse,
     Project,
     ProjectFeature,
     ProjectWorklogSummary,
     UpdateProject,
 )
-from plane.models.query_params import PaginatedQueryParams
+from plane.models.query_params import LiteListQueryParams
 from plane.models.users import UserLite
 
 from plane_mcp.client import get_plane_client_context
@@ -33,40 +33,28 @@ def register_project_tools(mcp: FastMCP) -> None:
     def list_projects(
         cursor: str | None = None,
         per_page: int | None = None,
-        expand: str | None = None,
-        fields: str | None = None,
         order_by: str | None = None,
-    ) -> list[Project]:
+    ) -> PaginatedProjectLiteResponse:
         """
-        List all projects in a workspace.
+        List projects in a workspace (lite, paginated).
+
+        Trimmed fields: id, identifier, name, description, emoji, icon_prop,
+        cover_image, cover_image_url. For full detail use retrieve_project.
 
         Args:
-            workspace_slug: The workspace slug identifier
-            cursor: Pagination cursor for getting next set of results
-            per_page: Number of results per page (1-100)
-            expand: Comma-separated list of related fields to expand in response
-            fields: Comma-separated list of fields to include in response
-            order_by: Field to order results by. Prefix with '-' for descending order
+            cursor: Prior response's next_cursor; omit for first page.
+            per_page: Results per page (1-1000, default 1000).
+            order_by: Sort field; prefix '-' for descending.
 
         Returns:
-            List of Project objects
+            Paginated envelope: results + total_count, next_cursor,
+            next_page_results (page again while next_page_results is true).
         """
         client, workspace_slug = get_plane_client_context()
 
-        params = PaginatedQueryParams(
-            cursor=cursor,
-            per_page=per_page,
-            expand=expand,
-            fields=fields,
-            order_by=order_by,
-        )
+        params = LiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by)
 
-        response: PaginatedProjectResponse = client.projects.list(
-            workspace_slug=workspace_slug,
-            params=params,
-        )
-
-        return response.results
+        return client.projects.list_lite(workspace_slug=workspace_slug, params=params)
 
     @mcp.tool()
     def create_project(

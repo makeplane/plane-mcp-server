@@ -10,12 +10,12 @@ from plane.models.cycles import (
     CreateCycle,
     Cycle,
     PaginatedArchivedCycleResponse,
-    PaginatedCycleResponse,
+    PaginatedCycleLiteResponse,
     PaginatedCycleWorkItemResponse,
     TransferCycleWorkItemsRequest,
     UpdateCycle,
 )
-from plane.models.query_params import WorkItemQueryParams
+from plane.models.query_params import LiteListQueryParams, WorkItemQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
@@ -31,29 +31,36 @@ def register_cycle_tools(mcp: FastMCP) -> None:
     def list_cycles(
         project_id: str,
         archived: bool = False,
-        params: dict[str, Any] | None = None,
-    ) -> list[Cycle]:
+        cursor: str | None = None,
+        per_page: int | None = None,
+        order_by: str | None = None,
+    ) -> PaginatedCycleLiteResponse | PaginatedArchivedCycleResponse:
         """
         List cycles in a project.
 
         Args:
             project_id: UUID of the project
             archived: Set True to list archived cycles instead of active ones.
-            params: Optional query parameters as a dictionary
+            cursor: Pagination cursor from a previous response's next_cursor
+                (form "{per_page}:{page}:{offset}"). Omit for the first page.
+            per_page: Number of results per page (1-1000, default and max 1000).
+            order_by: Field to order results by. Prefix with '-' for descending.
 
         Returns:
-            List of Cycle objects
+            Paginated envelope: results (lite cycles) + total_count,
+            next_cursor, next_page_results.
         """
         client, workspace_slug = get_plane_client_context()
+        params = LiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by)
         if archived:
-            archived_response: PaginatedArchivedCycleResponse = client.cycles.list_archived(
-                workspace_slug=workspace_slug, project_id=project_id, params=params
+            return client.cycles.list_archived(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=params.model_dump(exclude_none=True),
             )
-            return archived_response.results
-        response: PaginatedCycleResponse = client.cycles.list(
+        return client.cycles.list_lite(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
-        return response.results
 
     @mcp.tool()
     def create_cycle(
