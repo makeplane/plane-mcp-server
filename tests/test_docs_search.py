@@ -205,3 +205,30 @@ def test_search_partial_fetch_error_is_a_warning(monkeypatch):
     assert result["results"]
     assert "warnings" in result and "dev docs unreachable" in result["warnings"]
     assert "error" not in result
+
+
+# --- full_text ------------------------------------------------------------------
+
+
+def test_search_full_text_returns_full_body_not_snippet():
+    _seed_cache()
+    result = docs._search("how to create a cycle", "help", 1, full_text=True)
+    top = result["results"][0]
+    assert top["url"] == "https://docs.plane.so/cycles/overview"
+    assert "content" in top and "snippet" not in top
+    assert "New Cycle" in top["content"]  # full body, not just a snippet
+
+
+def test_search_full_text_unescapes_html_entities():
+    docs._CACHE["developer"] = (
+        time.time(),
+        docs._parse_llms_full(BLOCK_SCALAR_FIXTURE, "developer", "developers.plane.so"),
+    )
+    result = docs._search("create work item", "developer", 1, full_text=True)
+    assert "&#x20;" not in result["results"][0]["content"]  # entities decoded
+
+
+def test_search_default_returns_snippet_not_content():
+    _seed_cache()
+    top = docs._search("how to create a cycle", "help", 1)["results"][0]
+    assert "snippet" in top and "content" not in top

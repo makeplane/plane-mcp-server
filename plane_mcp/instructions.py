@@ -12,4 +12,11 @@ items always belong to a project; ask which if one is not named.
    delete_work_item by work item id (set parent=<work item id> to nest).
 5. List an epic's children: list_work_items(project_id, pql='childOf("<EPIC-IDENTIFIER>")')
    using the epic's human-readable identifier (e.g. "PROJ-12") from retrieve_work_item.
+
+## Documentation
+
+For any how / what / why question about using or building on Plane, call
+search_docs before action tools (create_*, update_*, delete_*) — those change
+data, they do not explain features. Read a page in full with full_text=True,
+limit=1.
 """

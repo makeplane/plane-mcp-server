@@ -303,7 +303,7 @@ def _get_corpus(source: str) -> list[DocPage]:
         return pages
 
 
-def _search(query: str, source: str, limit: int) -> dict:
+def _search(query: str, source: str, limit: int, full_text: bool = False) -> dict:
     """Core search routine shared by the tool and tests."""
     query_tokens = _query_tokens(query)
     limit = max(1, min(limit, _MAX_LIMIT))
@@ -322,16 +322,21 @@ def _search(query: str, source: str, limit: int) -> dict:
     scored = [(score, page) for page in pages if (score := _score_page(query_tokens, page)) > 0]
     scored.sort(key=lambda item: item[0], reverse=True)
 
-    results = [
-        {
+    results = []
+    for score, page in scored[:limit]:
+        result: dict = {
             "title": page.title,
             "url": page.url,
             "source": page.source,
             "score": round(score, 2),
-            "snippet": _make_snippet(page.content, page.description, query_tokens),
         }
-        for score, page in scored[:limit]
-    ]
+        # The full body is already in hand here, so full_text avoids any extra
+        # call (and any client-side fetch) to read a page in full.
+        if full_text:
+            result["content"] = html.unescape(page.content)
+        else:
+            result["snippet"] = _make_snippet(page.content, page.description, query_tokens)
+        results.append(result)
 
     out: dict = {"query": query, "results": results}
     if errors:
@@ -347,33 +352,26 @@ def register_docs_tools(mcp: FastMCP) -> None:
         query: str,
         source: Literal["all", "help", "developer"] = "all",
         limit: int = 5,
+        full_text: bool = False,
     ) -> dict:
         """
-        Search Plane's official documentation and return the most relevant pages.
+        Search Plane's official docs for how-to and conceptual answers.
 
-        Use this to answer questions about how to use Plane (product/help docs)
-        or how to build on Plane (REST API, self-hosting, OAuth, webhooks, MCP).
-        It searches the public docs at docs.plane.so and developers.plane.so via
-        local full-text ranking and returns the top matching pages, each with a
-        short snippet and a URL you can open or fetch for full content.
+        Use for any how / what / why question about Plane — product usage
+        (docs.plane.so) or building on Plane: REST API, self-hosting, OAuth,
+        webhooks, MCP (developers.plane.so). Prefer over action tools, which act but
+        do not explain. Find a page with the default snippets, then re-call with
+        full_text=True, limit=1 to read it in full from cache (no URL fetch needed).
 
         Args:
-            query: Natural-language question or keywords, e.g. "how to create a
-                cycle", "rest api create work item", "self-host docker compose".
-            source: Which documentation set to search.
-                - "all" (default): both sites.
-                - "help": product / usage docs (docs.plane.so).
-                - "developer": API reference, self-hosting, and app-building
-                  docs (developers.plane.so).
-            limit: Maximum number of results to return (1-20, default 5).
+            query: Question or keywords, e.g. "how to create a cycle".
+            source: "help" (product), "developer" (API / build), or "all" (default).
+            limit: Max results, 1-20 (default 5).
+            full_text: True returns each page's full "content" instead of a
+                "snippet"; use with limit=1.
 
         Returns:
-            A dict with:
-                - "query": the original query string.
-                - "results": ranked matches, each with "title", "url", "source"
-                  ("help" or "developer"), "score", and "snippet". Empty if
-                  nothing matched.
-                - "error" (or "warnings"): present only if a docs site could not
-                  be fetched.
+            {"query", "results": [{"title", "url", "source", "score", and "snippet"
+            or "content"}]}; "error"/"warnings" only if a docs site fetch failed.
         """
-        return _search(query, source, limit)
+        return _search(query, source, limit, full_text)
