@@ -325,6 +325,12 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 |-----------|-------------|
 | `get_me` | Get current authenticated user information |
 
+### Documentation
+
+| Tool Name | Description |
+|-----------|-------------|
+| `search_docs` | Full-text search of Plane's official docs (docs.plane.so and developers.plane.so); returns ranked pages with snippets and URLs, or full page text with `full_text=True` |
+
 **Total Tools**: 100+ tools across 20 categories
 
 ## Development
