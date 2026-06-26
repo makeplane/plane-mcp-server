@@ -29,11 +29,12 @@ ALLOWED_REDIRECT_URI_PATTERNS = [
     "http://localhost:*/*",
     "http://127.0.0.1:*",
     "http://127.0.0.1:*/*",
-    "cursor://*",
-    "vscode://*",
-    "vscode-insiders://*",
-    "windsurf://*",
-    "claude://*",
+    "cursor://anysphere.cursor-mcp/oauth/*",
+    "https://www.cursor.com/*",
+    "https://vscode.dev/redirect",
+    "https://insiders.vscode.dev/redirect",
+    "https://antigravity.google/oauth-callback",
+    "https://claude.ai/*",
 ]
 
 
