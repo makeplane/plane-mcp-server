@@ -11,6 +11,7 @@ from plane_mcp.tools.modules import register_module_tools
 from plane_mcp.tools.pages import register_page_tools
 from plane_mcp.tools.pql import register_pql_tools
 from plane_mcp.tools.projects import register_project_tools
+from plane_mcp.tools.roles import register_role_tools
 from plane_mcp.tools.states import register_state_tools
 from plane_mcp.tools.users import register_user_tools
 from plane_mcp.tools.work_item_activities import register_work_item_activity_tools
@@ -18,6 +19,7 @@ from plane_mcp.tools.work_item_attachments import register_work_item_attachment_
 from plane_mcp.tools.work_item_comments import register_work_item_comment_tools
 from plane_mcp.tools.work_item_links import register_work_item_link_tools
 from plane_mcp.tools.work_item_properties import register_work_item_property_tools
+from plane_mcp.tools.work_item_relation_definitions import register_work_item_relation_definition_tools
 from plane_mcp.tools.work_item_relations import register_work_item_relation_tools
 from plane_mcp.tools.work_item_types import register_work_item_type_tools
 from plane_mcp.tools.work_items import register_work_item_tools
@@ -33,6 +35,7 @@ def register_tools(mcp: FastMCP) -> None:
     register_work_item_attachment_tools(mcp)
     register_work_item_comment_tools(mcp)
     register_work_item_link_tools(mcp)
+    register_work_item_relation_definition_tools(mcp)
     register_work_item_relation_tools(mcp)
     register_work_log_tools(mcp)
     register_cycle_tools(mcp)
@@ -47,4 +50,5 @@ def register_tools(mcp: FastMCP) -> None:
     register_state_tools(mcp)
     register_workspace_tools(mcp)
     register_milestone_tools(mcp)
+    register_role_tools(mcp)
     register_pql_tools(mcp)

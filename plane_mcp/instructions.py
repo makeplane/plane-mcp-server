@@ -1,5 +1,3 @@
-"""Server-level instructions sent once to MCP clients (FastMCP `instructions` param)."""
-
 SERVER_INSTRUCTIONS = """
 ## Epics
 

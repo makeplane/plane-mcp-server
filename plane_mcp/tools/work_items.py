@@ -161,7 +161,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             sub_grouped_by: The sub_group_by field used (null if none).
             total_count: Total matching work items.
             grouped_counts: Dict of group_key → {count} or
-                {total_count, sub_grouped_counts} when sub_group_by is set.
+                {count, sub_grouped_counts} when sub_group_by is set.
                 Keys are UUIDs for FK fields, plain strings for priority/state__group,
                 ISO dates for target_date/start_date, "None" for unset values.
         """
@@ -643,12 +643,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         Search work items by text across a workspace.
 
-        Use this for free-text name/description search. For structured
-        filtering (priority, state, assignee, dates, etc.) use
-        `list_work_items` with a PQL expression.
+        Matches on work item name, sequence id, and project identifier (not
+        description). For structured filtering (priority, state, assignee,
+        dates, etc.) use `list_work_items` with a PQL expression.
 
         Args:
-            query: Free-text search string across work item name and description
+            query: Free-text string matched against name, sequence id, and project identifier
             expand: Comma-separated list of related fields to expand in response
             fields: Comma-separated list of fields to include in response
             external_id: External system identifier for filtering

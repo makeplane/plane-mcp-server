@@ -129,6 +129,16 @@ export PLANE_WORKSPACE_SLUG="your-workspace-slug"
 
 **Note**: For remote HTTP transports (OAuth or PAT), authentication is handled via the connection method (OAuth flow or PAT headers) and does not require these environment variables.
 
+### Logging
+
+The server emits structured JSON logs. Each tool call is logged with its tool name, duration, status, and (when available) the opaque user id and workspace slug.
+
+- `LOG_USER_INFO`: When `true`, include user info (PII such as the display name) in logs alongside the opaque user id. Defaults to `false` so PII is never logged unless explicitly opted in. Only the OAuth and PAT (header) HTTP transports carry a display name; stdio is unaffected.
+
+```bash
+export LOG_USER_INFO="true"
+```
+
 ## Available Tools
 
 The server provides comprehensive tools for interacting with Plane. All tools use Pydantic models from the Plane SDK for type safety and validation.
@@ -286,6 +296,15 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `list_work_item_relations` | List relations for a work item |
 | `create_work_item_relation` | Create relations for a work item |
 | `remove_work_item_relation` | Remove a relation from a work item |
+
+### Work Item Relation Definitions
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_work_item_relation_definitions` | List workspace custom relation definitions |
+| `create_work_item_relation_definition` | Create a workspace relation definition |
+| `update_work_item_relation_definition` | Update a relation definition |
+| `delete_work_item_relation_definition` | Delete a relation definition |
 
 ### Work Item Activities
 
