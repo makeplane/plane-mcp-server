@@ -37,11 +37,11 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
                 "http://127.0.0.1:*",
                 "http://127.0.0.1:*/*",
                 # Known MCP client custom protocol schemes
-                "cursor://*",
-                "vscode://*",
-                "vscode-insiders://*",
-                "windsurf://*",
-                "claude://*",
+                "cursor://anysphere.cursor-mcp/oauth/*",
+                "https://www.cursor.com/*",
+                "https://vscode.dev/redirect",
+                "https://insiders.vscode.dev/redirect",
+                "https://antigravity.google/oauth-callback",
                 # Claude.ai web client
                 "https://claude.ai/*",
             ],
