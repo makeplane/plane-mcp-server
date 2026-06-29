@@ -1,6 +1,6 @@
 """Project-related tools for Plane MCP Server."""
 
-from typing import Any, get_args
+from typing import get_args
 
 from fastmcp import FastMCP
 from plane.models.enums import TimezoneEnum
@@ -15,13 +15,14 @@ from plane.models.estimates import (
 from plane.models.projects import (
     CreateProject,
     PaginatedProjectLiteResponse,
+    PaginatedProjectMemberResponse,
     Project,
     ProjectFeature,
     ProjectWorklogSummary,
     UpdateProject,
 )
 from plane.models.query_params import ProjectLiteListQueryParams
-from plane.models.users import UserLite
+from plane.models.query_params import MemberListQueryParams
 
 from plane_mcp.client import get_plane_client_context
 
@@ -301,20 +302,51 @@ def register_project_tools(mcp: FastMCP) -> None:
         return client.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def get_project_members(project_id: str, params: dict[str, Any] | None = None) -> list[UserLite]:
+    def get_project_members(
+        project_id: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        email: str | None = None,
+        display_name: str | None = None,
+        role_slug: str | None = None,
+        is_active: bool | None = None,
+        is_bot: bool | None = None,
+        cursor: str | None = None,
+        per_page: int | None = 100,
+        order_by: str | None = None,
+    ) -> PaginatedProjectMemberResponse:
         """
-        Get all members of a project.
+        List members of a project (filterable, paginated).
+
+        Optional filters first_name/last_name/email/display_name (case-insensitive
+        contains), role_slug (exact), is_active, is_bot — combined with AND.
 
         Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary
+            project_id: UUID of the project.
+            cursor: Prior response's next_cursor; omit for first page.
+            per_page: Results per page (1-1000, default 100).
+            order_by: Sort field; prefix '-' for descending.
 
         Returns:
-            List of UserLite objects representing project members
+            Paginated envelope: results (members incl. role, role_slug,
+            is_active, is_bot) + total_count, next_cursor, next_page_results.
         """
         client, workspace_slug = get_plane_client_context()
-        return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id, params=params)
+        params = MemberListQueryParams(
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            display_name=display_name,
+            role_slug=role_slug,
+            is_active=is_active,
+            is_bot=is_bot,
+            cursor=cursor,
+            per_page=per_page,
+            order_by=order_by,
+        )
+        return client.projects.get_members_lite(
+            workspace_slug=workspace_slug, project_id=project_id, params=params
+        )
 
     @mcp.tool()
     def update_project_features(

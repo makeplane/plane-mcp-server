@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 
 from fastmcp import FastMCP
-from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
 from mcp.types import Icon
 
 from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
 from plane_mcp.instructions import SERVER_INSTRUCTIONS
+from plane_mcp.middleware import PlaneLoggingMiddleware
 from plane_mcp.storage import build_token_store
 from plane_mcp.tools import register_tools
 
@@ -37,17 +37,20 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
                 "http://127.0.0.1:*",
                 "http://127.0.0.1:*/*",
                 # Known MCP client custom protocol schemes
-                "cursor://*",
-                "vscode://*",
-                "vscode-insiders://*",
-                "windsurf://*",
-                "claude://*",
+                "cursor://anysphere.cursor-mcp/oauth/*",
+                "https://www.cursor.com/*",
+                "https://vscode.dev/redirect",
+                "https://insiders.vscode.dev/redirect",
+                "https://antigravity.google/oauth-callback",
                 # Claude.ai web client
                 "https://claude.ai/*",
+                # ChatGPT connectors — per-connector callback + legacy redirect
+                "https://chatgpt.com/connector/oauth/*",
+                "https://chatgpt.com/connector_platform_oauth_redirect",
             ],
         ),
     )
-    oauth_mcp.add_middleware(StructuredLoggingMiddleware(include_payloads=True))
+    oauth_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
     register_tools(oauth_mcp)
     return oauth_mcp
 
@@ -60,7 +63,7 @@ def get_header_mcp():
             required_scopes=["read", "write"],
         ),
     )
-    header_mcp.add_middleware(StructuredLoggingMiddleware(include_payloads=True))
+    header_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
     register_tools(header_mcp)
     return header_mcp
 
@@ -70,6 +73,6 @@ def get_stdio_mcp():
         "Plane MCP Server (stdio)",
         instructions=SERVER_INSTRUCTIONS,
     )
-    stdio_mcp.add_middleware(StructuredLoggingMiddleware(include_payloads=True))
+    stdio_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
     register_tools(stdio_mcp)
     return stdio_mcp
