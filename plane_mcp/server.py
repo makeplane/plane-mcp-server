@@ -44,6 +44,9 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
                 "https://antigravity.google/oauth-callback",
                 # Claude.ai web client
                 "https://claude.ai/*",
+                # ChatGPT connectors — per-connector callback + legacy redirect
+                "https://chatgpt.com/connector/oauth/*",
+                "https://chatgpt.com/connector_platform_oauth_redirect",
             ],
         ),
     )
