@@ -15,7 +15,8 @@ from plane.models.cycles import (
     TransferCycleWorkItemsRequest,
     UpdateCycle,
 )
-from plane.models.query_params import LiteListQueryParams, WorkItemQueryParams
+from plane.models.enums import CycleViewEnum
+from plane.models.query_params import CycleLiteListQueryParams, LiteListQueryParams, WorkItemQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
@@ -31,16 +32,20 @@ def register_cycle_tools(mcp: FastMCP) -> None:
     def list_cycles(
         project_id: str,
         archived: bool = False,
+        cycle_view: CycleViewEnum | None = None,
         cursor: str | None = None,
         per_page: int | None = None,
         order_by: str | None = None,
     ) -> PaginatedCycleLiteResponse | PaginatedArchivedCycleResponse:
         """
-        List cycles in a project.
+        List cycles in a project. Active (non-archived) cycles by default.
 
         Args:
             project_id: UUID of the project
             archived: Set True to list archived cycles instead of active ones.
+            cycle_view: Filter active cycles by status — "current" (running now),
+                "upcoming" (starts later), "completed" (ended), "draft" (no dates),
+                or "incomplete" (not yet finished). Ignored when archived is True.
             cursor: Pagination cursor from a previous response's next_cursor
                 (form "{per_page}:{page}:{offset}"). Omit for the first page.
             per_page: Number of results per page (1-1000, default and max 1000).
@@ -51,16 +56,15 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             next_cursor, next_page_results.
         """
         client, workspace_slug = get_plane_client_context()
-        params = LiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by)
         if archived:
+            params = LiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by)
             return client.cycles.list_archived(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
                 params=params.model_dump(exclude_none=True),
             )
-        return client.cycles.list_lite(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
+        params = CycleLiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by, cycle_view=cycle_view)
+        return client.cycles.list_lite(workspace_slug=workspace_slug, project_id=project_id, params=params)
 
     @mcp.tool()
     def create_cycle(

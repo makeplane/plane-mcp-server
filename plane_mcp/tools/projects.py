@@ -20,7 +20,7 @@ from plane.models.projects import (
     ProjectWorklogSummary,
     UpdateProject,
 )
-from plane.models.query_params import LiteListQueryParams
+from plane.models.query_params import ProjectLiteListQueryParams
 from plane.models.users import UserLite
 
 from plane_mcp.client import get_plane_client_context
@@ -34,17 +34,20 @@ def register_project_tools(mcp: FastMCP) -> None:
         cursor: str | None = None,
         per_page: int | None = None,
         order_by: str | None = None,
+        include_archived: bool = False,
     ) -> PaginatedProjectLiteResponse:
         """
         List projects in a workspace (lite, paginated).
 
         Trimmed fields: id, identifier, name, description, emoji, icon_prop,
-        cover_image, cover_image_url. For full detail use retrieve_project.
+        cover_image, cover_image_url, archived_at. For full detail use retrieve_project.
 
         Args:
             cursor: Prior response's next_cursor; omit for first page.
             per_page: Results per page (1-1000, default 1000).
             order_by: Sort field; prefix '-' for descending.
+            include_archived: Set True to also include archived projects.
+                Archived projects are excluded by default.
 
         Returns:
             Paginated envelope: results + total_count, next_cursor,
@@ -52,7 +55,9 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
-        params = LiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by)
+        params = ProjectLiteListQueryParams(
+            cursor=cursor, per_page=per_page, order_by=order_by, include_archived=include_archived
+        )
 
         return client.projects.list_lite(workspace_slug=workspace_slug, params=params)
 
