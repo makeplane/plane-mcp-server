@@ -129,6 +129,20 @@ export PLANE_WORKSPACE_SLUG="your-workspace-slug"
 
 **Note**: For remote HTTP transports (OAuth or PAT), authentication is handled via the connection method (OAuth flow or PAT headers) and does not require these environment variables.
 
+### OAuth redirect URIs
+
+For the OAuth HTTP/SSE transports, the server validates each client's redirect URI against an allowlist. Common MCP clients (Cursor, VS Code, Claude.ai, ChatGPT connectors, localhost) are allowed by default.
+
+To onboard a new client without a code change or release, append extra patterns via an environment variable:
+
+- `PLANE_OAUTH_ALLOWED_REDIRECT_URIS`: Comma-separated redirect URI patterns appended to the built-in allowlist.
+
+```bash
+export PLANE_OAUTH_ALLOWED_REDIRECT_URIS="https://newclient.com/cb,https://other.app/oauth/*"
+```
+
+Patterns support glob matching (`*` matches any port, path segment, or subdomain). For security, keep the host pinned and wildcard only the port/path.
+
 ### Logging
 
 The server emits structured JSON logs. Each tool call is logged with its tool name, duration, status, and (when available) the opaque user id and workspace slug.

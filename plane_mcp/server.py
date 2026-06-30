@@ -13,6 +13,40 @@ from plane_mcp.middleware import PlaneLoggingMiddleware
 from plane_mcp.storage import build_token_store
 from plane_mcp.tools import register_tools
 
+# Baseline redirect URIs shipped with the server. Additional patterns can be
+# supplied at runtime via PLANE_OAUTH_ALLOWED_REDIRECT_URIS (comma-separated) so
+# onboarding a new MCP client needs only a config change, not a new release.
+DEFAULT_ALLOWED_REDIRECT_URIS = [
+    # Localhost only for http (dynamic ports from MCP clients)
+    "http://localhost:*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*",
+    "http://127.0.0.1:*/*",
+    # Known MCP client custom protocol schemes
+    "cursor://anysphere.cursor-mcp/oauth/*",
+    "https://www.cursor.com/*",
+    "https://vscode.dev/redirect",
+    "https://insiders.vscode.dev/redirect",
+    "https://antigravity.google/oauth-callback",
+    # Claude.ai web client
+    "https://claude.ai/*",
+    # ChatGPT connectors — per-connector callback + legacy redirect
+    "https://chatgpt.com/connector/oauth/*",
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+]
+
+
+def get_allowed_client_redirect_uris() -> list[str]:
+    """Return the redirect URI allowlist: built-in defaults plus any extras
+    from the PLANE_OAUTH_ALLOWED_REDIRECT_URIS env var (comma-separated)."""
+    allowed = list(DEFAULT_ALLOWED_REDIRECT_URIS)
+    extra = os.getenv("PLANE_OAUTH_ALLOWED_REDIRECT_URIS", "")
+    for uri in extra.split(","):
+        uri = uri.strip()
+        if uri and uri not in allowed:
+            allowed.append(uri)
+    return allowed
+
 
 def get_oauth_mcp(base_path: str = "/") -> FastMCP:
     """Build the FastMCP instance for the OAuth HTTP / SSE transports."""
@@ -30,24 +64,7 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
             enable_cimd=os.getenv("PLANE_OAUTH_PROVIDER_ENABLE_CIMD", "false").lower() == "true",
             client_storage=build_token_store(),
             required_scopes=["read", "write"],
-            allowed_client_redirect_uris=[
-                # Localhost only for http (dynamic ports from MCP clients)
-                "http://localhost:*",
-                "http://localhost:*/*",
-                "http://127.0.0.1:*",
-                "http://127.0.0.1:*/*",
-                # Known MCP client custom protocol schemes
-                "cursor://anysphere.cursor-mcp/oauth/*",
-                "https://www.cursor.com/*",
-                "https://vscode.dev/redirect",
-                "https://insiders.vscode.dev/redirect",
-                "https://antigravity.google/oauth-callback",
-                # Claude.ai web client
-                "https://claude.ai/*",
-                # ChatGPT connectors — per-connector callback + legacy redirect
-                "https://chatgpt.com/connector/oauth/*",
-                "https://chatgpt.com/connector_platform_oauth_redirect",
-            ],
+            allowed_client_redirect_uris=get_allowed_client_redirect_uris(),
         ),
     )
     oauth_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
