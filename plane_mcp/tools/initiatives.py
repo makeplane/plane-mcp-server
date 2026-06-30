@@ -1,6 +1,6 @@
 """Initiative-related tools for Plane MCP Server."""
 
-from typing import Any
+from typing import Any, Literal
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -11,8 +11,13 @@ from plane.models.initiatives import (
     PaginatedInitiativeResponse,
     UpdateInitiative,
 )
+from plane.models.projects import PaginatedProjectResponse, Project
 
 from plane_mcp.client import get_plane_client_context
+
+_PROJECTS_NEED_NATIVE = (
+    "Linking projects to an initiative requires the native initiatives feature. Enable it in workspace settings."
+)
 
 
 def _require_native_initiatives(client: Any, workspace_slug: str, fallback: str) -> None:
@@ -208,3 +213,54 @@ def register_initiative_tools(mcp: FastMCP) -> None:
             "delete_work_item(project_id, work_item_id) instead.",
         )
         client.initiatives.delete(workspace_slug=workspace_slug, initiative_id=initiative_id)
+
+    @mcp.tool()
+    def list_initiative_projects(
+        initiative_id: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[Project]:
+        """
+        List projects linked to an initiative.
+
+        Args:
+            initiative_id: UUID of the initiative
+            params: Optional query parameters (e.g., per_page, cursor)
+
+        Returns:
+            List of linked Project objects
+        """
+        client, workspace_slug = get_plane_client_context()
+        _require_native_initiatives(client, workspace_slug, _PROJECTS_NEED_NATIVE)
+        response: PaginatedProjectResponse = client.initiatives.projects.list(
+            workspace_slug=workspace_slug, initiative_id=initiative_id, params=params
+        )
+        return response.results
+
+    @mcp.tool()
+    def manage_initiative_projects(
+        initiative_id: str,
+        action: Literal["add", "remove"],
+        project_ids: list[str],
+    ) -> list[Project]:
+        """
+        Link or unlink projects of an initiative. Use list_initiative_projects to read.
+
+        Args:
+            initiative_id: UUID of the initiative
+            action: "add" to link the projects, "remove" to unlink them
+            project_ids: Project UUIDs to link/unlink
+
+        Returns:
+            The initiative's linked projects after the operation
+        """
+        client, workspace_slug = get_plane_client_context()
+        _require_native_initiatives(client, workspace_slug, _PROJECTS_NEED_NATIVE)
+
+        if not project_ids:
+            raise ToolError("project_ids must not be empty.")
+        projects = client.initiatives.projects
+        mutate = projects.add if action == "add" else projects.remove
+        mutate(workspace_slug=workspace_slug, initiative_id=initiative_id, project_ids=project_ids)
+
+        response: PaginatedProjectResponse = projects.list(workspace_slug=workspace_slug, initiative_id=initiative_id)
+        return response.results
