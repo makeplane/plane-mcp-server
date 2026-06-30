@@ -35,7 +35,6 @@ def register_project_tools(mcp: FastMCP) -> None:
         cursor: str | None = None,
         per_page: int | None = None,
         order_by: str | None = None,
-        include_archived: bool = False,
     ) -> PaginatedProjectLiteResponse:
         """
         List projects in a workspace (lite, paginated).
@@ -47,8 +46,6 @@ def register_project_tools(mcp: FastMCP) -> None:
             cursor: Prior response's next_cursor; omit for first page.
             per_page: Results per page (1-1000, default 1000).
             order_by: Sort field; prefix '-' for descending.
-            include_archived: Set True to also include archived projects.
-                Archived projects are excluded by default.
 
         Returns:
             Paginated envelope: results + total_count, next_cursor,
@@ -57,7 +54,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
 
         params = ProjectLiteListQueryParams(
-            cursor=cursor, per_page=per_page, order_by=order_by, include_archived=include_archived
+            cursor=cursor, per_page=per_page, order_by=order_by, include_archived=False
         )
 
         return client.projects.list_lite(workspace_slug=workspace_slug, params=params)
