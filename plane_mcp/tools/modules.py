@@ -10,11 +10,11 @@ from plane.models.modules import (
     CreateModule,
     Module,
     PaginatedArchivedModuleResponse,
-    PaginatedModuleResponse,
+    PaginatedModuleLiteResponse,
     PaginatedModuleWorkItemResponse,
     UpdateModule,
 )
-from plane.models.query_params import WorkItemQueryParams
+from plane.models.query_params import LiteListQueryParams, WorkItemQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
@@ -30,29 +30,36 @@ def register_module_tools(mcp: FastMCP) -> None:
     def list_modules(
         project_id: str,
         archived: bool = False,
-        params: dict[str, Any] | None = None,
-    ) -> list[Module]:
+        cursor: str | None = None,
+        per_page: int | None = None,
+        order_by: str | None = None,
+    ) -> PaginatedModuleLiteResponse | PaginatedArchivedModuleResponse:
         """
         List modules in a project.
 
         Args:
             project_id: UUID of the project
             archived: Set True to list archived modules instead of active ones.
-            params: Optional query parameters as a dictionary
+            cursor: Pagination cursor from a previous response's next_cursor
+                (form "{per_page}:{page}:{offset}"). Omit for the first page.
+            per_page: Number of results per page (1-1000, default and max 1000).
+            order_by: Field to order results by. Prefix with '-' for descending.
 
         Returns:
-            List of Module objects
+            Paginated envelope: results (lite modules) + total_count,
+            next_cursor, next_page_results.
         """
         client, workspace_slug = get_plane_client_context()
+        params = LiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by)
         if archived:
-            archived_response: PaginatedArchivedModuleResponse = client.modules.list_archived(
-                workspace_slug=workspace_slug, project_id=project_id, params=params
+            return client.modules.list_archived(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=params.model_dump(exclude_none=True),
             )
-            return archived_response.results
-        response: PaginatedModuleResponse = client.modules.list(
+        return client.modules.list_lite(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
-        return response.results
 
     @mcp.tool()
     def create_module(
