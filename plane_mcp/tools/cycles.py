@@ -15,7 +15,7 @@ from plane.models.cycles import (
     TransferCycleWorkItemsRequest,
     UpdateCycle,
 )
-from plane.models.enums import CycleViewEnum
+from plane.models.enums import CycleStatusEnum
 from plane.models.query_params import CycleLiteListQueryParams, LiteListQueryParams, WorkItemQueryParams
 from pydantic import Field
 
@@ -32,7 +32,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
     def list_cycles(
         project_id: str,
         archived: bool = False,
-        cycle_view: CycleViewEnum | None = None,
+        status: CycleStatusEnum | None = None,
         cursor: str | None = None,
         per_page: int | None = None,
         order_by: str | None = None,
@@ -43,7 +43,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         Args:
             project_id: UUID of the project
             archived: Set True to list archived cycles instead of active ones.
-            cycle_view: Filter active cycles by status — "current" (running now),
+            status: Filter active cycles by status — "current" (running now),
                 "upcoming" (starts later), "completed" (ended), "draft" (no dates),
                 or "incomplete" (not yet finished). Ignored when archived is True.
             cursor: Pagination cursor from a previous response's next_cursor
@@ -63,7 +63,7 @@ def register_cycle_tools(mcp: FastMCP) -> None:
                 project_id=project_id,
                 params=params.model_dump(exclude_none=True),
             )
-        params = CycleLiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by, cycle_view=cycle_view)
+        params = CycleLiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by, status=status)
         return client.cycles.list_lite(workspace_slug=workspace_slug, project_id=project_id, params=params)
 
     @mcp.tool()
