@@ -9,15 +9,17 @@ from plane.models.enums import ModuleStatusEnum
 from plane.models.modules import (
     CreateModule,
     Module,
+    ModuleLite,
     PaginatedArchivedModuleResponse,
     PaginatedModuleLiteResponse,
     PaginatedModuleWorkItemResponse,
     UpdateModule,
 )
-from plane.models.query_params import LiteListQueryParams, WorkItemQueryParams
+from plane.models.query_params import LiteListQueryParams, PaginatedQueryParams, WorkItemQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.lite_fallback import lite_or_fallback
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
@@ -57,8 +59,17 @@ def register_module_tools(mcp: FastMCP) -> None:
                 project_id=project_id,
                 params=params.model_dump(exclude_none=True),
             )
-        return client.modules.list_lite(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
+        return lite_or_fallback(
+            lambda: client.modules.list_lite(workspace_slug=workspace_slug, project_id=project_id, params=params),
+            lambda: client.modules.list(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=PaginatedQueryParams(cursor=cursor, per_page=per_page, order_by=order_by).model_dump(
+                    exclude_none=True
+                ),
+            ),
+            ModuleLite,
+            PaginatedModuleLiteResponse,
         )
 
     @mcp.tool()

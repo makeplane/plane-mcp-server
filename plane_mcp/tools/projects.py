@@ -18,13 +18,14 @@ from plane.models.projects import (
     PaginatedProjectMemberResponse,
     Project,
     ProjectFeature,
+    ProjectLite,
     ProjectWorklogSummary,
     UpdateProject,
 )
-from plane.models.query_params import ProjectLiteListQueryParams
-from plane.models.query_params import MemberListQueryParams
+from plane.models.query_params import MemberListQueryParams, PaginatedQueryParams, ProjectLiteListQueryParams
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.lite_fallback import lite_or_fallback
 
 
 def register_project_tools(mcp: FastMCP) -> None:
@@ -53,11 +54,17 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context()
 
-        params = ProjectLiteListQueryParams(
-            cursor=cursor, per_page=per_page, order_by=order_by, include_archived=False
-        )
+        params = ProjectLiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by, include_archived=False)
 
-        return client.projects.list_lite(workspace_slug=workspace_slug, params=params)
+        return lite_or_fallback(
+            lambda: client.projects.list_lite(workspace_slug=workspace_slug, params=params),
+            lambda: client.projects.list(
+                workspace_slug=workspace_slug,
+                params=PaginatedQueryParams(cursor=cursor, per_page=per_page, order_by=order_by),
+            ),
+            ProjectLite,
+            PaginatedProjectLiteResponse,
+        )
 
     @mcp.tool()
     def create_project(
@@ -341,9 +348,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             per_page=per_page,
             order_by=order_by,
         )
-        return client.projects.get_members_lite(
-            workspace_slug=workspace_slug, project_id=project_id, params=params
-        )
+        return client.projects.get_members_lite(workspace_slug=workspace_slug, project_id=project_id, params=params)
 
     @mcp.tool()
     def update_project_features(

@@ -2,10 +2,11 @@
 
 from fastmcp import FastMCP
 from plane.models.projects import ProjectFeature
-from plane.models.query_params import MemberListQueryParams
-from plane.models.workspaces import PaginatedWorkspaceMemberResponse, WorkspaceFeature
+from plane.models.query_params import MemberListQueryParams, MemberQueryParams
+from plane.models.workspaces import PaginatedWorkspaceMemberResponse, WorkspaceFeature, WorkspaceMember
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.lite_fallback import lite_or_fallback
 
 
 def register_workspace_tools(mcp: FastMCP) -> None:
@@ -52,7 +53,24 @@ def register_workspace_tools(mcp: FastMCP) -> None:
             per_page=per_page,
             order_by=order_by,
         )
-        return client.workspaces.get_members_lite(workspace_slug=workspace_slug, params=params)
+        return lite_or_fallback(
+            lambda: client.workspaces.get_members_lite(workspace_slug=workspace_slug, params=params),
+            lambda: client.workspaces.get_members(
+                workspace_slug=workspace_slug,
+                params=MemberQueryParams(
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    display_name=display_name,
+                    role_slug=role_slug,
+                    is_active=is_active,
+                    is_bot=is_bot,
+                    order_by=order_by,
+                ),
+            ),
+            WorkspaceMember,
+            PaginatedWorkspaceMemberResponse,
+        )
 
     @mcp.tool()
     def get_features(project_id: str | None = None) -> WorkspaceFeature | ProjectFeature:
