@@ -16,6 +16,7 @@ from plane.models.projects import (
     CreateProject,
     PaginatedProjectLiteResponse,
     PaginatedProjectMemberResponse,
+    PaginatedProjectResponse,
     Project,
     ProjectFeature,
     ProjectLite,
@@ -56,12 +57,19 @@ def register_project_tools(mcp: FastMCP) -> None:
 
         params = ProjectLiteListQueryParams(cursor=cursor, per_page=per_page, order_by=order_by, include_archived=False)
 
-        return lite_or_fallback(
-            lambda: client.projects.list_lite(workspace_slug=workspace_slug, params=params),
-            lambda: client.projects.list(
+        def _list_full() -> PaginatedProjectResponse:
+            # PaginatedQueryParams has no include_archived toggle (unlike the lite
+            # path's ProjectLiteListQueryParams), so filter archived projects out
+            # client-side to match the lite path's include_archived=False default.
+            response = client.projects.list(
                 workspace_slug=workspace_slug,
                 params=PaginatedQueryParams(cursor=cursor, per_page=per_page, order_by=order_by),
-            ),
+            )
+            return response.model_copy(update={"results": [p for p in response.results if p.archived_at is None]})
+
+        return lite_or_fallback(
+            lambda: client.projects.list_lite(workspace_slug=workspace_slug, params=params),
+            _list_full,
             ProjectLite,
             PaginatedProjectLiteResponse,
         )

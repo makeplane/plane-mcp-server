@@ -116,3 +116,27 @@ def test_reraises_non_404_http_errors():
         lite_or_fallback(lite_call, full_call, _LiteItem, _LiteResponse)
 
     assert exc_info.value.status_code == 500
+
+
+def test_propagates_error_from_full_call_after_404():
+    def lite_call():
+        raise HttpError("Not Found", status_code=404, response={"error": "Page not found."})
+
+    def full_call():
+        raise HttpError("Server Error", status_code=500, response={"error": "boom"})
+
+    with pytest.raises(HttpError) as exc_info:
+        lite_or_fallback(lite_call, full_call, _LiteItem, _LiteResponse)
+
+    assert exc_info.value.status_code == 500
+
+
+def test_falls_back_to_empty_bare_list_on_404():
+    def lite_call():
+        raise HttpError("Not Found", status_code=404, response={"error": "Page not found."})
+
+    result = lite_or_fallback(lite_call, lambda: [], _LiteItem, _LiteResponse)
+
+    assert isinstance(result, _LiteResponse)
+    assert result.results == []
+    assert result.total_count == 0

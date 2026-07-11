@@ -53,6 +53,10 @@ def register_workspace_tools(mcp: FastMCP) -> None:
             per_page=per_page,
             order_by=order_by,
         )
+        # get_members (the fallback for self-hosted CE instances lacking members-lite)
+        # is documented as unpaginated -- MemberQueryParams has no cursor/per_page
+        # fields because the underlying endpoint always returns every member in one
+        # bare list, so the requested cursor/per_page can't be forwarded.
         return lite_or_fallback(
             lambda: client.workspaces.get_members_lite(workspace_slug=workspace_slug, params=params),
             lambda: client.workspaces.get_members(
