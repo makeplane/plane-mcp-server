@@ -3,6 +3,7 @@
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from plane.models.customers import (
     CreateCustomer,
     CreateCustomerProperty,
@@ -323,6 +324,12 @@ def register_customer_tools(mcp: FastMCP) -> None:
         validated_relation_type: RelationType | None = None
         if relation_type:
             validated_relation_type = RelationType(relation_type)
+
+        # settings must be paired with property_type — TEXT vs DATETIME settings
+        # can only be built when the type is known. Reject a settings-only update
+        # rather than silently dropping it.
+        if settings and not property_type:
+            raise ToolError("Updating settings requires property_type (TEXT or DATETIME) to be provided as well.")
 
         processed_settings: PropertySettings = None
         if settings and property_type:
