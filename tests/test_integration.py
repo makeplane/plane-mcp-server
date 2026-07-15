@@ -372,6 +372,24 @@ EXPECTED_TOOLS = [
     "retrieve_work_item_property",
     "update_work_item_property",
     "delete_work_item_property",
+    # Customer tools
+    "list_customers",
+    "create_customer",
+    "retrieve_customer",
+    "update_customer",
+    "delete_customer",
+    # Customer property tools
+    "list_customer_properties",
+    "create_customer_property",
+    "retrieve_customer_property",
+    "update_customer_property",
+    "delete_customer_property",
+    # Customer request tools
+    "list_customer_requests",
+    "create_customer_request",
+    "retrieve_customer_request",
+    "update_customer_request",
+    "delete_customer_request",
 ]
 
 
@@ -416,5 +434,192 @@ def test_tools_availability():
     asyncio.run(run_tools_availability_test())
 
 
+async def run_customer_integration_test():
+    """
+    Full customer integration test:
+    1. Create a customer
+    2. Retrieve the customer
+    3. Update the customer
+    4. List customers and confirm the created customer is present
+    5. Create a workspace-level customer property (TEXT)
+    6. List customer properties and confirm the created property is present
+    7. Update the customer property
+    8. Create a project and a work item to associate with a request
+    9. Create a customer request referencing the work item
+    10. List the customer's requests and confirm the created request is present
+    11. Retrieve the request
+    12. Update the request
+    13. Delete the request
+    14. Delete the customer property
+    15. Delete the work item and project
+    16. Delete the customer
+    """
+    config = get_config()
+    unique_id = uuid.uuid4().hex[:6]
+
+    transport = StreamableHttpTransport(
+        f"{config['mcp_url']}/http/api-key/mcp",
+        headers={
+            "x-workspace-slug": config["workspace_slug"],
+            "authorization": f"Bearer {config['api_key']}",
+        },
+    )
+
+    async with Client(transport=transport) as client:
+        # 1. Create customer
+        print("Creating customer...")
+        customer_result = await client.call_tool(
+            "create_customer",
+            {
+                "name": f"Test Customer {unique_id}",
+                "domain": f"test-{unique_id}.example.com",
+                "email": f"contact-{unique_id}@example.com",
+                "employees": 42,
+            },
+        )
+        customer = extract_result(customer_result)
+        customer_id = customer["id"]
+        print(f"Created customer: {customer_id}")
+
+        # 2. Retrieve customer
+        print("Retrieving customer...")
+        retrieved = extract_result(await client.call_tool("retrieve_customer", {"customer_id": customer_id}))
+        assert retrieved["id"] == customer_id
+
+        # 3. Update customer
+        print("Updating customer...")
+        updated = extract_result(
+            await client.call_tool(
+                "update_customer",
+                {"customer_id": customer_id, "name": f"Updated Customer {unique_id}"},
+            )
+        )
+        assert updated["name"] == f"Updated Customer {unique_id}"
+
+        # 4. List customers and confirm presence
+        print("Listing customers...")
+        customers = extract_result(await client.call_tool("list_customers", {}))
+        customer_ids = [c["id"] for c in customers]
+        assert customer_id in customer_ids, "created customer not found in list"
+
+        # 5. Create a customer property (TEXT)
+        print("Creating customer property...")
+        property_result = await client.call_tool(
+            "create_customer_property",
+            {
+                "name": f"tier_{unique_id}",
+                "display_name": f"Tier {unique_id}",
+                "property_type": "TEXT",
+                "settings": {"display_format": "single-line"},
+            },
+        )
+        customer_property = extract_result(property_result)
+        property_id = customer_property["id"]
+        print(f"Created customer property: {property_id}")
+
+        # 6. List customer properties and confirm presence
+        print("Listing customer properties...")
+        properties = extract_result(await client.call_tool("list_customer_properties", {}))
+        assert property_id in [p["id"] for p in properties], "created property not found in list"
+
+        # 7. Update the customer property
+        print("Updating customer property...")
+        await client.call_tool(
+            "update_customer_property",
+            {"property_id": property_id, "display_name": f"Updated Tier {unique_id}"},
+        )
+
+        # 8. Create a project and work item to associate with a request
+        print("Creating project and work item for request association...")
+        project = extract_result(
+            await client.call_tool(
+                "create_project",
+                {
+                    "name": f"Customer Test Project {unique_id}",
+                    "identifier": f"CT{unique_id[:3].upper()}",
+                },
+            )
+        )
+        project_id = project["id"]
+        work_item = extract_result(
+            await client.call_tool(
+                "create_work_item",
+                {"project_id": project_id, "name": f"Customer Request Work Item {unique_id}"},
+            )
+        )
+        work_item_id = work_item["id"]
+
+        # 9. Create a customer request referencing the work item
+        print("Creating customer request...")
+        request_result = await client.call_tool(
+            "create_customer_request",
+            {
+                "customer_id": customer_id,
+                "name": f"Feature Request {unique_id}",
+                "description_html": "<p>Integration test customer request</p>",
+                "work_item_ids": [work_item_id],
+            },
+        )
+        customer_request = extract_result(request_result)
+        request_id = customer_request["id"]
+        print(f"Created customer request: {request_id}")
+
+        # 10. List customer requests and confirm presence
+        print("Listing customer requests...")
+        requests = extract_result(await client.call_tool("list_customer_requests", {"customer_id": customer_id}))
+        assert request_id in [r["id"] for r in requests], "created request not found in list"
+
+        # 11. Retrieve the request
+        print("Retrieving customer request...")
+        retrieved_request = extract_result(
+            await client.call_tool(
+                "retrieve_customer_request",
+                {"customer_id": customer_id, "request_id": request_id},
+            )
+        )
+        assert retrieved_request["id"] == request_id
+
+        # 12. Update the request
+        print("Updating customer request...")
+        await client.call_tool(
+            "update_customer_request",
+            {
+                "customer_id": customer_id,
+                "request_id": request_id,
+                "name": f"Updated Feature Request {unique_id}",
+            },
+        )
+
+        # 13. Delete the request
+        print("Deleting customer request...")
+        await client.call_tool(
+            "delete_customer_request",
+            {"customer_id": customer_id, "request_id": request_id},
+        )
+
+        # 14. Delete the customer property
+        print("Deleting customer property...")
+        await client.call_tool("delete_customer_property", {"property_id": property_id})
+
+        # 15. Delete work item and project
+        print("Deleting work item and project...")
+        await client.call_tool(
+            "delete_work_item", {"project_id": project_id, "work_item_id": work_item_id}
+        )
+        await client.call_tool("delete_project", {"project_id": project_id})
+
+        # 16. Delete the customer
+        print("Deleting customer...")
+        await client.call_tool("delete_customer", {"customer_id": customer_id})
+
+        print("Customer integration test passed!")
+
+
+def test_customer_integration():
+    """Pytest entry point - runs the async customer integration test."""
+    asyncio.run(run_customer_integration_test())
+
+
 if __name__ == "__main__":
     asyncio.run(run_integration_test())
+    asyncio.run(run_customer_integration_test())
