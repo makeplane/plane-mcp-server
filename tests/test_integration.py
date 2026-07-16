@@ -267,6 +267,9 @@ EXPECTED_TOOLS = [
     "retrieve_project",
     "update_project",
     "delete_project",
+    "add_project_members",
+    "update_project_member",
+    "remove_project_member",
     # Work item tools
     "create_work_item",
     "list_work_items",

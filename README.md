@@ -168,6 +168,9 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `delete_project` | Delete a project by ID |
 | `get_project_worklog_summary` | Get work log summary for a project |
 | `get_project_members` | Get all members of a project |
+| `add_project_members` | Add existing workspace users to a project |
+| `update_project_member` | Update a project member's role |
+| `remove_project_member` | Remove a member from a project |
 | `update_project_features` | Update features configuration of a project |
 
 ### Work Items
