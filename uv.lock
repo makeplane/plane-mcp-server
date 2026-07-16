@@ -808,7 +808,7 @@ wheels = [
 
 [[package]]
 name = "mcp"
-version = "1.26.0"
+version = "1.27.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -826,9 +826,9 @@ dependencies = [
     { name = "typing-inspection" },
     { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/6d/62e76bbb8144d6ed86e202b5edd8a4cb631e7c8130f3f4893c3f90262b10/mcp-1.26.0.tar.gz", hash = "sha256:db6e2ef491eecc1a0d93711a76f28dec2e05999f93afd48795da1c1137142c66", size = 608005, upload-time = "2026-01-24T19:40:32.468Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/27/3c/347cf965d313f5d41764e7d46bea6ffe7d9ef13b983cc429b0340962a082/mcp-1.27.2.tar.gz", hash = "sha256:8e02db104096d1c25b28e64bde29a5c32b31bc241710213e12fd4d84985bdfef", size = 621116, upload-time = "2026-05-29T17:16:04.039Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fd/d9/eaa1f80170d2b7c5ba23f3b59f766f3a0bb41155fbc32a69adfa1adaaef9/mcp-1.26.0-py3-none-any.whl", hash = "sha256:904a21c33c25aa98ddbeb47273033c435e595bbacfdb177f4bd87f6dceebe1ca", size = 233615, upload-time = "2026-01-24T19:40:30.652Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/11/252c6f971dc4f16af1d98a1c469d8ba523aab00d1bb76b4d3bc1ff32eacc/mcp-1.27.2-py3-none-any.whl", hash = "sha256:d6ff5160c6ca65d93013626efb3fc249de683c30b2d8570755ceddd490344de5", size = 220498, upload-time = "2026-05-29T17:16:02.442Z" },
 ]
 
 [[package]]
@@ -894,7 +894,7 @@ wheels = [
 
 [[package]]
 name = "plane-mcp-server"
-version = "0.2.9"
+version = "0.2.10"
 source = { editable = "." }
 dependencies = [
     { name = "authlib" },
@@ -919,8 +919,8 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.34.0" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1,<2.35.0" },
     { name = "fastmcp", specifier = "==3.2.0" },
-    { name = "mcp", specifier = "==1.26.0" },
-    { name = "plane-sdk", specifier = "==0.2.16" },
+    { name = "mcp", specifier = "==1.27.2" },
+    { name = "plane-sdk", specifier = "==0.2.19" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4,<0.5.0" },
     { name = "pyjwt", specifier = ">=2.12.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -930,15 +930,15 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "plane-sdk"
-version = "0.2.16"
+version = "0.2.19"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/a5/34db34e8286df62d3080dae04546686d23dc196581b574dff6bd94193baf/plane_sdk-0.2.16.tar.gz", hash = "sha256:0cc881880be107fd0e03db8df17766d72828d4a23d2c1aa3975b45040f67f752", size = 64910, upload-time = "2026-06-15T13:39:09.372Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/16/4a5e82202cff54e72e203605a3eee167ed0f5899c6678b0cd5db602e1eb0/plane_sdk-0.2.19.tar.gz", hash = "sha256:738bb757c1a0f7fdace1a869486cbe7f994e71b731e23a097cb2e98063fc4225", size = 81440, upload-time = "2026-06-30T09:54:55.808Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/f5/049b5ed3286c4c4d4efbd1562bb254b41453888e0a708ca24cd3246289f2/plane_sdk-0.2.16-py3-none-any.whl", hash = "sha256:3f5aaac8b89248c74c2dbfd9902cb4defcfe5a65c430c9239549ce311fcfd999", size = 103856, upload-time = "2026-06-15T13:39:08.385Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/1d/5e615a7510ca9b060752582c99fa47ec89d39da686b8a085081a29e90a83/plane_sdk-0.2.19-py3-none-any.whl", hash = "sha256:e853b066df4352abd732fba6ec490123c329ce0a1a29606e7e25cd1d1ca67e5a", size = 114133, upload-time = "2026-06-30T09:54:54.609Z" },
 ]
 
 [[package]]
