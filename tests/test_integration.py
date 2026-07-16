@@ -372,6 +372,30 @@ EXPECTED_TOOLS = [
     "retrieve_work_item_property",
     "update_work_item_property",
     "delete_work_item_property",
+    # Customer tools
+    "list_customers",
+    "create_customer",
+    "retrieve_customer",
+    "update_customer",
+    "delete_customer",
+    # Customer property tools
+    "list_customer_properties",
+    "create_customer_property",
+    "retrieve_customer_property",
+    "update_customer_property",
+    "delete_customer_property",
+    # Customer property value tools
+    "get_customer_property_values",
+    "set_customer_property_values",
+    # Customer request tools
+    "list_customer_requests",
+    "create_customer_request",
+    "retrieve_customer_request",
+    "update_customer_request",
+    "delete_customer_request",
+    # Customer work item tools
+    "list_customer_work_items",
+    "manage_customer_work_items",
 ]
 
 
