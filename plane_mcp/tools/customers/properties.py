@@ -52,6 +52,8 @@ def register_customer_property_tools(mcp: FastMCP) -> None:
         is_active: bool | None = None,
         is_multi: bool | None = None,
         options: list[dict] | None = None,
+        external_source: str | None = None,
+        external_id: str | None = None,
     ) -> CustomerProperty:
         """
         Create a customer property (a workspace-wide custom field on customers).
@@ -75,6 +77,8 @@ def register_customer_property_tools(mcp: FastMCP) -> None:
             is_active: Whether the property is active
             is_multi: Whether the property holds multiple values
             options: For OPTION type — [{"name": str, "description"?: str, "is_default"?: bool}]
+            external_source: External system this property came from, e.g. "salesforce"
+            external_id: The property's ID in that external system
 
         Returns:
             The created CustomerProperty, including its options for OPTION type
@@ -92,6 +96,8 @@ def register_customer_property_tools(mcp: FastMCP) -> None:
             is_active=is_active,
             is_multi=is_multi,
             options=options,
+            external_source=external_source,
+            external_id=external_id,
         )
         return client.customers.properties.create(workspace_slug=workspace_slug, data=data)
 
@@ -119,6 +125,8 @@ def register_customer_property_tools(mcp: FastMCP) -> None:
         default_value: list[str] | None = None,
         is_active: bool | None = None,
         options: list[dict] | None = None,
+        external_source: str | None = None,
+        external_id: str | None = None,
     ) -> CustomerProperty:
         """
         Update a customer property. Only the fields you pass are changed.
@@ -137,6 +145,8 @@ def register_customer_property_tools(mcp: FastMCP) -> None:
             is_active: Whether the property is active
             options: For OPTION type — [{"id": str, ...}] to edit an existing option,
                 or [{"name": str, ...}] without an id to add one
+            external_source: External system this property came from
+            external_id: The property's ID in that external system
 
         Returns:
             The updated CustomerProperty
@@ -150,6 +160,8 @@ def register_customer_property_tools(mcp: FastMCP) -> None:
             default_value=default_value,
             is_active=is_active,
             options=options,
+            external_source=external_source,
+            external_id=external_id,
         )
         return client.customers.properties.update(workspace_slug=workspace_slug, property_id=property_id, data=data)
 
