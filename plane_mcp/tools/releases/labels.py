@@ -13,6 +13,7 @@ from plane.models.releases import (
     CreateReleaseLabel,
     PaginatedReleaseLabelResponse,
     ReleaseLabel,
+    RemoveReleaseItemLabel,
     UpdateReleaseLabel,
 )
 
@@ -140,7 +141,10 @@ def register_release_label_tools(mcp: FastMCP) -> None:
                 data=AddReleaseItemLabel(label_ids=label_ids),
             )
         else:
-            for label_id in label_ids:
-                item_labels.delete(workspace_slug=workspace_slug, release_id=release_id, label_id=label_id)
+            item_labels.delete(
+                workspace_slug=workspace_slug,
+                release_id=release_id,
+                data=RemoveReleaseItemLabel(label_ids=label_ids),
+            )
 
         return item_labels.list(workspace_slug=workspace_slug, release_id=release_id).results

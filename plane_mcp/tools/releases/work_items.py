@@ -8,6 +8,7 @@ from plane.models.releases import (
     AddReleaseWorkItems,
     PaginatedReleaseWorkItemResponse,
     ReleaseWorkItem,
+    RemoveReleaseWorkItems,
 )
 
 from plane_mcp.client import get_plane_client_context
@@ -63,12 +64,16 @@ def register_release_work_item_tools(mcp: FastMCP) -> None:
 
         work_items = client.releases.work_items
         if action == "add":
-            work_items.add(
+            work_items.create(
                 workspace_slug=workspace_slug,
                 release_id=release_id,
                 data=AddReleaseWorkItems(work_item_ids=work_item_ids),
             )
         else:
-            work_items.remove(workspace_slug=workspace_slug, release_id=release_id, work_item_ids=work_item_ids)
+            work_items.delete(
+                workspace_slug=workspace_slug,
+                release_id=release_id,
+                data=RemoveReleaseWorkItems(work_item_ids=work_item_ids),
+            )
 
         return work_items.list(workspace_slug=workspace_slug, release_id=release_id).results
