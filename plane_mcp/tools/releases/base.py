@@ -58,8 +58,10 @@ def register_release_base_tools(mcp: FastMCP) -> None:
             name: Release name
             description_html: HTML body of the release notes
             status: unreleased (default) | released | cancelled
-            target_date: Planned date, YYYY-MM-DD
-            release_date: Actual release date, YYYY-MM-DD
+            release_date: The date shown as "Target date" in the Plane UI, YYYY-MM-DD.
+                Use this for the date a user calls the release's target/release date.
+            target_date: A separate date stored on the release but not shown in the
+                release UI. Prefer release_date unless you specifically need this field.
             tag_id: UUID of a release tag (version marker) to attach
             lead_id: UUID of the user leading the release
             is_prerelease: Whether this is a pre-release
@@ -118,8 +120,10 @@ def register_release_base_tools(mcp: FastMCP) -> None:
             name: Release name
             description_html: HTML body of the release notes
             status: unreleased | released | cancelled
-            target_date: Planned date, YYYY-MM-DD
-            release_date: Actual release date, YYYY-MM-DD
+            release_date: The date shown as "Target date" in the Plane UI, YYYY-MM-DD.
+                Use this for the date a user calls the release's target/release date.
+            target_date: A separate date stored on the release but not shown in the
+                release UI. Prefer release_date unless you specifically need this field.
             tag_id: UUID of a release tag to attach
             lead_id: UUID of the user leading the release
             is_prerelease: Whether this is a pre-release
