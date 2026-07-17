@@ -39,7 +39,7 @@ def register_customer_request_tools(mcp: FastMCP) -> None:
             next_page_results (page again while next_page_results is true).
         """
         client, workspace_slug = get_plane_client_context()
-        return client.customers.requests.list_paginated(
+        return client.customers.requests.list(
             workspace_slug=workspace_slug,
             customer_id=customer_id,
             params=page_params(cursor, per_page, query),
