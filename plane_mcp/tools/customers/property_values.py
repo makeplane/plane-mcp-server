@@ -54,7 +54,7 @@ def register_customer_property_value_tools(mcp: FastMCP) -> None:
                 e.g. {"<property_id>": ["Enterprise"]}
         """
         client, workspace_slug = get_plane_client_context()
-        client.customers.property_values.set(
+        client.customers.property_values.create(
             workspace_slug,
             customer_id,
             SetCustomerPropertyValues(customer_property_values=values),

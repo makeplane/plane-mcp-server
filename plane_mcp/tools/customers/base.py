@@ -186,15 +186,13 @@ def register_customer_base_tools(mcp: FastMCP) -> None:
             external_source: External system the customer came from
             external_id: The customer's ID in that external system
         """
+        if not customer_id and not (external_source and external_id):
+            raise ToolError("Provide customer_id, or both external_source and external_id.")
+
         client, workspace_slug = get_plane_client_context()
-        if customer_id:
-            client.customers.delete(workspace_slug=workspace_slug, customer_id=customer_id)
-            return
-        if external_source and external_id:
-            client.customers.delete_by_external_id(
-                workspace_slug=workspace_slug,
-                external_source=external_source,
-                external_id=external_id,
-            )
-            return
-        raise ToolError("Provide customer_id, or both external_source and external_id.")
+        client.customers.delete(
+            workspace_slug=workspace_slug,
+            customer_id=customer_id,
+            external_source=external_source,
+            external_id=external_id,
+        )

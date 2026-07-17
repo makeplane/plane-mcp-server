@@ -64,7 +64,7 @@ def register_customer_work_item_tools(mcp: FastMCP) -> None:
 
         work_items = client.customers.work_items
         if action == "link":
-            work_items.link(
+            work_items.create(
                 workspace_slug=workspace_slug,
                 customer_id=customer_id,
                 data=LinkCustomerWorkItems(work_item_ids=work_item_ids),
@@ -72,7 +72,7 @@ def register_customer_work_item_tools(mcp: FastMCP) -> None:
             )
         else:
             for work_item_id in work_item_ids:
-                work_items.unlink(
+                work_items.delete(
                     workspace_slug=workspace_slug,
                     customer_id=customer_id,
                     work_item_id=work_item_id,
