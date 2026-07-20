@@ -1,11 +1,4 @@
-"""Release-related tools for Plane MCP Server.
-
-Split to mirror the SDK's `plane.api.releases` sub-resources: the releases
-themselves, their version tags, workspace labels, and the labels and work
-items attached to a release.
-
-Releases are gated by a workspace feature flag; calls fail if it is off.
-"""
+"""Release-related tools for Plane MCP Server."""
 
 from fastmcp import FastMCP
 
