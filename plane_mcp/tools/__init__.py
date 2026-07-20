@@ -2,6 +2,7 @@
 
 from fastmcp import FastMCP
 
+from plane_mcp.tools.customers import register_customer_tools
 from plane_mcp.tools.cycles import register_cycle_tools
 from plane_mcp.tools.initiatives import register_initiative_tools
 from plane_mcp.tools.intake import register_intake_tools
@@ -53,4 +54,5 @@ def register_tools(mcp: FastMCP) -> None:
     register_milestone_tools(mcp)
     register_role_tools(mcp)
     register_release_tools(mcp)
+    register_customer_tools(mcp)
     register_pql_tools(mcp)

@@ -58,7 +58,7 @@ Three factory functions (`get_oauth_mcp`, `get_header_mcp`, `get_stdio_mcp`) eac
 
 ### Tools (`tools/`)
 
-24 tool modules organized by Plane domain (projects, work_items, cycles, modules, releases, etc.), totaling 160+ tools. Each module exports a `register_*_tools(mcp: FastMCP)` function called from `tools/__init__.py`.
+29 tool modules organized by Plane domain (projects, work_items, cycles, modules, releases, etc.), totaling 160+ tools. Each module exports a `register_*_tools(mcp: FastMCP)` function called from `tools/__init__.py`.
 
 **Tool pattern:**
 ```python
