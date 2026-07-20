@@ -372,30 +372,6 @@ EXPECTED_TOOLS = [
     "retrieve_work_item_property",
     "update_work_item_property",
     "delete_work_item_property",
-    # Release tools
-    "list_releases",
-    "create_release",
-    "retrieve_release",
-    "update_release",
-    "delete_release",
-    # Release tag tools
-    "list_release_tags",
-    "create_release_tag",
-    "retrieve_release_tag",
-    "update_release_tag",
-    "delete_release_tag",
-    # Release label tools
-    "list_release_labels",
-    "create_release_label",
-    "update_release_label",
-    "delete_release_label",
-    "manage_release_labels",
-    # Release work item tools
-    "list_release_work_items",
-    "manage_release_work_items",
-    # Release changelog tools
-    "get_release_changelog",
-    "update_release_changelog",
 ]
 
 
