@@ -393,6 +393,9 @@ EXPECTED_TOOLS = [
     # Release work item tools
     "list_release_work_items",
     "manage_release_work_items",
+    # Release changelog tools
+    "get_release_changelog",
+    "update_release_changelog",
 ]
 
 
