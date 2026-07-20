@@ -25,6 +25,30 @@ from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 logger = get_logger(__name__)
 
 
+def _dump_results(items: Any, fields: str | None) -> list[Any]:
+    """Serialize a page of work items, honoring `fields` as a sparse fieldset."""
+    requested = {name.strip() for name in fields.split(",")} - {""} if fields else None
+
+    def _dump(item: Any) -> Any:
+        if not hasattr(item, "model_dump"):
+            return item
+        if requested:
+            return item.model_dump(include=requested)
+        return item.model_dump()
+
+    return [_dump(item) for item in (items or [])]
+
+
+def _ids(items: Any) -> list[str]:
+    """Extract ids from assignees/labels that may be bare id strings or objects."""
+    ids: list[str] = []
+    for item in items or []:
+        value = item if isinstance(item, str) else getattr(item, "id", None)
+        if value:
+            ids.append(value)
+    return ids
+
+
 def _resolve_description_html(description_html: str | None, description_stripped: str | None) -> str | None:
     """Resolve the description_html to persist.
 
@@ -71,14 +95,13 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             per_page: 1-100, default 25.
             cursor: From previous response's next_cursor.
             expand: Comma-separated relations to expand (e.g. assignees,labels,state).
-            fields: Sparse fieldset — id, name, sequence_id, priority, state,
-                project, assignees, labels, type_id, description_html, start_date,
-                target_date, created_at, updated_at, created_by, is_draft. Use
-                `project` (not `project_id`) and `description_html` (there is no
-                `description` field). Any field you omit or misname comes back
-                null — a null here does NOT mean the item lacks that value; it
-                means it was not requested. To read the description, include
-                description_html; for the type, include type_id.
+            fields: Sparse fieldset — the response contains only the fields you
+                name here (plus pagination metadata). Available: id, name,
+                sequence_id, priority, state, project, assignees, labels, type_id,
+                description_html, start_date, target_date, created_at, updated_at,
+                created_by, is_draft. Use `project` (not `project_id`) and
+                `description_html` (there is no `description` field); a misnamed
+                field is simply absent from the result.
             external_id / external_source: Filter by external system.
 
         Returns:
@@ -124,9 +147,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             raise
 
         return {
-            "results": [
-                item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])
-            ],
+            "results": _dump_results(response.results, fields),
             "total_count": response.total_count,
             "count": response.count,
             "next_cursor": response.next_cursor,
@@ -490,7 +511,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
-        ids = [u.id for u in (current.assignees or []) if u.id]
+        ids = _ids(current.assignees)
         if remove_user_id:
             ids = [uid for uid in ids if uid != remove_user_id]
         if add_user_id and add_user_id not in ids:
@@ -529,7 +550,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
-        ids = [lb.id for lb in (current.labels or []) if lb.id]
+        ids = _ids(current.labels)
         if remove_label_id:
             ids = [lid for lid in ids if lid != remove_label_id]
         if add_label_id and add_label_id not in ids:
@@ -593,9 +614,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 }
             raise
         return {
-            "results": [
-                item.model_dump() if hasattr(item, "model_dump") else item for item in (response.results or [])
-            ],
+            "results": _dump_results(response.results, fields),
             "total_count": response.total_count,
             "count": response.count,
             "next_cursor": response.next_cursor,
