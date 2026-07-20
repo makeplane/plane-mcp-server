@@ -39,6 +39,16 @@ def _dump_results(items: Any, fields: str | None) -> list[Any]:
     return [_dump(item) for item in (items or [])]
 
 
+def _ids(items: Any) -> list[str]:
+    """Extract ids from assignees/labels that may be bare id strings or objects."""
+    ids: list[str] = []
+    for item in items or []:
+        value = item if isinstance(item, str) else getattr(item, "id", None)
+        if value:
+            ids.append(value)
+    return ids
+
+
 def _resolve_description_html(description_html: str | None, description_stripped: str | None) -> str | None:
     """Resolve the description_html to persist.
 
@@ -501,7 +511,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
-        ids = [u.id for u in (current.assignees or []) if u.id]
+        ids = _ids(current.assignees)
         if remove_user_id:
             ids = [uid for uid in ids if uid != remove_user_id]
         if add_user_id and add_user_id not in ids:
@@ -540,7 +550,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
-        ids = [lb.id for lb in (current.labels or []) if lb.id]
+        ids = _ids(current.labels)
         if remove_label_id:
             ids = [lid for lid in ids if lid != remove_label_id]
         if add_label_id and add_label_id not in ids:
