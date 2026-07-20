@@ -393,18 +393,6 @@ EXPECTED_TOOLS = [
     # Release work item tools
     "list_release_work_items",
     "manage_release_work_items",
-    # Release comment tools
-    "list_release_comments",
-    "create_release_comment",
-    "retrieve_release_comment",
-    "update_release_comment",
-    "delete_release_comment",
-    # Release link tools
-    "list_release_links",
-    "create_release_link",
-    "retrieve_release_link",
-    "update_release_link",
-    "delete_release_link",
 ]
 
 
