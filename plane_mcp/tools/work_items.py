@@ -25,6 +25,26 @@ from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 logger = get_logger(__name__)
 
 
+class _CreateWorkItemCompat(CreateWorkItem):
+    """CreateWorkItem that also serializes ``state_id`` for self-hosted CE.
+
+    Plane Cloud accepts ``state``; Community Edition accepts ``state_id``. The
+    wrong key is silently ignored (HTTP 200, state unchanged). Emitting both
+    keeps Cloud and CE working — see issue #183.
+    """
+
+    state_id: str | None = None
+
+
+class _UpdateWorkItemCompat(UpdateWorkItem):
+    """UpdateWorkItem that also serializes ``state_id`` for self-hosted CE.
+
+    See :class:`_CreateWorkItemCompat` and issue #183.
+    """
+
+    state_id: str | None = None
+
+
 def _resolve_description_html(description_html: str | None, description_stripped: str | None) -> str | None:
     """Resolve the description_html to persist.
 
@@ -228,7 +248,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_source: External system source name
             external_id: External system identifier
             parent: UUID of the parent work item
-            state: UUID of the state
+            state: UUID of the state (also sent as state_id for CE compatibility)
             estimate_point: Estimate point value
             type: Work item type identifier
 
@@ -241,7 +261,8 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
 
-        data = CreateWorkItem(
+        # Mirror state onto state_id so Cloud and self-hosted CE both apply it (#183).
+        data = _CreateWorkItemCompat(
             name=name,
             assignees=assignees,
             labels=labels,
@@ -257,6 +278,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_id=external_id,
             parent=parent,
             state=state,
+            state_id=state,
             estimate_point=estimate_point,
             type=type,
         )
@@ -411,7 +433,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_source: External system source name
             external_id: External system identifier
             parent: UUID of the parent work item
-            state: UUID of the state
+            state: UUID of the state (also sent as state_id for CE compatibility)
             estimate_point: Estimate point value
             type: Work item type identifier
 
@@ -424,7 +446,8 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
 
-        data = UpdateWorkItem(
+        # Mirror state onto state_id so Cloud and self-hosted CE both apply it (#183).
+        data = _UpdateWorkItemCompat(
             name=name,
             assignees=assignees,
             labels=labels,
@@ -440,6 +463,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_id=external_id,
             parent=parent,
             state=state,
+            state_id=state,
             estimate_point=estimate_point,
             type=type,
         )
