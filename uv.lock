@@ -920,7 +920,7 @@ requires-dist = [
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1,<2.35.0" },
     { name = "fastmcp", specifier = "==3.2.0" },
     { name = "mcp", specifier = "==1.26.0" },
-    { name = "plane-sdk", specifier = "==0.2.16" },
+    { name = "plane-sdk", specifier = "==0.2.19" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4,<0.5.0" },
     { name = "pyjwt", specifier = ">=2.12.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -930,15 +930,15 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "plane-sdk"
-version = "0.2.16"
+version = "0.2.19"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/a5/34db34e8286df62d3080dae04546686d23dc196581b574dff6bd94193baf/plane_sdk-0.2.16.tar.gz", hash = "sha256:0cc881880be107fd0e03db8df17766d72828d4a23d2c1aa3975b45040f67f752", size = 64910, upload-time = "2026-06-15T13:39:09.372Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/16/4a5e82202cff54e72e203605a3eee167ed0f5899c6678b0cd5db602e1eb0/plane_sdk-0.2.19.tar.gz", hash = "sha256:738bb757c1a0f7fdace1a869486cbe7f994e71b731e23a097cb2e98063fc4225", size = 81440, upload-time = "2026-06-30T09:54:55.808Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/f5/049b5ed3286c4c4d4efbd1562bb254b41453888e0a708ca24cd3246289f2/plane_sdk-0.2.16-py3-none-any.whl", hash = "sha256:3f5aaac8b89248c74c2dbfd9902cb4defcfe5a65c430c9239549ce311fcfd999", size = 103856, upload-time = "2026-06-15T13:39:08.385Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/1d/5e615a7510ca9b060752582c99fa47ec89d39da686b8a085081a29e90a83/plane_sdk-0.2.19-py3-none-any.whl", hash = "sha256:e853b066df4352abd732fba6ec490123c329ce0a1a29606e7e25cd1d1ca67e5a", size = 114133, upload-time = "2026-06-30T09:54:54.609Z" },
 ]
 
 [[package]]
@@ -1159,14 +1159,14 @@ wheels = [
 
 [[package]]
 name = "pyjwt"
-version = "2.12.1"
+version = "2.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c2/27/a3b6e5bf6ff856d2509292e95c8f57f0df7017cf5394921fc4e4ef40308a/pyjwt-2.12.1.tar.gz", hash = "sha256:c74a7a2adf861c04d002db713dd85f84beb242228e671280bf709d765b03672b", size = 102564, upload-time = "2026-03-13T19:27:37.25Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/81/58d0ac84e1ef3a3843791d6954d94c0b33d526c75eeb1efbce9d0a4c4077/pyjwt-2.13.0.tar.gz", hash = "sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423", size = 107515, upload-time = "2026-05-21T19:54:36.618Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/7a/8dd906bd22e79e47397a61742927f6747fe93242ef86645ee9092e610244/pyjwt-2.12.1-py3-none-any.whl", hash = "sha256:28ca37c070cad8ba8cd9790cd940535d40274d22f80ab87f3ac6a713e6e8454c", size = 29726, upload-time = "2026-03-13T19:27:35.677Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/5e/ecf12fdb62546d64385c158514e9b2b671f7832108ef2ecd2020ce0af2d1/pyjwt-2.13.0-py3-none-any.whl", hash = "sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728", size = 31274, upload-time = "2026-05-21T19:54:35.362Z" },
 ]
 
 [package.optional-dependencies]
