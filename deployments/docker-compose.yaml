@@ -1,0 +1,36 @@
+# Plane MCP Server — Production Deployment
+#
+# Setup:
+#   # edit variables.env with your values
+#   docker compose up -d
+
+name: plane-mcp
+
+services:
+  mcp:
+    image: makeplane/plane-mcp-server:${APP_RELEASE_VERSION:-latest}
+    restart: always
+    ports:
+      - "8211:8211"
+    env_file:
+      - variables.env
+    environment:
+      REDIS_HOST: valkey
+      REDIS_PORT: "6379"
+    depends_on:
+      valkey:
+        condition: service_healthy
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: always
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  valkey-data:
