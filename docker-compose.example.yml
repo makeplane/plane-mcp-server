@@ -1,0 +1,28 @@
+# Example: self-host the Plane MCP Server over HTTP against a self-hosted Plane.
+# Usage:
+#   cp .env.example .env   # then fill in PLANE_BASE_URL (+ PLANE_OAUTH_PROVIDER_* for OAuth)
+#   docker compose -f docker-compose.example.yml up --build
+#
+# The MCP endpoints are served on http://localhost:8211 (e.g. /http/mcp for OAuth,
+# /http/api-key/mcp for per-user PAT headers). /healthz is the readiness probe.
+
+services:
+  plane-mcp:
+    build: .
+    # Or use a published image instead of building:
+    # image: ghcr.io/makeplane/plane-mcp-server:latest
+    command: ["http"]
+    restart: unless-stopped
+    ports:
+      - "${MCP_PORT:-8211}:${MCP_PORT:-8211}"
+    env_file:
+      - .env
+    environment:
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: ${MCP_PORT:-8211}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${MCP_PORT:-8211}/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
