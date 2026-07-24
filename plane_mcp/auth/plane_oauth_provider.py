@@ -108,7 +108,7 @@ class _VerificationCache:
     def get(self, token: str, *, max_age_seconds: float) -> AccessToken | None:
         entry = self._entries.get(self._key(token))
         if entry and (time.time() - entry.verified_at) <= max_age_seconds:
-            return entry.access_token
+            return entry.access_token.model_copy(deep=True)
         return None
 
     def put(self, token: str, access_token: AccessToken) -> None:
