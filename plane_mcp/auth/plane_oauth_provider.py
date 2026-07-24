@@ -67,6 +67,12 @@ VERIFY_CACHE_MAX_ENTRIES = 1024
 # a 200 is treated as transient (5xx, 429, ...) and must never revoke auth.
 DEFINITIVE_REJECTION_STATUSES = frozenset({401, 403})
 
+# Refresh the upstream Plane token this many seconds before it actually
+# expires. Without a margin, every session/replica discovers expiry at the
+# same instant and races the refresh — with rotation enabled, the losers get
+# invalid_grant and force the user through interactive re-auth.
+DEFAULT_TOKEN_EXPIRY_THRESHOLD_SECONDS = 300
+
 
 class TransientVerificationError(Exception):
     """Verification could not be completed — says nothing about token validity.
@@ -172,6 +178,8 @@ class PlaneOAuthProviderSettings(BaseSettings):
     plane_base_url: str | None = None
     plane_internal_base_url: str | None = None  # Internal URL for server-to-server calls
     enable_cimd: bool = False
+    token_expiry_threshold_seconds: int | None = None
+    access_token_expiry_seconds: int | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -410,6 +418,8 @@ class PlaneOAuthProvider(OAuthProxy):
         plane_base_url: str | NotSetT = NotSet,
         plane_internal_base_url: str | NotSetT = NotSet,
         enable_cimd: bool | NotSetT = NotSet,
+        token_expiry_threshold_seconds: int | NotSetT = NotSet,
+        access_token_expiry_seconds: int | NotSetT = NotSet,
     ):
         """Initialize Plane OAuth provider.
 
@@ -449,6 +459,16 @@ class PlaneOAuthProvider(OAuthProxy):
                 (defaults to https://api.plane.so or PLANE_BASE_URL env var)
             enable_cimd: Whether to enable CIMD (Client ID Metadata Document) support.
                 Defaults to False. Can be set via the PLANE_OAUTH_PROVIDER_ENABLE_CIMD environment variable.
+            token_expiry_threshold_seconds: Refresh the upstream Plane token this
+                many seconds before expiry (default 300). Avoids concurrent
+                sessions racing the refresh at the expiry boundary. Env:
+                PLANE_OAUTH_PROVIDER_TOKEN_EXPIRY_THRESHOLD_SECONDS.
+            access_token_expiry_seconds: Lifetime of the FastMCP-issued access
+                token, decoupled from the upstream Plane token's expires_in.
+                Unset mirrors the upstream lifetime. Safe to raise: the FastMCP
+                JWT is a reference token — the upstream token is still validated
+                on every request, so revocation is unaffected. Env:
+                PLANE_OAUTH_PROVIDER_ACCESS_TOKEN_EXPIRY_SECONDS.
         """
 
         settings = PlaneOAuthProviderSettings.model_validate(
@@ -467,6 +487,8 @@ class PlaneOAuthProvider(OAuthProxy):
                     "plane_base_url": plane_base_url,
                     "plane_internal_base_url": plane_internal_base_url,
                     "enable_cimd": enable_cimd,
+                    "token_expiry_threshold_seconds": token_expiry_threshold_seconds,
+                    "access_token_expiry_seconds": access_token_expiry_seconds,
                 }.items()
                 if v is not NotSet
             }
@@ -517,6 +539,14 @@ class PlaneOAuthProvider(OAuthProxy):
             require_authorization_consent=require_authorization_consent,
             valid_scopes=["read", "write"],
             enable_cimd=settings.enable_cimd,
+            # Proactive upstream refresh: avoid the expiry-boundary refresh race.
+            token_expiry_threshold_seconds=(
+                settings.token_expiry_threshold_seconds
+                if settings.token_expiry_threshold_seconds is not None
+                else DEFAULT_TOKEN_EXPIRY_THRESHOLD_SECONDS
+            ),
+            # None mirrors the upstream token lifetime (current behavior).
+            fastmcp_access_token_expiry_seconds=settings.access_token_expiry_seconds,
         )
 
         logger.info(
