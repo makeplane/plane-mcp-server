@@ -3,7 +3,7 @@
 from typing import Any
 
 from fastmcp import FastMCP
-from plane.models.pages import CreatePage, Page
+from plane.models.pages import CreatePage, Page, UpdatePage
 from plane.models.work_item_pages import CreateWorkItemPage, WorkItemPage
 
 from plane_mcp.client import get_plane_client_context
@@ -199,3 +199,102 @@ def register_page_tools(mcp: FastMCP) -> None:
             workspace_slug=workspace_slug,
             data=data,
         )
+
+    @mcp.tool()
+    def update_page(
+        page_id: str,
+        project_id: str | None = None,
+        name: str | None = None,
+        description_html: str | None = None,
+        access: int | None = None,
+        color: str | None = None,
+        is_locked: bool | None = None,
+        archived_at: str | None = None,
+        view_props: dict[str, Any] | None = None,
+        logo_props: dict[str, Any] | None = None,
+        external_id: str | None = None,
+        external_source: str | None = None,
+    ) -> Page:
+        """
+        Update a page.
+
+        Updates a project page if project_id is given, otherwise a
+        workspace-level page. Only the fields provided are changed;
+        omitted fields are left as-is.
+
+        Args:
+            page_id: UUID of the page to update
+            project_id: UUID of the project. Omit to update a workspace page.
+            name: Page name
+            description_html: Page content in HTML format
+            access: Access level for the page (integer)
+            color: Page color
+            is_locked: Whether the page is locked
+            archived_at: Archive timestamp (ISO 8601 format)
+            view_props: View properties dictionary
+            logo_props: Logo properties dictionary
+            external_id: External system identifier
+            external_source: External system source name
+
+        Returns:
+            Updated Page object
+        """
+        client, workspace_slug = get_plane_client_context()
+
+        data = UpdatePage(
+            name=name,
+            description_html=description_html,
+            access=access,
+            color=color,
+            is_locked=is_locked,
+            archived_at=archived_at,
+            view_props=view_props,
+            logo_props=logo_props,
+            external_id=external_id,
+            external_source=external_source,
+        )
+
+        if project_id is not None:
+            return client.pages.update_project_page(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                page_id=page_id,
+                data=data,
+            )
+        return client.pages.update_workspace_page(
+            workspace_slug=workspace_slug,
+            page_id=page_id,
+            data=data,
+        )
+
+    @mcp.tool()
+    def delete_page(
+        page_id: str,
+        project_id: str | None = None,
+    ) -> None:
+        """
+        Delete a page.
+
+        Permanently deletes a project page if project_id is given,
+        otherwise a workspace-level page. This action cannot be undone.
+
+        Args:
+            page_id: UUID of the page to delete
+            project_id: UUID of the project. Omit to delete a workspace page.
+
+        Returns:
+            None
+        """
+        client, workspace_slug = get_plane_client_context()
+
+        if project_id is not None:
+            client.pages.delete_project_page(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                page_id=page_id,
+            )
+        else:
+            client.pages.delete_workspace_page(
+                workspace_slug=workspace_slug,
+                page_id=page_id,
+            )
