@@ -281,6 +281,9 @@ def register_page_tools(mcp: FastMCP) -> None:
         Args:
             page_id: UUID of the page to delete
             project_id: UUID of the project. Omit to delete a workspace page.
+
+        Returns:
+            None
         """
         client, workspace_slug = get_plane_client_context()
 
