@@ -1,5 +1,7 @@
 # Plane MCP Server
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fmakeplane%2Fplane-mcp-server.svg)](https://mcptoplist.com/server/glama%2Fmakeplane%2Fplane-mcp-server)
+
 A Model Context Protocol (MCP) server for Plane integration. This server provides tools and resources for interacting with Plane through AI agents.
 
 ## Features
