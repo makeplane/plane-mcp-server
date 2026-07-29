@@ -49,6 +49,86 @@ def _ids(items: Any) -> list[str]:
     return ids
 
 
+# Plane's project role ladder: guest=5, member=15, admin=20. Only member and
+# above can hold a work item assignment.
+_MEMBER_ROLE = 15
+
+
+def _is_assignable(member: Any) -> bool:
+    """Whether a project member can hold a work item assignment.
+
+    `role` and `is_active` are missing from some deployments' member payloads.
+    Only reject on a field the server actually reported — an unreported role
+    must not disqualify every member.
+    """
+    if getattr(member, "is_active", None) is False:
+        return False
+    role = getattr(member, "role", None)
+    return role is None or role >= _MEMBER_ROLE
+
+
+def _assert_assignable(client: Any, workspace_slug: str, project_id: str, assignees: list[str]) -> None:
+    """Reject assignees Plane would drop, before a write that would clear the field.
+
+    Plane filters unassignable ids out of `assignees` during validation rather
+    than rejecting them, and an update deletes the work item's existing
+    assignees before writing that filtered list. A single unassignable id
+    therefore clears the assignees and still answers 200, so the caller sees a
+    successful write that both failed and destroyed data. Checking first turns
+    it into an error naming the ids that would work.
+
+    Args:
+        client: Plane client.
+        workspace_slug: The workspace slug identifier.
+        project_id: UUID of the project the work item belongs to.
+        assignees: User IDs the caller asked to assign.
+
+    Raises:
+        ValueError: If any id is not an assignable member of the project.
+    """
+    if not assignees:
+        return
+
+    try:
+        members = client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id)
+        known = {str(m.id): m for m in members}
+        assignable = {uid: m for uid, m in known.items() if _is_assignable(m)}
+    # A pre-check must not become a new failure mode: if the lookup is
+    # unavailable or answers in an unexpected shape, let the write proceed
+    # exactly as it did before.
+    except Exception as e:
+        logger.warning("Could not verify assignees against project %s members: %s", project_id, e)
+        return
+
+    rejected = [uid for uid in assignees if uid not in assignable]
+    if not rejected:
+        return
+
+    details = []
+    for uid in rejected:
+        member = known.get(uid)
+        if member is None:
+            details.append(f"{uid} (not a member of this project)")
+        elif getattr(member, "is_active", None) is False:
+            details.append(f"{uid} ({member.email}, project membership is inactive)")
+        else:
+            details.append(f"{uid} ({member.email}, project role {member.role} is below member)")
+
+    roster = sorted(f"{m.email}={uid}" for uid, m in assignable.items())
+    shown = ", ".join(roster[:25]) or "(none)"
+    if len(roster) > 25:
+        shown += f", … and {len(roster) - 25} more"
+
+    raise ValueError(
+        "Plane silently drops assignees it will not accept, and an update clears the work item's "
+        "existing assignees in the process. Rejected: "
+        + "; ".join(details)
+        + ". Only active project members at member role or above can be assigned. "
+        + f"Assignable members of this project: {shown}. "
+        + "Add the user to the project first, or use one of the IDs above."
+    )
+
+
 def _resolve_description_html(description_html: str | None, description_stripped: str | None) -> str | None:
     """Resolve the description_html to persist.
 
@@ -262,6 +342,8 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
 
+        _assert_assignable(client, workspace_slug, project_id, assignees or [])
+
         data = CreateWorkItem(
             name=name,
             assignees=assignees,
@@ -445,6 +527,8 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
 
+        _assert_assignable(client, workspace_slug, project_id, assignees or [])
+
         data = UpdateWorkItem(
             name=name,
             assignees=assignees,
@@ -508,6 +592,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             Updated WorkItem object
         """
         client, workspace_slug = get_plane_client_context()
+        # The update below rewrites the whole list, so an unassignable add_user_id
+        # would clear the very assignees this tool exists to preserve. Only the
+        # incoming id is checked: an already-assigned member who has since lost
+        # access must not block a removal.
+        _assert_assignable(client, workspace_slug, project_id, [add_user_id] if add_user_id else [])
+
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
