@@ -114,6 +114,7 @@ def test_manage_assignee_remove_bare_string(monkeypatch):
 # guard has to run before the write.
 
 MEMBER = {"id": "member-1", "email": "member@example.com", "role": 20, "is_active": True}
+AT_THRESHOLD = {"id": "member-2", "email": "member2@example.com", "role": 15, "is_active": True}
 GUEST = {"id": "guest-1", "email": "guest@example.com", "role": 5, "is_active": True}
 INACTIVE = {"id": "inactive-1", "email": "inactive@example.com", "role": 20, "is_active": False}
 BARE = {"id": "bare-1", "email": "bare@example.com"}  # CE omits role/is_active
@@ -173,11 +174,16 @@ def test_unassignable_assignee_is_rejected_before_the_write(monkeypatch, members
     assert client.work_items.updated is None, "the destructive update must not be issued"
 
 
-def test_assignable_member_passes_through(monkeypatch):
-    """The happy path is unchanged: a real member is written as before."""
-    client = MemberAwareClient([MEMBER])
-    _assign(monkeypatch, client, ["member-1"])
-    assert client.work_items.updated.assignees == ["member-1"]
+@pytest.mark.parametrize("member", [MEMBER, AT_THRESHOLD], ids=["above-threshold", "exactly-at-threshold"])
+def test_assignable_member_passes_through(monkeypatch, member):
+    """The happy path is unchanged, including a role sitting exactly on the member floor.
+
+    Plane's cutoff is `role >= 15`, so role 15 is the value that decides whether the
+    comparison is inclusive — an off-by-one there would lock out every plain member.
+    """
+    client = MemberAwareClient([member])
+    _assign(monkeypatch, client, [member["id"]])
+    assert client.work_items.updated.assignees == [member["id"]]
 
 
 def test_members_without_role_are_accepted_on_membership_alone(monkeypatch):
