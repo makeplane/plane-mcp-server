@@ -493,7 +493,71 @@ matched the SDK attribute `client.customers.requests.list(...)`.
 
 ---
 
-## 10. Housekeeping
+## 10. ⚠️ Wire payload vs model-facing cost — this may invalidate the BD/D tradeoff
+
+Everything in §1–§9 measures the **MCP wire payload** (server → client). That is not necessarily
+what reaches the model.
+
+**An Anthropic tool definition has no output-schema field.** It carries `name`, `description`,
+`input_schema` (plus `strict`, `defer_loading`, `cache_control`, `allowed_callers`,
+`eager_input_streaming`). Response-shape constraints live in `output_config.format` at the
+*request* level, not per tool. An MCP client bridging `tools/list` into the Messages API therefore
+has nowhere to put an `outputSchema` — it is most likely dropped.
+
+If so, the model-facing numbers are:
+
+| Variant | Full MCP payload | Model-facing (name + description + inputSchema) |
+|:---|---:|---:|
+| **A** baseline (177) | 125,649 | **40,474** |
+| **C** v2 typed (29) | 59,783 | **14,481** |
+| **BD** v2 typed + compression | 42,243 | **14,267** |
+| **D** v2 str (29) | 15,837 | **14,481** |
+
+**Spread across C / BD / D: 1.48%.** If output schemas never reach the model, the −87%-vs-−66%
+tradeoff in §9 does not exist — BD and D are equivalent for context cost, and **BD wins outright**
+because it is non-breaking and costs nothing extra.
+
+Note the wire payload still matters independently: it is real bytes over stdio/HTTP and real client
+memory, and it is what a client that *inlines* `outputSchema` into the description would pay.
+
+### Settling it: `spike/probe_model_tokens.py`
+
+Needs an `ANTHROPIC_API_KEY` (or `ant auth login`). `count_tokens` is free; the whole probe is one
+~20-token request plus free counts.
+
+```
+.venv/bin/pip install anthropic
+.venv/bin/python spike/probe_model_tokens.py
+```
+
+| | Question | Decides |
+|---|:---|:---|
+| **Q1** | Does a tool definition accept an output-schema field? | A 400 proves `outputSchema` cannot be forwarded — it is dropped |
+| **Q2** | Real token cost of baseline vs v2, measured by the actual tokenizer | Replaces every `chars ÷ 4` figure in this document |
+| **Q3** | Cost if a client inlines `outputSchema` into the description | The pessimistic upper bound |
+
+Reading the result:
+
+- **Q1 rejected/ignored + Q2 ≈ the model-facing column** → output schemas never reach the model.
+  Choose **BD**; the breaking variant buys nothing.
+- **Q1 counted, or your client inlines (Q3)** → the full payload is real and §9's tradeoff stands.
+
+Verified by dry run with the API stubbed (`Q1` → 400 path, `Q2`/`Q3` tables render). Every token
+figure in this document remains a `chars ÷ 4` approximation (±10% absolute; ratios unaffected)
+until Q2 is run for real.
+
+### Caveat on "14,267 tokens per query"
+
+That is the **tool-definition block only**, and it is re-sent on **every** API call in a
+conversation, not once per session. Total request input is `tools` → `system` → `messages`, so it
+also carries the system prompt, the full conversation history, and the user turn. Because tool
+definitions render *first*, they are the ideal prompt-cache prefix — written once at ~1.25×, read at
+~0.1× thereafter — so with caching enabled the recurring cost is roughly a tenth of the cold-start
+figure.
+
+---
+
+## 11. Housekeeping
 
 `CLAUDE.md` line 61 currently reads *"29 tool modules … totaling 160+ tools."*
 Actual: **33 modules, 177 tools**. Fix alongside this work.

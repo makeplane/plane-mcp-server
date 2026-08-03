@@ -125,4 +125,5 @@ async def main() -> None:
         print(f"  {len(json.dumps(d, **J)) // 4:6,d} tok  {d['name']}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
