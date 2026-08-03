@@ -12,6 +12,21 @@ from plane_mcp.instructions import SERVER_INSTRUCTIONS
 from plane_mcp.middleware import PlaneLoggingMiddleware
 from plane_mcp.storage import build_token_store
 from plane_mcp.tools import register_tools
+from plane_mcp.tools_v2 import register_tools_v2
+
+# Tool surfaces. "v1" is the 177 verb-per-resource tools; "v2" is the 29
+# consolidated action-dispatch tools. v1 remains the default so existing
+# clients are unaffected -- see docs/tool-consolidation-plan.md section 5.
+SURFACES = ("v1", "v2")
+
+
+def _register_surface(mcp: FastMCP, surface: str) -> None:
+    if surface not in SURFACES:
+        raise ValueError(f"surface must be one of {SURFACES}, got {surface!r}")
+    if surface == "v2":
+        register_tools_v2(mcp, variant=os.getenv("PLANE_MCP_V2_VARIANT", "typed"))
+    else:
+        register_tools(mcp)
 
 # Baseline redirect URIs shipped with the server. Additional patterns can be
 # supplied at runtime via PLANE_OAUTH_ALLOWED_REDIRECT_URIS (comma-separated) so
@@ -48,10 +63,10 @@ def get_allowed_client_redirect_uris() -> list[str]:
     return allowed
 
 
-def get_oauth_mcp(base_path: str = "/") -> FastMCP:
+def get_oauth_mcp(base_path: str = "/", surface: str = "v1") -> FastMCP:
     """Build the FastMCP instance for the OAuth HTTP / SSE transports."""
     oauth_mcp = FastMCP(
-        "Plane MCP Server",
+        f"Plane MCP Server{'' if surface == 'v1' else ' (v2)'}",
         instructions=SERVER_INSTRUCTIONS,
         icons=[Icon(src="https://plane.so/favicon.ico", alt="Plane MCP Server")],
         website_url="https://plane.so",
@@ -68,28 +83,28 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
         ),
     )
     oauth_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    register_tools(oauth_mcp)
+    _register_surface(oauth_mcp, surface)
     return oauth_mcp
 
 
-def get_header_mcp():
+def get_header_mcp(surface: str = "v1"):
     header_mcp = FastMCP(
-        "Plane MCP Server (header-http)",
+        f"Plane MCP Server (header-http){'' if surface == 'v1' else ' v2'}",
         instructions=SERVER_INSTRUCTIONS,
         auth=PlaneHeaderAuthProvider(
             required_scopes=["read", "write"],
         ),
     )
     header_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    register_tools(header_mcp)
+    _register_surface(header_mcp, surface)
     return header_mcp
 
 
-def get_stdio_mcp():
+def get_stdio_mcp(surface: str = "v1"):
     stdio_mcp = FastMCP(
-        "Plane MCP Server (stdio)",
+        f"Plane MCP Server (stdio){'' if surface == 'v1' else ' v2'}",
         instructions=SERVER_INSTRUCTIONS,
     )
     stdio_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    register_tools(stdio_mcp)
+    _register_surface(stdio_mcp, surface)
     return stdio_mcp

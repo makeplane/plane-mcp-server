@@ -27,7 +27,7 @@ os.environ.setdefault("PLANE_WORKSPACE_SLUG", "x")
 
 from fastmcp import FastMCP  # noqa: E402
 
-import spike.v2 as v2pkg  # noqa: E402
+import plane_mcp.tools_v2 as v2pkg  # noqa: E402
 from plane_mcp.server import get_stdio_mcp  # noqa: E402
 from spike.bench.compress import compress  # noqa: E402
 
@@ -46,7 +46,7 @@ def build_v2(variant: str) -> tuple[FastMCP, list[str]]:
     failed: list[str] = []
     for name in v2_modules():
         try:
-            mod = importlib.import_module(f"spike.v2.{name}")
+            mod = importlib.import_module(f"plane_mcp.tools_v2.{name}")
             getattr(mod, f"register_{variant}")(mcp)
         except Exception as e:  # noqa: BLE001
             failed.append(f"{name}: {type(e).__name__}: {e}")

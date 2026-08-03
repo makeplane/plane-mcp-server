@@ -126,11 +126,41 @@ async def combined_lifespan(oauth_app, header_app, sse_app):
                 yield
 
 
+USAGE = "usage: plane-mcp-server [stdio|http|sse] [--v2]"
+
+
+def parse_args(argv: list[str]) -> tuple[ServerMode, str]:
+    """Return (mode, surface) from CLI args.
+
+    `--v2` selects the consolidated 29-tool surface; the default is the
+    177-tool v1 surface, so existing clients are unaffected. The surface is a
+    flag rather than an env var deliberately: a config that loses an env var
+    would silently serve v1, whereas a missing/misspelled flag is visible in
+    the command line and rejected here.
+    """
+    flags = [a for a in argv if a.startswith("-")]
+    positional = [a for a in argv if not a.startswith("-")]
+
+    unknown = [f for f in flags if f != "--v2"]
+    if unknown:
+        raise SystemExit(f"unknown option(s): {' '.join(unknown)}\n{USAGE}")
+
+    surface = "v2" if "--v2" in flags else "v1"
+
+    if len(positional) > 1:
+        raise SystemExit(f"expected at most one mode, got: {' '.join(positional)}\n{USAGE}")
+    if not positional:
+        return ServerMode.STDIO, surface
+    try:
+        return ServerMode(positional[0]), surface
+    except ValueError:
+        valid = ", ".join(m.value for m in ServerMode)
+        raise SystemExit(f"unknown mode {positional[0]!r} (expected one of: {valid})\n{USAGE}") from None
+
+
 def main() -> None:
     """Run the MCP server."""
-    server_mode = ServerMode.STDIO
-    if len(sys.argv) > 1:
-        server_mode = ServerMode(sys.argv[1])
+    server_mode, surface = parse_args(sys.argv[1:])
 
     if server_mode == ServerMode.STDIO:
         # Validate API_KEY and PLANE_WORKSPACE_SLUG are set
@@ -139,17 +169,17 @@ def main() -> None:
         if not os.getenv("PLANE_WORKSPACE_SLUG"):
             raise ValueError("PLANE_WORKSPACE_SLUG is not set")
 
-        get_stdio_mcp().run()
+        get_stdio_mcp(surface=surface).run()
         return
 
     if server_mode == ServerMode.HTTP:
         prefix = os.getenv("MCP_PATH_PREFIX") or ""
 
-        oauth_mcp = get_oauth_mcp(prefix + "/http")
+        oauth_mcp = get_oauth_mcp(prefix + "/http", surface=surface)
         oauth_app = oauth_mcp.http_app(stateless_http=True)
-        header_app = get_header_mcp().http_app(stateless_http=True)
+        header_app = get_header_mcp(surface=surface).http_app(stateless_http=True)
 
-        sse_mcp = get_oauth_mcp(prefix)
+        sse_mcp = get_oauth_mcp(prefix, surface=surface)
         sse_app = sse_mcp.http_app(transport="sse")
 
         # mcp_path is appended to the auth provider's base_url to form the
@@ -189,7 +219,7 @@ def main() -> None:
             uv_handler.addFilter(UserContextFilter())
             uv_logger.addHandler(uv_handler)
 
-        logger.info("Starting HTTP server at URLs: /mcp and /header/mcp")
+        logger.info(f"Starting HTTP server (surface={surface}) at URLs: /mcp and /header/mcp")
         uvicorn.run(
             app,
             host="0.0.0.0",

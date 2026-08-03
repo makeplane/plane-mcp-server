@@ -1,6 +1,6 @@
 """Self-check for v2 modules. Run:  .venv/bin/python spike/check_v2.py [name ...]
 
-For each spike/v2/<name>.py it imports the module, registers both variants on a
+For each plane_mcp/tools_v2/<name>.py it imports the module, registers both variants on a
 throwaway FastMCP instance, and reports the resulting schema size. Any import
 error, missing register_* function, or duplicate tool name shows up here.
 """
@@ -20,7 +20,7 @@ os.environ.setdefault("PLANE_WORKSPACE_SLUG", "x")
 
 from fastmcp import FastMCP  # noqa: E402
 
-import spike.v2 as v2pkg  # noqa: E402
+import plane_mcp.tools_v2 as v2pkg  # noqa: E402
 
 J = dict(separators=(",", ":"))
 
@@ -43,7 +43,7 @@ async def main() -> None:
     print("-" * 88)
     for name in names:
         try:
-            mod = importlib.import_module(f"spike.v2.{name}")
+            mod = importlib.import_module(f"plane_mcp.tools_v2.{name}")
         except Exception as e:  # noqa: BLE001
             print(f"{name:28s} {'-':26s} {'-':>10s} {'-':>9s}  IMPORT FAIL: {type(e).__name__}: {e}")
             bad += 1
