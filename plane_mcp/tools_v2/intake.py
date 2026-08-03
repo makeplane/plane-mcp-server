@@ -1,7 +1,7 @@
 """Consolidated `intake` tool -- REFERENCE IMPLEMENTATION.
 
 This module is the canonical example every other v2 module should mirror.
-Validated live (16/16 checks) against a real workspace; see spike/bench/.
+Validated live (16/16 checks) against a real workspace; see tests/test_tools_v2_live.py.
 """
 
 from __future__ import annotations

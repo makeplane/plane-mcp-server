@@ -140,7 +140,7 @@ Error: action 'retrieve' requires: work_item_id.
 
 The gap is almost entirely `outputSchema`. Excluding output schemas the two are within
 **1.5%** — and an Anthropic tool definition has no output-schema field, so those bytes may
-never reach the model. Run `spike/bench/probe_model_tokens.py` to settle it; §10 of the
+never reach the model. Run `benchmarks/probe_model_tokens.py` to settle it; §10 of the
 plan doc has the analysis.
 
 **Variant BD (typed + schema compression) is measured but not implemented.** The server
@@ -165,7 +165,7 @@ Two conventions that matter for payload size:
   action in the docstring. There is no schema-level `required` beyond `action`, so an
   inaccurate docstring is a real bug.
 
-After editing: `.venv/bin/python spike/bench/check_v2.py`
+After editing: `.venv/bin/python -m pytest tests/test_tools_v2.py`
 
 ---
 

@@ -315,8 +315,8 @@ percentages are unaffected.
 
 ## 8. Spike results — intake module (measured)
 
-Run on branch `spike/tool-consolidation-v2`, code in `spike/`. Reproduce with
-`.venv/bin/python spike/bench/measure_all.py` and `spike/bench/verify.py`.
+Run on branch `spike/tool-consolidation-v2`; the surface now lives in `plane_mcp/tools_v2/`. Reproduce with
+`.venv/bin/python benchmarks/measure_all.py` and `benchmarks/verify.py`.
 
 Four variants of the intake module, to separate *consolidation* from *output-schema treatment*
 — two levers §2 treated as one:
@@ -352,7 +352,7 @@ demonstrably unused.
 
 ### Correctness
 
-`spike/bench/verify.py`, run against all 177 live tools:
+`benchmarks/verify.py`, run against all 177 live tools:
 
 ```
 compress() losslessness: 316/316 schemas round-trip exactly
@@ -412,7 +412,7 @@ measured across the output-share range before the full-server number can be trus
 
 ## 9. FULL-SURFACE RESULTS — all 29 modules implemented and measured
 
-All 28 remaining modules were implemented (in `spike/v2/`) and measured. This **supersedes the
+All 28 remaining modules were implemented (now `plane_mcp/tools_v2/`) and measured. This **supersedes the
 projections in §4** with measured numbers.
 
 ```
@@ -438,7 +438,7 @@ consolidation compounds with the schema work rather than overlapping it.
 
 ### Live validation — all 29 tools
 
-`spike/bench/live_smoke.py` calls one read action on every consolidated tool through a real
+`tests/test_tools_v2_live.py` calls one read action on every consolidated tool through a real
 `FastMCP.Client` against the live workspace:
 
 ```
@@ -519,14 +519,14 @@ because it is non-breaking and costs nothing extra.
 Note the wire payload still matters independently: it is real bytes over stdio/HTTP and real client
 memory, and it is what a client that *inlines* `outputSchema` into the description would pay.
 
-### Settling it: `spike/bench/probe_model_tokens.py`
+### Settling it: `benchmarks/probe_model_tokens.py`
 
 Needs an `ANTHROPIC_API_KEY` (or `ant auth login`). `count_tokens` is free; the whole probe is one
 ~20-token request plus free counts.
 
 ```
 .venv/bin/pip install anthropic
-.venv/bin/python spike/bench/probe_model_tokens.py
+.venv/bin/python benchmarks/probe_model_tokens.py
 ```
 
 | | Question | Decides |

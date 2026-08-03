@@ -13,15 +13,15 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("PLANE_API_KEY", "x")
 os.environ.setdefault("PLANE_WORKSPACE_SLUG", "x")
 
 from fastmcp import FastMCP  # noqa: E402
 
+from benchmarks.compress import _collapse_nullable, compress  # noqa: E402
 from plane_mcp.server import get_stdio_mcp  # noqa: E402
 from plane_mcp.tools_v2.intake import register_str as register_variant_d  # noqa: E402
-from spike.bench.compress import _collapse_nullable, compress  # noqa: E402
 
 
 def inline(node, defs):
