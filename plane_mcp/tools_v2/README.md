@@ -191,7 +191,7 @@ After editing: `.venv/bin/python -m pytest tests/test_tools_v2.py`
 **Verified:** 29/29 modules register in both variants; one read-only live call per tool
 (22 OK, 5 feature-gated, 1 pre-existing failure, 0 consolidation failures); a full
 create → update → delete round trip through a real MCP client; `uvx` end-to-end for both
-surfaces; v1 unchanged at 177 tools; 56/56 unit tests pass.
+surfaces; v1 unchanged at 177 tools; 11 dedicated unit tests (suite: 67 passed, 1 skipped).
 
 **Not verified:** write paths for most tools, tool-selection accuracy at scale, and whether
 output schemas reach the model.
