@@ -373,6 +373,35 @@ on the first run — recorded here because they are easy to reintroduce:
   decoration time. Use `@mcp.tool(description=...)`. First run under-reported C and D by ~900 chars
   each by silently shipping empty descriptions.
 
+### Live validation (real workspace)
+
+`spike/live_test.py` drives **both** surfaces through a real `FastMCP.Client` against a live
+workspace and compares them — full `create → list → retrieve → update → delete` round trip on each.
+
+```
+A (5 current tools)   5/5 checks passed
+D (1 consolidated)    5/5 checks passed
+equivalence           4/4 (same counts, correct status, both cleaned up)
+D error handling      2/2 (unknown action, missing work_item_id)
+                     ------
+                     16/16 checks passed, workspace swept clean
+```
+
+`spike/server_v2.py` composes a runnable server — all existing tools, minus the 5 intake tools,
+plus the consolidated one:
+
+```
+v2: 173 tools, 105,622 tok   (baseline 177 tools, 125,649 tok)
+```
+
+**One module swapped = −20,027 tok, 16% off the whole payload**, matching the §4 projection.
+
+**Finding 3 — `-> str` does not remove `structuredContent`.** FastMCP still emits it for a
+string-returning tool, as `{"result": "<json string>"}` — an opaque blob rather than typed data.
+So the §6 🔴 risk is narrower than stated: clients that merely *check for* structured content keep
+working; only clients that *parse typed fields out of it* would regress. Worth confirming per
+client, but the failure mode is degradation, not absence.
+
 ### Caveat on extrapolation
 
 Intake is the **best case**: 95% of its cost is output schema. Modules with a lower output-schema
