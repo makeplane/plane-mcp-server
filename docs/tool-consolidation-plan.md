@@ -411,7 +411,89 @@ measured across the output-share range before the full-server number can be trus
 
 ---
 
-## 9. Housekeeping
+## 9. FULL-SURFACE RESULTS — all 29 modules implemented and measured
+
+All 28 remaining modules were implemented (in `spike/v2/`) and measured. This **supersedes the
+projections in §4** with measured numbers.
+
+```
+A   baseline                 177 tools   502,596 ch  ~125,649 tok   [out 84,618 | in 17,004 | desc 18,629]
+B   baseline + compression   177 tools   445,183 ch  ~111,295 tok   [out 72,374 | in 14,895 | desc 18,629]  -11.4%
+C   v2 typed                  29 tools   239,134 ch  ~ 59,783 tok   [out 45,190 | in  5,864 | desc  7,840]  -52.4%
+BD  v2 typed + compression    29 tools   168,975 ch  ~ 42,243 tok   [out 27,864 | in  5,650 | desc  7,840]  -66.4%
+D   v2 str                    29 tools    63,348 ch  ~ 15,837 tok   [out  1,239 | in  5,864 | desc  7,840]  -87.4%
+```
+
+**The §4 projection was ~15,800 tok. Measured: 15,837.** Within 0.2%.
+
+Two headline numbers, depending on the client-compat decision:
+
+- **D (breaking): 125,649 -> 15,837 tok, −87.4%.** Gives up typed `structuredContent`.
+- **BD (non-breaking): 125,649 -> 42,243 tok, −66.4%.** Keeps typed returns intact.
+
+The BD figure is lower than the −77% intake-only result, exactly as §8's caveat predicted — intake
+was the best case at 95% output-schema share. −66% is the honest full-surface number.
+
+Input schema fell 17,004 -> 5,864 (−66%) and descriptions 18,629 -> 7,840 (−58%), confirming that
+consolidation compounds with the schema work rather than overlapping it.
+
+### Live validation — all 29 tools
+
+`spike/live_smoke.py` calls one read action on every consolidated tool through a real
+`FastMCP.Client` against the live workspace:
+
+```
+OK=22   FEAT(not enabled on this plan)=5   PRE(broken in baseline too)=1   SKIP(needs parent id)=1   FAIL=0
+```
+
+Zero failures attributable to consolidation. The five FEAT results are plan/licence gates
+(`work_item_relation` -> HTTP 402, `initiative` -> feature disabled, `work_log` -> not enabled,
+`project_estimate` -> no estimate exists, `work_item_property_value` -> 404).
+
+**Pre-existing bug found (NOT caused by this work):** `list_work_item_activities` is broken against
+`api.plane.so` today. The SDK types `PaginatedWorkItemActivityResponse.results[].epoch` as `int`,
+but the API returns a float (`1785746693.7522993`), so pydantic raises `int_from_float`. Verified
+by calling the **baseline** v1 tool and observing an identical failure. Worth its own ticket.
+
+### Cross-module consistency issues to resolve before productionising
+
+Six workers implemented in parallel from one brief; these divergences need a decision:
+
+1. **Pagination envelope vs `.results`.** Mostly faithful to each source tool, but `release` and
+   `release_tag` unwrap to `.results` where their sources returned the full envelope — losing
+   `next_cursor`/`total_count`, so paging is no longer discoverable. The reference `intake.py` set
+   this precedent. Fix: standardise on returning the envelope wherever the source did.
+2. **`action` is now a reserved parameter name.** Four source tools had their own `action`
+   parameter (`manage_release_work_items`, `manage_release_labels`, `manage_customer_work_items`,
+   `manage_initiative_projects`). Workers independently renamed it to `operation` or `op` — pick one.
+3. **`Literal` enums downgraded to `str`** in several places (`release.status`, `cycle.list.status`,
+   `member.namespace`). Values moved into DOC; invalid input now fails at pydantic or a runtime
+   guard rather than schema validation. Deliberate, but it is lost upfront validation.
+4. **Tri-state booleans kept as `bool | None`** wherever `False` differs from unset
+   (`is_active`, `is_prerelease`, `is_triage`, `is_default`, `is_multi`, …). Three workers reached
+   this independently. Correct, and the main residual cost in the input schema.
+5. **`manage_type_properties` now enforces a documented-but-unenforced precondition** (source
+   silently returned `None` when both id lists were empty). Arguably a fix; still a behaviour change.
+6. **Two modules import constants from `plane_mcp.tools`** despite the brief
+   (`PQL_FULL_REFERENCE` in `work_item.py`; `_require_native_initiatives` in `initiative.py`), both
+   to keep error text byte-identical. Fine for a spike; inline them for production.
+
+### Known functional loss in variant D
+
+`work_item_attachment.read` cannot return images under `-> str` — there is no image channel, so it
+returns an error pointing at `get_download_url`. This is the first concrete case where D is not a
+pure win and BD (or a per-tool exemption) is required.
+
+### Correction to §1
+
+An earlier draft said four modules use raw HTTP. Only **three** do
+(`work_item_attachments.py` and the two auth providers) — and `work_item_attachments.py` uses
+`requests`, not `httpx`. `customers/requests.py` was a false positive: the grep pattern `requests\.`
+matched the SDK attribute `client.customers.requests.list(...)`.
+
+---
+
+## 10. Housekeeping
 
 `CLAUDE.md` line 61 currently reads *"29 tool modules … totaling 160+ tools."*
 Actual: **33 modules, 177 tools**. Fix alongside this work.
