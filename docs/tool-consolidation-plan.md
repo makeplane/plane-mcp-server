@@ -316,7 +316,7 @@ percentages are unaffected.
 ## 8. Spike results — intake module (measured)
 
 Run on branch `spike/tool-consolidation-v2`, code in `spike/`. Reproduce with
-`.venv/bin/python spike/measure.py` and `spike/verify.py`.
+`.venv/bin/python spike/bench/measure_all.py` and `spike/bench/verify.py`.
 
 Four variants of the intake module, to separate *consolidation* from *output-schema treatment*
 — two levers §2 treated as one:
@@ -352,7 +352,7 @@ demonstrably unused.
 
 ### Correctness
 
-`spike/verify.py`, run against all 177 live tools:
+`spike/bench/verify.py`, run against all 177 live tools:
 
 ```
 compress() losslessness: 316/316 schemas round-trip exactly
@@ -375,7 +375,7 @@ on the first run — recorded here because they are easy to reintroduce:
 
 ### Live validation (real workspace)
 
-`spike/live_test.py` drives **both** surfaces through a real `FastMCP.Client` against a live
+The intake A/D equivalence run drove **both** surfaces through a real `FastMCP.Client` against a live
 workspace and compares them — full `create → list → retrieve → update → delete` round trip on each.
 
 ```
@@ -387,8 +387,7 @@ D error handling      2/2 (unknown action, missing work_item_id)
                      16/16 checks passed, workspace swept clean
 ```
 
-`spike/server_v2.py` composes a runnable server — all existing tools, minus the 5 intake tools,
-plus the consolidated one:
+A pilot server composed all existing tools, minus the 5 intake tools, plus the consolidated one:
 
 ```
 v2: 173 tools, 105,622 tok   (baseline 177 tools, 125,649 tok)
@@ -439,7 +438,7 @@ consolidation compounds with the schema work rather than overlapping it.
 
 ### Live validation — all 29 tools
 
-`spike/live_smoke.py` calls one read action on every consolidated tool through a real
+`spike/bench/live_smoke.py` calls one read action on every consolidated tool through a real
 `FastMCP.Client` against the live workspace:
 
 ```
@@ -520,14 +519,14 @@ because it is non-breaking and costs nothing extra.
 Note the wire payload still matters independently: it is real bytes over stdio/HTTP and real client
 memory, and it is what a client that *inlines* `outputSchema` into the description would pay.
 
-### Settling it: `spike/probe_model_tokens.py`
+### Settling it: `spike/bench/probe_model_tokens.py`
 
 Needs an `ANTHROPIC_API_KEY` (or `ant auth login`). `count_tokens` is free; the whole probe is one
 ~20-token request plus free counts.
 
 ```
 .venv/bin/pip install anthropic
-.venv/bin/python spike/probe_model_tokens.py
+.venv/bin/python spike/bench/probe_model_tokens.py
 ```
 
 | | Question | Decides |
