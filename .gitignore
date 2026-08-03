@@ -56,3 +56,6 @@ dmypy.json
 
 # Ignore cursor AI rules
 .cursor/rules/codacy.mdc
+
+# MCP client config — may contain API keys
+.mcp.json
