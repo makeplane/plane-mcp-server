@@ -21,7 +21,7 @@ from fastmcp import FastMCP  # noqa: E402
 
 from plane_mcp.server import get_stdio_mcp  # noqa: E402
 from spike.compress import _collapse_nullable, compress  # noqa: E402
-from spike.intake_v2 import register_variant_d  # noqa: E402
+from spike.v2.intake import register_str as register_variant_d  # noqa: E402
 
 
 def inline(node, defs):

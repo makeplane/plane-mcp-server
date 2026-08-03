@@ -16,7 +16,8 @@ from fastmcp import FastMCP  # noqa: E402
 
 from plane_mcp.server import get_stdio_mcp  # noqa: E402
 from spike.compress import compress  # noqa: E402
-from spike.intake_v2 import register_variant_c, register_variant_d  # noqa: E402
+from spike.v2.intake import register_str as register_variant_d
+from spike.v2.intake import register_typed as register_variant_c  # noqa: E402
 
 J = dict(separators=(",", ":"))
 

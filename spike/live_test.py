@@ -4,7 +4,7 @@ Drives BOTH tool surfaces through the real FastMCP client against a live Plane
 workspace and compares results:
 
   A -- the 5 current intake tools (plane_mcp.tools.intake)
-  D -- the 1 consolidated intake tool (spike.intake_v2)
+  D -- the 1 consolidated intake tool (spike.v2.intake)
 
 Credentials come from .env.test.local (gitignored). Creates and then deletes
 its own intake work items; nothing is left behind on success.
@@ -29,7 +29,7 @@ from fastmcp import Client, FastMCP  # noqa: E402
 
 from plane_mcp.client import get_plane_client_context  # noqa: E402
 from plane_mcp.server import get_stdio_mcp  # noqa: E402
-from spike.intake_v2 import register_variant_d  # noqa: E402
+from spike.v2.intake import register_str as register_variant_d  # noqa: E402
 
 PROJECT_ID = os.environ.get("TEST_PROJECT_ID", "311cc73d-551b-4ef8-95fd-a0748996a4b5")
 
