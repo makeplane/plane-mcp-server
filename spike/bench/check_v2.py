@@ -14,7 +14,7 @@ import os
 import pkgutil
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 os.environ.setdefault("PLANE_API_KEY", "x")
 os.environ.setdefault("PLANE_WORKSPACE_SLUG", "x")
 

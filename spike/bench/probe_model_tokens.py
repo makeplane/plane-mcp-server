@@ -33,7 +33,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 os.environ.setdefault("PLANE_API_KEY", "x")
 os.environ.setdefault("PLANE_WORKSPACE_SLUG", "x")
 
@@ -43,7 +43,7 @@ except ImportError:
     sys.exit("Install the SDK first:  .venv/bin/pip install anthropic")
 
 from plane_mcp.server import get_stdio_mcp  # noqa: E402
-from spike.measure_all import build_v2, dds_of  # noqa: E402
+from spike.bench.measure_all import build_v2, dds_of  # noqa: E402
 
 MODEL = os.environ.get("PROBE_MODEL", "claude-opus-5")
 J = dict(separators=(",", ":"))

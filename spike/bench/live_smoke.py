@@ -19,9 +19,9 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-_ENV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.test.local")
+_ENV = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env.test.local")
 for _line in open(_ENV):
     if "=" in _line and not _line.strip().startswith("#"):
         _k, _v = _line.strip().split("=", 1)
@@ -29,7 +29,7 @@ for _line in open(_ENV):
 
 from fastmcp import Client  # noqa: E402
 
-from spike.measure_all import build_v2  # noqa: E402
+from spike.bench.measure_all import build_v2  # noqa: E402
 
 PROJECT_ID = os.environ.get("TEST_PROJECT_ID", "311cc73d-551b-4ef8-95fd-a0748996a4b5")
 
