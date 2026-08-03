@@ -122,6 +122,65 @@ Three conventions carry the design:
 
 ## 4. Per-module plan
 
+> **Superseded by measurement.** The table below is the *pre-implementation projection*,
+> kept for the record. For measured per-module before/after numbers see
+> [§4.0 Measured per-module results](#40-measured-per-module-results-actuals) immediately
+> below.
+
+### 4.0 Measured per-module results (actuals)
+
+Every v1 tool grouped under the v2 tool that replaces it, with the real `tools/list` cost
+of each. Reproduce with `benchmarks/measure_all.py`.
+
+| v2 tool | v1 tools | v1 tok | v2 typed | cut | v2 str | cut |
+|:---|---:|---:|---:|---:|---:|---:|
+| `intake` | 5 | 20,427 | 10,119 | −50% | 400 | −98% |
+| `project` | 8 | 11,518 | 4,494 | −61% | 968 | −92% |
+| `work_item` | 12 | 10,111 | 3,122 | −69% | 1,048 | −90% |
+| `work_item_property` | 11 | 8,772 | 3,900 | −56% | 1,303 | −85% |
+| `initiative` | 7 | 8,467 | 3,943 | −53% | 494 | −94% |
+| `project_estimate` | 9 | 6,308 | 4,230 | −33% | 556 | −91% |
+| `cycle` | 10 | 6,190 | 2,697 | −56% | 706 | −89% |
+| `customer_property` | 7 | 5,762 | 3,045 | −47% | 1,003 | −83% |
+| `module` | 8 | 5,082 | 2,565 | −50% | 619 | −88% |
+| `customer` | 7 | 4,724 | 2,210 | −53% | 790 | −83% |
+| `release` | 9 | 4,533 | 1,766 | −61% | 673 | −85% |
+| `work_item_type` | 7 | 3,297 | 1,255 | −62% | 576 | −83% |
+| `member` | 5 | 2,807 | 2,207 | −21% | 529 | −81% |
+| `page` | 6 | 2,578 | 1,708 | −34% | 525 | −80% |
+| `work_item_comment` | 5 | 2,497 | 1,137 | −54% | 385 | −85% |
+| `work_item_relation` | 7 | 2,470 | 1,306 | −47% | 739 | −70% |
+| `state` | 5 | 2,381 | 1,112 | −53% | 429 | −82% |
+| `work_item_property_value` | 3 | 2,136 | 1,079 | −49% | 425 | −80% |
+| `label` | 5 | 2,080 | 943 | −55% | 351 | −83% |
+| `release_tag` | 5 | 1,913 | 792 | −59% | 293 | −85% |
+| `customer_request` | 5 | 1,874 | 1,049 | −44% | 469 | −75% |
+| `milestone` | 7 | 1,849 | 781 | −58% | 392 | −79% |
+| `work_item_link` | 5 | 1,624 | 715 | −56% | 243 | −85% |
+| `release_label` | 5 | 1,549 | 638 | −59% | 397 | −74% |
+| `work_log` | 4 | 1,296 | 737 | −43% | 306 | −76% |
+| `work_item_attachment` | 5 | 1,172 | 364 | −69% | 411 | −65% |
+| `work_item_activity` | 2 | 1,019 | 904 | −11% | 201 | −80% |
+| `workspace` | 2 | 977 | 729 | −25% | 339 | −65% |
+| `get_pql_reference` | 1 | 224 | 224 | −0% | 256 | **+14%** |
+| **TOTAL** | **177** | **125,637** | **59,771** | **−52%** | **15,826** | **−87%** |
+
+Reading it:
+
+- **`typed` (BD/C) never beats −69% on any module** because it keeps the output schemas,
+  which are 67% of the baseline. `str` (D) clears −80% almost everywhere.
+- **`get_pql_reference` gets *worse* under `str` (+14%)** — it is a 1:1 carry-over with no
+  actions to merge, so the `-> str` wrapper is pure overhead. The floor effect from the
+  projection table, confirmed.
+- **`work_item_attachment` is the one module where `typed` beats `str`** (364 vs 411).
+  `Image` in its return union makes FastMCP emit no output schema at all, so `-> str`
+  adds bytes *and* loses the image channel.
+- **Low `typed` cuts cluster where output schemas dominate** — `work_item_activity` (−11%),
+  `member` (−21%), `workspace` (−25%). Consolidation cannot help a module whose weight is
+  almost entirely the shape of what it returns.
+
+### 4.1 Original projection (pre-implementation)
+
 Projection method: `outputSchema` → 0; `inputSchema` × 0.65 (lever 1) × 0.45 (dedup across
 merged actions); one consolidated docstring ≈ 1,400 chars; wrapper ≈ 120 chars. Ratios are
 conservative and derived from a working consolidated implementation, not from theory.
@@ -165,7 +224,7 @@ conservative and derived from a working consolidated implementation, not from th
 
 ---
 
-### 4.1 Detailed action maps
+### 4.2 Detailed action maps
 
 Grouped by how much they change. Each line is `target tool ← current tools`.
 
