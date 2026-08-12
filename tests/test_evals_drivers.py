@@ -402,7 +402,7 @@ def test_find_codex_rollout_exact_match_and_unmatched(tmp_path: Path, monkeypatc
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(drivers_mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     found = drivers_mod.find_codex_rollout(tid)
     assert found is not None
     assert tid in found.name
@@ -423,7 +423,7 @@ def test_find_codex_rollout_session_meta_id(tmp_path: Path, monkeypatch):
         json.dumps({"type": "session_meta", "payload": {"id": "sess-meta-42"}}) + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(drivers_mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     found = drivers_mod.find_codex_rollout("sess-meta-42")
     assert found is not None
     assert found.name == "rollout-meta-only.jsonl"
@@ -431,11 +431,10 @@ def test_find_codex_rollout_session_meta_id(tmp_path: Path, monkeypatch):
 
 def test_codex_driver_notes_rollout_unmatched_when_no_file(tmp_path: Path, monkeypatch):
     """When thread_id is known but no rollout file matches, note codex_rollout_unmatched."""
-    from evals import drivers as drivers_mod
 
     # Empty sessions dir under fake home
     (tmp_path / ".codex" / "sessions").mkdir(parents=True)
-    monkeypatch.setattr(drivers_mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 0, stdout=CODEX_V0147_JSONL, stderr="")
@@ -729,6 +728,38 @@ def test_agent_run_hit_max_maps_to_hit_max_iterations():
     assert out["stop_reason"] == "max_turns"
 
 
+def test_agent_run_to_harness_dict_does_not_guess_usage_total():
+    """Generic row mapping must not invent usage_total from a vendor usage dict.
+
+    Drivers own normalization (ClaudeCliDriver via normalize_claude_usage,
+    CodexCliDriver builds its own). Missing usage_total stays None.
+    """
+    run = AgentRun(
+        calls=[],
+        final_text="ok",
+        usage={
+            "input_tokens": 5000,
+            "output_tokens": 200,
+            # Codex-ish shape — not Claude modelUsage. A Claude rebuild would
+            # silently produce a wrong / empty total if reintroduced.
+            "total_token_usage": {"input_tokens": 5000, "output_tokens": 200},
+        },
+        usage_total=None,
+        stopped_reason="completed",
+        usage_scope="run",
+        call_source="stream",
+    )
+    out = agent_run_to_harness_dict(
+        run,
+        optimal=set(),
+        alternate=set(),
+        classify=classify_call,
+        skip_result_tokens=True,
+    )
+    assert out["usage"] == run.usage
+    assert out["usage_total"] is None
+
+
 # ---------------------------------------------------------------------------
 # Plumbing
 # ---------------------------------------------------------------------------
@@ -832,7 +863,7 @@ def test_killpg_reaps_grandchild_when_leader_already_dead(tmp_path: Path):
     import signal
     from types import SimpleNamespace
 
-    from evals.drivers import _kill_process_group
+    from evals.drivers import kill_process_group
 
     pidfile = tmp_path / "pids.txt"
     script = tmp_path / "sticky_leader.py"
@@ -880,7 +911,7 @@ def test_killpg_reaps_grandchild_when_leader_already_dead(tmp_path: Path):
 
         t0 = time.monotonic()
         # Direct killpg(leader_pid) — pgid == original leader pid under start_new_session.
-        ok = _kill_process_group(SimpleNamespace(pid=leader_pid))
+        ok = kill_process_group(SimpleNamespace(pid=leader_pid))
         assert ok is True
         assert time.monotonic() - t0 < 3.0
 
