@@ -32,13 +32,23 @@ class AgentRun:
     client_tool_calls: list[dict[str, Any]] = field(default_factory=list)
     # Cache-aware run totals (CLI); do not put uncached-only input_tokens into cum_input_tokens
     usage_total: dict[str, Any] | None = None
-    # Harness extras (optional; defaults keep SDK path simple)
+    # Harness extras (optional; defaults keep CLI paths simple)
     usage_scope: str = "run"  # 'run' | 'iteration'
-    call_source: str = "unknown"  # 'json' | 'transcript' | 'stream' | 'sdk'
+    call_source: str = "unknown"  # 'json' | 'transcript' | 'stream' | 'api'
     hit_max_turns: bool = False
     wall_time_s: float = 0.0
     experimental: bool = False
     notes: list[str] = field(default_factory=list)
+    usage_per_iteration: list[dict[str, int]] = field(default_factory=list)
+    cum_input_tokens: int | None = None
+    result_pair_mismatch: bool = False
+    token_count_failures: int = 0
+    # None means result token sizing was skipped (CLI drivers). False means a
+    # backend counter was used; True means at least one result used estimation.
+    result_tokens_estimated: bool | None = None
+    provider: str | None = None
+    model: str | None = None
+    requested_model: str | None = None
 
 
 class AgentDriver(Protocol):
@@ -117,7 +127,7 @@ def split_plane_and_client_calls(
     """Partition tagged calls into plane vs client lists.
 
     Prefer explicit ``origin`` from ``normalize_tool_call``. Untagged calls
-    (SDK path) default to plane so existing harness behavior is unchanged.
+    (API path) default to plane so existing harness behavior is unchanged.
     """
     plane: list[dict[str, Any]] = []
     client: list[dict[str, Any]] = []
@@ -130,7 +140,7 @@ def split_plane_and_client_calls(
             elif raw.startswith("mcp__"):
                 origin = "client"  # other MCP server
             else:
-                origin = "plane"  # bare name → assume plane (SDK)
+                origin = "plane"  # bare name → assume plane (API)
         if origin == "client":
             client.append(c)
         else:
@@ -172,9 +182,9 @@ def agent_run_to_harness_dict(
             "tool": tool,
             "class": classify(str(tool), optimal, alternate),
             "args_chars": args_chars,
-            "result_tokens": None,
+            "result_tokens": None if skip_result_tokens else c.get("result_tokens"),
             "result_chars": int(c["result_chars"]) if c.get("result_chars") is not None else 0,
-            "result_kind": "text",
+            "result_kind": str(c.get("result_kind") or "text"),
             "is_error": bool(c.get("is_error")),
         }
         if c.get("duration_ms") is not None:
@@ -184,7 +194,7 @@ def agent_run_to_harness_dict(
         if isinstance(args, dict) and isinstance(args.get("action"), str):
             rec["action"] = args["action"]
         if skip_result_tokens:
-            rec["result_tokens_skipped"] = "no API key / CLI driver has no count_tokens"
+            rec["result_tokens_skipped"] = "CLI driver does not expose complete result text"
         calls.append(rec)
 
     client_tool_calls: list[dict[str, Any]] = []
@@ -218,7 +228,15 @@ def agent_run_to_harness_dict(
     is_cli = run.call_source in ("json", "transcript", "stream", "proxy") or run.usage_scope == "run"
     usage_total = run.usage_total
 
-    if is_cli and skip_result_tokens:
+    if run.usage_per_iteration:
+        usage_per_iteration = [dict(item) for item in run.usage_per_iteration]
+        cum_input = (
+            run.cum_input_tokens
+            if run.cum_input_tokens is not None
+            else sum(item.get("in", 0) for item in usage_per_iteration)
+        )
+        cum_reason = None
+    elif is_cli and skip_result_tokens:
         cum_input: int | None = None
         cum_reason: str | None = (
             "CLI driver: Claude usage.input_tokens is uncached-only; "
@@ -230,9 +248,9 @@ def agent_run_to_harness_dict(
         cum_reason = None
         usage_per_iteration = []
         if run.usage and run.usage_scope == "iteration":
-            pass  # SDK fills this separately
+            pass
 
-    return {
+    result = {
         "final_text": run.final_text,
         "calls": calls,
         "num_calls": len(calls),
@@ -250,18 +268,26 @@ def agent_run_to_harness_dict(
         "wall_time_s": run.wall_time_s,
         "stop_reason": stop_reason,
         "hit_max_iterations": hit_max,
-        "result_pair_mismatch": False,
-        "token_count_failures": 0,
+        "result_pair_mismatch": run.result_pair_mismatch,
+        "token_count_failures": run.token_count_failures,
+        "result_tokens_estimated": run.result_tokens_estimated,
         "usage_scope": run.usage_scope,
         "call_source": run.call_source,
         "driver_raw_ref": run.raw_ref,
         "driver_notes": list(run.notes),
         "result_tokens_skipped_reason": (
-            "CLI driver: count_tokens requires Anthropic API key; skipped" if skip_result_tokens else None
+            "CLI driver: complete tool result text is unavailable; skipped" if skip_result_tokens else None
         ),
         "usage": run.usage,
         "usage_total": usage_total,
     }
+    if run.provider is not None:
+        result["provider"] = run.provider
+    if run.model is not None:
+        result["model"] = run.model
+    if run.requested_model is not None:
+        result["requested_model"] = run.requested_model
+    return result
 
 
 __all__ = [

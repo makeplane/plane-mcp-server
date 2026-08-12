@@ -90,10 +90,10 @@ def is_meta_row(row: dict[str, Any]) -> bool:
 
 
 def is_infra_error_row(row: dict[str, Any]) -> bool:
-    """True when a row failed for infrastructure reasons (seed/cli/sdk), not task verify.
+    """True when a row failed for infrastructure reasons (seed/cli/api), not task verify.
 
     Any ``error_class`` starting with ``infra_`` (``infra_seed``, ``infra_cli``,
-    ``infra_sdk``, …) is excluded from success-rate denominators.
+    ``infra_api``, ``infra_sdk``, …) is excluded from success-rate denominators.
     """
     ec = row.get("error_class")
     return isinstance(ec, str) and ec.startswith("infra_")

@@ -131,16 +131,6 @@ def test_skip_path_no_network(monkeypatch):
     import tempfile
     from pathlib import Path
 
-    # Avoid importing anthropic for skip-only path: patch AsyncAnthropic too
-    class _FakeAnthro:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return None
-
-    monkeypatch.setattr("anthropic.AsyncAnthropic", lambda: _FakeAnthro())
-
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "out.jsonl"
         rc = asyncio.run(

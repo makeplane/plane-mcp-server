@@ -29,9 +29,9 @@ dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
 ]
-# Only the `sdk` eval driver needs this; the CLI drivers shell out to an agent.
+# The default API eval provider uses the stable Anthropic Messages client.
 evals = [
-    "anthropic[mcp]>=0.121.0",
+    "anthropic>=0.121.0",
 ]
 
 [project.scripts]

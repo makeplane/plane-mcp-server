@@ -972,3 +972,4 @@ def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypat
     assert new_r2["task_id"] == "R2"
     assert new_r2["success"] is True
     assert new_r2["error_class"] is None
+    assert new_r2["final_text"] == "done"

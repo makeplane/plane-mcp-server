@@ -32,11 +32,17 @@ they were the optimal ones), errors, and the agent's final text.
    unset REDIS_HOST REDIS_PORT      # else the SDK client picks up a stale cache config
    ```
 
-3. **An agent CLI** for the driver you pick (below), already authenticated.
+3. **Model access for the driver you pick.** The API driver uses
+   `ANTHROPIC_API_KEY` by default; OpenAI requires its SDK and `OPENAI_API_KEY`.
+   CLI drivers require their corresponding local CLI to already be authenticated.
 
 ## Running
 
 ```bash
+# Provider-neutral API loop (default provider: Anthropic)
+.venv/bin/python -m evals.run --driver api --provider anthropic --model sonnet \
+  --surface full --out results/api.jsonl
+
 # Everything, one surface
 .venv/bin/python -m evals.run --driver codex-cli --model gpt-5.6-sol \
   --surface full --out results/legacy.jsonl
@@ -70,14 +76,21 @@ compared, and it is honest about what it ran because it launches the server you 
 
 | Driver | Backend | Notes |
 |---|---|---|
+| `api` | Owned API + MCP loop | Provider-neutral; `--provider anthropic` (default) or `openai` |
+| `sdk` | Alias for `api` | Retained for old commands/result pipelines |
 | `codex-cli` | OpenAI Codex CLI | Pass a real model id (`gpt-5.6-sol`); the short-alias table is incomplete |
 | `claude-cli` | Claude Code CLI | `--model sonnet` / `haiku` |
 | `antigravity-cli` | Antigravity CLI (`agy`) | Runs under a synthetic HOME so its MCP config is ours, not yours |
 | `opencode-cli` | opencode | Temp project config per run |
-| `sdk` | Anthropic SDK tool runner | No coding-harness prompt in the way; needs `ANTHROPIC_API_KEY` |
 
 Every CLI driver records the actual JSON-RPC traffic through a recording proxy, so tool
 calls are counted from the wire rather than from whatever the agent claims it did.
+
+The API driver executes MCP calls itself, records exact result character counts, and sizes
+result tokens without making a provider request per result. A backend may supply a token
+counter; otherwise rows set `result_tokens_estimated: true` and use a deterministic
+character-based estimate. CLI drivers retain null result-token counts because they do not
+always expose complete tool result text.
 
 ### Reading results
 

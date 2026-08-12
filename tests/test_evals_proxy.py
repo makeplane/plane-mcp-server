@@ -978,6 +978,8 @@ def test_resolve_model_for_driver_qualification():
     # Free-form passthrough
     assert resolve_model_for_driver("opencode-cli", "openai/gpt-4o") == "openai/gpt-4o"
     assert resolve_model_for_driver("sdk", "sonnet") == "claude-sonnet-5"
+    assert resolve_model_for_driver("api", "haiku") == "claude-haiku-4-5"
+    assert resolve_model_for_driver("api", "sonnet", provider="openai") == "gpt-5"
 
 
 def test_ensure_proxy_pythonpath_injects_repo():

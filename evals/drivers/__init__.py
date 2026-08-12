@@ -1,8 +1,8 @@
 """Agent-driver abstraction for the Plane MCP eval harness.
 
 Drivers run one task against a tool surface and return a normalized
-``AgentRun``. The default ``sdk`` driver preserves the historical Anthropic
-SDK + in-process MCP client path. CLI drivers (``claude-cli``, ``codex-cli``,
+``AgentRun``. The default ``api`` driver owns a provider-neutral model/tool
+loop over an in-process MCP client. CLI drivers (``claude-cli``, ``codex-cli``,
 ``antigravity-cli``, ``opencode-cli``) spawn locally installed agent CLIs on
 the user's subscription — no Anthropic API key required for those paths.
 
@@ -43,6 +43,7 @@ from evals.drivers.antigravity import (
     prepare_antigravity_fake_home,
     write_antigravity_mcp_config,
 )
+from evals.drivers.api import ApiDriver
 from evals.drivers.base import (
     REPO_ROOT,
     AgentDriver,
@@ -83,14 +84,14 @@ from evals.drivers.sidecar import (
 # Registry
 # ---------------------------------------------------------------------------
 
-KNOWN_DRIVERS = frozenset({"sdk", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"})
+KNOWN_DRIVERS = frozenset({"api", "sdk", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"})
 
 
-def get_driver(name: str, **kwargs: Any) -> AgentDriver | None:
-    """Return a driver instance, or None for the in-process ``sdk`` path."""
-    key = (name or "sdk").strip().lower()
-    if key == "sdk":
-        return None  # handled inline in evals.run
+def get_driver(name: str, **kwargs: Any) -> AgentDriver:
+    """Return a driver instance; ``sdk`` is a legacy alias for ``api``."""
+    key = (name or "api").strip().lower()
+    if key in ("api", "sdk"):
+        return ApiDriver(**kwargs)
     if key == "claude-cli":
         return ClaudeCliDriver(**kwargs)
     if key == "codex-cli":
@@ -107,6 +108,7 @@ __all__ = [
     "AgentDriver",
     "AgentRun",
     "AntigravityCliDriver",
+    "ApiDriver",
     "ClaudeCliDriver",
     "CodexCliDriver",
     "OpencodeCliDriver",

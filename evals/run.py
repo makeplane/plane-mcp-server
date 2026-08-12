@@ -14,7 +14,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +40,12 @@ MODEL_ALIASES: dict[str, str] = {
     "sonnet": "claude-sonnet-5",
     "haiku": "claude-haiku-4-5",
 }
+API_MODEL_ALIASES: dict[str, dict[str, str]] = {
+    "anthropic": MODEL_ALIASES,
+    # Preserve the harness's representative/fast intent when the user switches
+    # providers without also overriding the historical sonnet/haiku aliases.
+    "openai": {"sonnet": "gpt-5", "haiku": "gpt-5-mini"},
+}
 # Per-driver resolution of the short harness aliases (sonnet/haiku).
 # Drivers that need provider/model form get qualified defaults; unknown
 # strings (e.g. ``anthropic/claude-…``) pass through unchanged.
@@ -58,15 +63,16 @@ CLI_MODEL_ALIASES: dict[str, dict[str, str]] = {
 }
 
 
-def resolve_model_for_driver(driver_name: str, model: str) -> str:
+def resolve_model_for_driver(driver_name: str, model: str, *, provider: str = "anthropic") -> str:
     """Map a harness model token to the string the given driver expects.
 
     Known short aliases (sonnet/haiku) are looked up per-driver. Any other
     string (including already-qualified ``provider/model``) is passed through.
     """
-    key = (driver_name or "sdk").strip().lower()
-    if key == "sdk":
-        return MODEL_ALIASES.get(model, model)
+    key = (driver_name or "api").strip().lower()
+    if key in ("api", "sdk"):
+        table = API_MODEL_ALIASES.get(provider.strip().lower()) or {}
+        return table.get(model, model)
     table = CLI_MODEL_ALIASES.get(key) or {}
     return table.get(model, model)
 
@@ -111,64 +117,6 @@ def classify_call(tool: str, optimal: set[str], alternate: set[str]) -> str:
     if tool in alternate:
         return "alternate"
     return "out_of_set"
-
-
-def _tool_result_text(content: Any) -> tuple[str, str]:
-    """Return (text_for_counting, result_kind).
-
-    result_kind is 'text' | 'image' | 'mixed'. Mixed keeps text for token counting
-    and records that non-text blocks were present (char length of full payload).
-    """
-    if content is None:
-        return "", "text"
-    if isinstance(content, str):
-        return content, "text"
-    if isinstance(content, list):
-        texts: list[str] = []
-        saw_non_text = False
-        for block in content:
-            btype = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
-            if btype == "text" or btype is None:
-                text = getattr(block, "text", None) or (block.get("text") if isinstance(block, dict) else None)
-                if text is None and isinstance(block, str):
-                    text = block
-                if text is not None:
-                    texts.append(str(text))
-            else:
-                saw_non_text = True
-        joined = "\n".join(texts)
-        if texts and saw_non_text:
-            return joined, "mixed"
-        if texts:
-            return joined, "text"
-        if saw_non_text:
-            return json.dumps(content, default=str), "image"
-        return "", "text"
-    return str(content), "text"
-
-
-async def _count_result_tokens(client: Any, model: str, result_text: str) -> int | None:
-    if not result_text:
-        return 0
-    try:
-        n = await client.messages.count_tokens(
-            model=model,
-            messages=[{"role": "user", "content": result_text}],
-        )
-        return n.input_tokens
-    except Exception as exc:
-        print(f"count_tokens warning: {exc}", file=sys.stderr)
-        return None
-
-
-def _extract_final_text(message: Any) -> str:
-    if message is None:
-        return ""
-    parts: list[str] = []
-    for block in getattr(message, "content", None) or []:
-        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
-            parts.append(block.text)
-    return "\n".join(parts)
 
 
 def stdio_server_env(*, surface: str = "full", extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -224,8 +172,8 @@ def _resume_field_mismatch(
     raw = row.get(field)
     if raw is None or raw == "":
         return None  # back-compat: older rows without the key pass
-    # surface/driver compare case-insensitively; battery/model are exact strings.
-    if field in ("surface", "driver"):
+    # Surface/driver/provider compare case-insensitively; battery/model are exact.
+    if field in ("surface", "driver", "provider"):
         got, want = str(raw).strip().lower(), expected.strip().lower()
     else:
         got, want = str(raw).strip(), expected.strip()
@@ -275,12 +223,13 @@ def load_resume_skip_keys(
     battery: str | None = None,
     model: str | None = None,
     driver: str | None = None,
+    provider: str | None = None,
 ) -> tuple[set[tuple[str, int]], int, int]:
     """Load existing JSONL rows and decide which (task_id, rep) pairs to skip.
 
     Returns ``(skip_keys, n_skip, n_retry)`` where ``n_retry = len(seen - skip_keys)``
     (keys that still need a re-run). Raises ``SystemExit`` when a row's surface /
-    battery / model / driver disagrees with the current run (missing keys pass for
+    battery / model / driver / provider disagrees with the current run (missing keys pass for
     back-compat). Meta lines (``row_type=meta`` or no task_id) are mismatch-checked
     but not counted as task rows. Truncated/invalid JSON lines are warned and skipped.
     """
@@ -306,12 +255,20 @@ def load_resume_skip_keys(
             for field, expected in (
                 ("surface", surface),
                 ("battery", battery),
-                ("model", model),
                 ("driver", driver),
+                ("provider", provider),
             ):
                 msg = _resume_field_mismatch(row, field=field, expected=expected)
                 if msg:
                     raise SystemExit(msg)
+            # New API rows keep both the requested ID (resume identity) and the
+            # provider-reported model that actually ran. Older rows only have model.
+            model_row = dict(row)
+            if model_row.get("requested_model"):
+                model_row["model"] = model_row["requested_model"]
+            msg = _resume_field_mismatch(model_row, field="model", expected=model)
+            if msg:
+                raise SystemExit(msg)
             # Meta / header rows: checked above, not part of resume key set.
             if is_meta_or_non_task_row(row):
                 continue
@@ -338,6 +295,7 @@ def make_run_meta_row(
     model: str | None,
     driver: str,
     git_sha: str,
+    provider: str | None = None,
     ts: str | None = None,
 ) -> dict[str, Any]:
     """Build the single first-line meta record for a new output JSONL."""
@@ -348,6 +306,7 @@ def make_run_meta_row(
         "battery": battery,
         "model": model,
         "driver": driver,
+        "provider": provider,
         "git_sha": git_sha,
         "ts": ts or datetime.now(timezone.utc).isoformat(),
     }
@@ -395,7 +354,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "External MCP stdio server launch command (shlex-split), e.g. "
             "'/path/venv/bin/python -m plane_mcp stdio --v2'. Enables external mode: "
             "all tasks run (no surface skips) and mispick classification is disabled "
-            "(the foreign tool names have no overlay sets). CLI drivers only."
+            "(the foreign tool names have no overlay sets)."
         ),
     )
     p.add_argument(
@@ -408,11 +367,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--driver",
         type=str,
-        default="sdk",
+        default="api",
         choices=sorted(KNOWN_DRIVERS),
         help=(
-            "Agent backend: sdk | claude-cli | codex-cli | antigravity-cli | opencode-cli. Not required for --canary."
+            "Agent backend: api | claude-cli | codex-cli | antigravity-cli | opencode-cli "
+            "('sdk' is an alias for 'api'). Not required for --canary."
         ),
+    )
+    p.add_argument(
+        "--provider",
+        type=str,
+        default="anthropic",
+        choices=("anthropic", "openai"),
+        help="Model API provider for --driver api/sdk (default: anthropic).",
     )
     p.add_argument("--out", type=str, default=None, help="JSONL output path")
     p.add_argument(
@@ -475,190 +442,6 @@ def cmd_dry_run(tasks: list[dict[str, Any]]) -> int:
     return 0
 
 
-async def run_agent_task(
-    *,
-    client: Any,
-    model_id: str,
-    task: dict[str, Any],
-    ctx: dict[str, Any],
-    workspace_slug: str,
-    surface: str = "full",
-    optimal_tools: set[str] | None = None,
-    alternate_tools: set[str] | None = None,
-) -> dict[str, Any]:
-    """Run one task against a fresh stdio MCP server subprocess."""
-    from anthropic.lib.tools.mcp import async_mcp_tool
-    from mcp import ClientSession
-    from mcp.client.stdio import StdioServerParameters, stdio_client
-
-    project_name = ctx["project_name"]
-    system = _system_preamble(workspace_slug, project_name)
-    # strict: empty binder values / exceptions are infra_seed, not blank-ID prompts.
-    prompt = format_task_prompt(task, ctx, strict=True)
-
-    server_params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "plane_mcp", "stdio"],
-        env=stdio_server_env(surface=surface),
-    )
-
-    optimal = set(optimal_tools) if optimal_tools is not None else set(task["optimal_tools"])
-    alternate = set(alternate_tools) if alternate_tools is not None else set(task["alternate_tools"])
-    assert optimal.isdisjoint(alternate), f"{task['id']}: optimal/alternate overlap"
-
-    calls: list[dict[str, Any]] = []
-    # (call_idx, text, kind, is_error) buffered for post-loop count_tokens
-    pending_results: list[tuple[int, str, str, bool]] = []
-    usage_per_iteration: list[dict[str, int]] = []
-    final_message = None
-    iterations = 0
-    result_pair_mismatch = False
-    wall_time_s = 0.0
-
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as mcp_client:
-            await mcp_client.initialize()
-            tools_result = await mcp_client.list_tools()
-            runner = client.beta.messages.tool_runner(
-                model=model_id,
-                max_tokens=MAX_TOKENS,
-                max_iterations=MAX_ITERATIONS,
-                system=system,
-                messages=[{"role": "user", "content": prompt}],
-                tools=[async_mcp_tool(t, mcp_client) for t in tools_result.tools],
-            )
-            # wall_time: agent loop only (after list_tools, before subprocess teardown)
-            t0 = time.perf_counter()
-            try:
-                async for message in runner:
-                    iterations += 1
-                    final_message = message
-                    usage = getattr(message, "usage", None)
-                    if usage is not None:
-                        usage_per_iteration.append(
-                            {
-                                "in": getattr(usage, "input_tokens", 0) or 0,
-                                "out": getattr(usage, "output_tokens", 0) or 0,
-                                "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0,
-                                "cache_write": getattr(usage, "cache_creation_input_tokens", 0) or 0,
-                            }
-                        )
-
-                    # Map tool_use_id → call index for result pairing (not ordinal-only).
-                    tool_use_by_id: dict[str, int] = {}
-                    for block in message.content or []:
-                        if getattr(block, "type", None) == "tool_use":
-                            name = block.name
-                            args = block.input if hasattr(block, "input") else {}
-                            try:
-                                args_chars = len(json.dumps(args, default=str))
-                            except Exception:
-                                args_chars = len(str(args))
-                            call_rec = {
-                                "tool": name,
-                                "class": classify_call(name, optimal, alternate),
-                                "args_chars": args_chars,
-                                "result_tokens": None,
-                                "result_chars": 0,
-                                "result_kind": "text",
-                                "is_error": False,
-                            }
-                            idx = len(calls)
-                            calls.append(call_rec)
-                            use_id = getattr(block, "id", None)
-                            if use_id:
-                                tool_use_by_id[str(use_id)] = idx
-
-                    # Never execute tools on a refusal-terminated turn (F2 / SDK guard).
-                    if getattr(message, "stop_reason", None) == "refusal":
-                        continue
-
-                    tool_response = await runner.generate_tool_call_response()
-                    if tool_response is not None:
-                        if isinstance(tool_response, dict):
-                            blocks = tool_response.get("content") or []
-                        else:
-                            blocks = getattr(tool_response, "content", None) or []
-                        result_blocks = [
-                            b
-                            for b in blocks
-                            if getattr(b, "type", None) == "tool_result"
-                            or (isinstance(b, dict) and b.get("type") == "tool_result")
-                        ]
-                        matched_ids: set[str] = set()
-                        for block in result_blocks:
-                            if isinstance(block, dict):
-                                is_error = bool(block.get("is_error"))
-                                raw_content = block.get("content")
-                                tool_use_id = block.get("tool_use_id")
-                            else:
-                                is_error = bool(getattr(block, "is_error", False))
-                                raw_content = getattr(block, "content", None)
-                                tool_use_id = getattr(block, "tool_use_id", None)
-                            text, kind = _tool_result_text(raw_content)
-                            if tool_use_id is not None and str(tool_use_id) in tool_use_by_id:
-                                idx = tool_use_by_id[str(tool_use_id)]
-                                matched_ids.add(str(tool_use_id))
-                            else:
-                                result_pair_mismatch = True
-                                continue
-                            calls[idx]["is_error"] = is_error
-                            calls[idx]["result_kind"] = kind
-                            if kind == "text":
-                                calls[idx]["result_chars"] = len(text)
-                            else:
-                                calls[idx]["result_chars"] = len(str(raw_content))
-                            pending_results.append((idx, text, kind, is_error))
-                        if len(matched_ids) != len(tool_use_by_id):
-                            result_pair_mismatch = True
-            finally:
-                wall_time_s = time.perf_counter() - t0
-
-    # Token-count tool results after the agent loop (must not pollute wall_time).
-    token_count_failures = 0
-    for idx, text, kind, _is_error in pending_results:
-        if kind not in ("text", "mixed"):
-            calls[idx]["result_tokens"] = None
-            continue
-        counted = await _count_result_tokens(client, model_id, text)
-        calls[idx]["result_tokens"] = counted
-        if counted is None and text:
-            token_count_failures += 1
-
-    stop_reason = getattr(final_message, "stop_reason", None) if final_message else None
-    # Cap detection is stop_reason-aware only (F0/F3): a clean end_turn (or max_tokens,
-    # which the report already counts separately) on the 15th yield is not flagged here.
-    # Only runs that exhaust the iteration budget while still mid-tool-loop count.
-    hit_max_iterations = iterations >= MAX_ITERATIONS and stop_reason not in (
-        "end_turn",
-        "max_tokens",
-    )
-
-    final_text = _extract_final_text(final_message)
-    errored = sum(1 for c in calls if c.get("is_error"))
-    alternate_n = sum(1 for c in calls if c["class"] == "alternate")
-    out_of_set_n = sum(1 for c in calls if c["class"] == "out_of_set")
-    total_result_tokens = sum(c["result_tokens"] or 0 for c in calls if c.get("result_tokens") is not None)
-    cum_input = sum(u.get("in", 0) for u in usage_per_iteration)
-
-    return {
-        "final_text": final_text,
-        "calls": calls,
-        "num_calls": len(calls),
-        "errored_calls": errored,
-        "alternate_calls": alternate_n,
-        "out_of_set_calls": out_of_set_n,
-        "total_result_tokens": total_result_tokens,
-        "usage_per_iteration": usage_per_iteration,
-        "cum_input_tokens": cum_input,
-        "wall_time_s": round(wall_time_s, 3),
-        "stop_reason": stop_reason,
-        "hit_max_iterations": hit_max_iterations,
-        "result_pair_mismatch": result_pair_mismatch,
-        "token_count_failures": token_count_failures,
-    }
-
-
 async def run_agent_task_via_driver(
     *,
     driver: Any,
@@ -671,7 +454,7 @@ async def run_agent_task_via_driver(
     alternate_tools: set[str] | None = None,
     server_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Run one task through a CLI (or other) AgentDriver."""
+    """Run one task through the selected AgentDriver."""
     project_name = ctx["project_name"]
     system = _system_preamble(workspace_slug, project_name)
     prompt = format_task_prompt(task, ctx, strict=True)
@@ -680,7 +463,7 @@ async def run_agent_task_via_driver(
     assert optimal.isdisjoint(alternate), f"{task['id']}: optimal/alternate overlap"
 
     mcp_env = stdio_server_env(surface=surface, extra=server_env)
-    # Drivers are sync (subprocess); run off the event loop thread.
+    # AgentDriver is sync (CLI subprocess or API loop); keep it off this loop.
     agent_run = await asyncio.to_thread(
         driver.run_task,
         prompt,
@@ -695,7 +478,7 @@ async def run_agent_task_via_driver(
         optimal=optimal,
         alternate=alternate,
         classify=classify_call,
-        skip_result_tokens=True,
+        skip_result_tokens=agent_run.result_tokens_estimated is None,
     )
 
 
@@ -705,6 +488,7 @@ def _base_row(
     git_sha: str,
     surface: str,
     driver_name: str,
+    provider: str | None,
     model_id: str | None,
     task: dict[str, Any],
     rep: int,
@@ -718,8 +502,10 @@ def _base_row(
         "battery": battery,
         "surface": surface,
         "driver": driver_name,
+        "provider": provider,
         "classification": classification,
         "model": model_id,
+        "requested_model": model_id,
         "task_id": task["id"],
         "author": task_author(task),
         "rep": rep,
@@ -728,8 +514,12 @@ def _base_row(
         "skipped": None,
         "error": None,
         "error_class": None,
+        "final_text": "",
         "stop_reason": None,
         "hit_max_iterations": False,
+        "result_pair_mismatch": False,
+        "token_count_failures": 0,
+        "result_tokens_estimated": None,
         "calls": [],
         "num_calls": 0,
         "errored_calls": 0,
@@ -749,7 +539,8 @@ async def run_live(
     reps: int,
     surface: str,
     out_path: Path,
-    driver_name: str = "sdk",
+    driver_name: str = "api",
+    provider: str = "anthropic",
     server_cmd: list[str] | None = None,
     server_env: dict[str, str] | None = None,
     resume: bool = False,
@@ -764,22 +555,17 @@ async def run_live(
         )
         return 2
 
-    driver_name = (driver_name or "sdk").strip().lower()
+    driver_name = (driver_name or "api").strip().lower()
     if driver_name not in KNOWN_DRIVERS:
         print(
             f"error: unknown --driver {driver_name!r}; expected one of {sorted(KNOWN_DRIVERS)}",
             file=sys.stderr,
         )
         return 2
-    if external and driver_name == "sdk":
-        print(
-            f"error: --server-cmd requires a CLI driver (one of {sorted(KNOWN_DRIVERS - {'sdk'})})",
-            file=sys.stderr,
-        )
-        return 2
-
-    use_sdk = driver_name == "sdk"
-    model_id = resolve_model_for_driver(driver_name, model_alias)
+    provider = (provider or "anthropic").strip().lower()
+    is_api_driver = driver_name in ("api", "sdk")
+    provider_id = provider if is_api_driver else None
+    model_id = resolve_model_for_driver(driver_name, model_alias, provider=provider)
 
     run_id = uuid.uuid4().hex
     git_sha = _git_sha()
@@ -795,6 +581,7 @@ async def run_live(
                 battery=battery,
                 model=model_id,
                 driver=driver_name,
+                provider=provider_id,
             )
         except SystemExit as e:
             print(e, file=sys.stderr)
@@ -808,6 +595,7 @@ async def run_live(
         battery=battery,
         model=model_id,
         driver=driver_name,
+        provider=provider_id,
         git_sha=git_sha,
     )
     if maybe_write_run_meta(out_path, meta):
@@ -816,24 +604,23 @@ async def run_live(
     plane, workspace_slug = make_plane_client()
     # User chose --driver explicitly: codex live is allowed (they own the quota).
     driver_kwargs: dict[str, Any] = {}
+    if is_api_driver:
+        driver_kwargs.update({"provider": provider, "max_tokens": MAX_TOKENS})
     if driver_name == "codex-cli":
         driver_kwargs["allow_live"] = True
-    # --server-cmd must reach every CLI driver (not just Claude); otherwise we
+    # --server-cmd must reach every driver; otherwise we
     # silently benchmark the wrong server.
     if server_cmd is not None:
-        if use_sdk:
-            print("error: --server-cmd is incompatible with --driver sdk", file=sys.stderr)
-            return 2
         driver_kwargs["server_command"] = server_cmd
-    cli_driver = None if use_sdk else get_driver(driver_name, **driver_kwargs)
+    driver = get_driver(driver_name, **driver_kwargs)
 
     print(
-        f"run_id={run_id} battery={battery} driver={driver_name} model={model_id} "
+        f"run_id={run_id} battery={battery} driver={driver_name} provider={provider_id} model={model_id} "
         f"surface={surface} tasks={[t['id'] for t in tasks]} reps={reps}"
     )
     print(f"writing {out_path}")
 
-    async def _one_client_scope(client: Any | None) -> None:
+    async def _run_tasks() -> None:
         with out_path.open("a", encoding="utf-8") as fh:
             for task in tasks:
                 if external:
@@ -858,6 +645,7 @@ async def run_live(
                         git_sha=git_sha,
                         surface=surface,
                         driver_name=driver_name,
+                        provider=provider_id,
                         model_id=model_id,
                         task=task,
                         rep=rep,
@@ -902,34 +690,20 @@ async def run_live(
                                     print(f"  {task['id']} rep={rep} SKIPPED: {reason}")
                                 else:
                                     agent: dict[str, Any] | None = None
-                                    # Agent wrap: SDK bugs → infra_sdk; CLI raises → infra_cli.
+                                    # Agent wrap: API failures and CLI failures are infrastructure.
                                     # Contained CLI stops (timeout / error subtypes) return AgentRun.
                                     try:
-                                        if use_sdk:
-                                            assert client is not None
-                                            agent = await run_agent_task(
-                                                client=client,
-                                                model_id=model_id,
-                                                task=task,
-                                                ctx=ctx,
-                                                workspace_slug=workspace_slug,
-                                                surface=surface,
-                                                optimal_tools=surface_sets["optimal_tools"],
-                                                alternate_tools=surface_sets["alternate_tools"],
-                                            )
-                                        else:
-                                            assert cli_driver is not None
-                                            agent = await run_agent_task_via_driver(
-                                                driver=cli_driver,
-                                                model_id=model_id,
-                                                task=task,
-                                                ctx=ctx,
-                                                workspace_slug=workspace_slug,
-                                                surface=surface,
-                                                optimal_tools=surface_sets["optimal_tools"],
-                                                alternate_tools=surface_sets["alternate_tools"],
-                                                server_env=server_env,
-                                            )
+                                        agent = await run_agent_task_via_driver(
+                                            driver=driver,
+                                            model_id=model_id,
+                                            task=task,
+                                            ctx=ctx,
+                                            workspace_slug=workspace_slug,
+                                            surface=surface,
+                                            optimal_tools=surface_sets["optimal_tools"],
+                                            alternate_tools=surface_sets["alternate_tools"],
+                                            server_env=server_env,
+                                        )
                                     except PromptBindError as exc:
                                         # Empty/missing seed IDs in the prompt — not an agent failure.
                                         row["success"] = False
@@ -942,8 +716,12 @@ async def run_live(
                                         )
                                         agent = None
                                     except Exception as exc:
-                                        # SDK harness bugs must not look like CLI infra.
-                                        agent_err_class = "infra_sdk" if use_sdk else "infra_cli"
+                                        if driver_name == "sdk":
+                                            agent_err_class = "infra_sdk"
+                                        elif is_api_driver:
+                                            agent_err_class = "infra_api"
+                                        else:
+                                            agent_err_class = "infra_cli"
                                         row["success"] = False
                                         row["error"] = f"{type(exc).__name__}: {exc}"
                                         row["error_class"] = agent_err_class
@@ -955,7 +733,7 @@ async def run_live(
                                         agent = None
 
                                     if agent is not None:
-                                        row.update({k: agent[k] for k in agent if k != "final_text"})
+                                        row.update(agent)
                                         if external:
                                             # Empty overlay sets would classify every call
                                             # out-of-set; null the counters instead.
@@ -964,7 +742,7 @@ async def run_live(
 
                                         # CLI infra stops: timeout + error subtypes except error_max_turns.
                                         stop_reason = agent.get("stop_reason")
-                                        if not use_sdk and is_infra_cli_stop_reason(
+                                        if driver_name.endswith("-cli") and is_infra_cli_stop_reason(
                                             str(stop_reason) if stop_reason is not None else None
                                         ):
                                             row["success"] = False
@@ -1035,13 +813,7 @@ async def run_live(
                     fh.write(json.dumps(row, default=str) + "\n")
                     fh.flush()
 
-    if use_sdk:
-        from anthropic import AsyncAnthropic
-
-        async with AsyncAnthropic() as client:
-            await _one_client_scope(client)
-    else:
-        await _one_client_scope(None)
+    await _run_tasks()
 
     return 0
 
@@ -1169,7 +941,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.canary:
         return asyncio.run(run_canary(tasks, surface=surface))
 
-    driver_name = (getattr(args, "driver", None) or "sdk").strip().lower()
+    driver_name = (getattr(args, "driver", None) or "api").strip().lower()
     if driver_name not in KNOWN_DRIVERS:
         print(
             f"error: unknown --driver {driver_name!r}; expected one of {sorted(KNOWN_DRIVERS)}",
@@ -1192,6 +964,7 @@ def main(argv: list[str] | None = None) -> int:
             surface=surface,
             out_path=out,
             driver_name=driver_name,
+            provider=args.provider,
             server_cmd=server_cmd,
             server_env=server_env or None,
             resume=bool(args.resume),

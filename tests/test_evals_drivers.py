@@ -16,6 +16,7 @@ import pytest
 from evals.drivers import (
     KNOWN_DRIVERS,
     AgentRun,
+    ApiDriver,
     ClaudeCliDriver,
     CodexCliDriver,
     agent_run_to_harness_dict,
@@ -766,11 +767,12 @@ def test_agent_run_to_harness_dict_does_not_guess_usage_total():
 
 
 def test_known_drivers():
-    assert KNOWN_DRIVERS == {"sdk", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"}
+    assert KNOWN_DRIVERS == {"api", "sdk", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"}
 
 
-def test_get_driver_sdk_is_none():
-    assert get_driver("sdk") is None
+def test_get_driver_api_and_sdk_alias():
+    assert isinstance(get_driver("api"), ApiDriver)
+    assert isinstance(get_driver("sdk"), ApiDriver)
     assert isinstance(get_driver("claude-cli"), ClaudeCliDriver)
     assert isinstance(get_driver("codex-cli"), CodexCliDriver)
 
@@ -779,7 +781,8 @@ def test_parse_args_accepts_driver():
     a = parse_args(["--driver", "claude-cli", "--dry-run"])
     assert a.driver == "claude-cli"
     b = parse_args(["--dry-run"])
-    assert b.driver == "sdk"
+    assert b.driver == "api"
+    assert b.provider == "anthropic"
 
 
 def test_stdio_env_still_works_for_cli_drivers(monkeypatch):

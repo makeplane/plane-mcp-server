@@ -24,68 +24,31 @@ The harness must support A/B comparison: same tasks against different tool surfa
 
 ## Architecture
 
-**Driver:** the Anthropic Python SDK's beta tool runner with its MCP conversion helpers —
-NOT the Claude Agent SDK, NOT a hand-rolled agent loop. This measures the MCP surface in
-isolation (no coding-harness system prompt or built-in tools polluting the numbers).
+**Driver:** `ApiDriver` owns the model/tool loop and the stdio MCP session. Provider adapters
+own only conversation state and wire translation behind a neutral `ModelBackend` protocol:
+`start(system, prompt, tools)`, `next_turn()`, and `add_tool_results(results)`. Anthropic uses
+the stable Messages API; OpenAI uses Chat Completions function tools. CLI drivers keep the
+same `AgentDriver` boundary, so `run.py` has one execution path for every driver.
 
-The exact pattern (this is documented SDK API — do not improvise alternatives):
-
-```python
-from anthropic import AsyncAnthropic
-from anthropic.lib.tools.mcp import async_mcp_tool
-from mcp import ClientSession
-from mcp.client.stdio import stdio_client, StdioServerParameters
-
-client = AsyncAnthropic()  # resolves ANTHROPIC_API_KEY / ant-auth profile from env
-
-server_params = StdioServerParameters(
-    command=sys.executable,
-    args=["-m", "plane_mcp", "stdio"],
-    env={
-        "PLANE_API_KEY": os.environ["EVAL_PLANE_API_KEY"],
-        "PLANE_WORKSPACE_SLUG": os.environ["EVAL_PLANE_WORKSPACE_SLUG"],
-        "PLANE_BASE_URL": os.environ.get("EVAL_PLANE_BASE_URL", "https://api.plane.so"),
-    },
-)
-
-async with stdio_client(server_params) as (read, write):
-    async with ClientSession(read, write) as mcp_client:
-        await mcp_client.initialize()
-        tools_result = await mcp_client.list_tools()
-        runner = client.beta.messages.tool_runner(  # sync call — returns the runner
-            model=MODEL_ID,
-            max_tokens=8192,
-            max_iterations=15,  # turn cap per task
-            system=SYSTEM_PREAMBLE,
-            messages=[{"role": "user", "content": task["prompt"]}],
-            tools=[async_mcp_tool(t, mcp_client) for t in tools_result.tools],
-        )
-        async for message in runner:
-            # capture tool_use blocks from message.content
-            for block in message.content:
-                if block.type == "tool_use":
-                    record_call(block.name, block.input)
-            # capture tool results (cached — tools still run exactly once)
-            tool_response = runner.generate_tool_call_response()
-            if tool_response is not None:
-                record_results(tool_response)  # user message w/ tool_result blocks
-            final = message
-```
+Neutral turns contain final text, tool calls keyed by provider call ID, normalized usage,
+and stop reason. The driver records calls, executes MCP tools, pairs results back by call ID,
+and passes neutral results to the backend for the next provider turn. This isolates tool-
+surface behavior without a coding-harness system prompt or built-in tools.
 
 Notes:
 - One fresh stdio server subprocess per task run (cheap, isolates state).
-- Record `message.usage` from **every** yielded message (input_tokens, output_tokens,
+- Record provider usage from **every** model turn (input tokens, output tokens,
   cache_read_input_tokens, cache_creation_input_tokens) — this is the exact context cost,
   returned free; the per-result counts below are a size proxy, not the cost figure.
 - Record the final message's `stop_reason`, and whether the loop ended by exhausting
   `max_iterations` — a capped/truncated run must be distinguishable from a genuine failure.
-  Detect the cap from `stop_reason` (the runner can legitimately finish with `end_turn` on
+  Detect the cap from `stop_reason` (a model can legitimately finish with `end_turn` on
   exactly its last permitted iteration — an unconditional iteration-count check misreports
   that as capped).
-- **Never call `generate_tool_call_response()` on a refusal-terminated message**
-  (`stop_reason == "refusal"`): the SDK deliberately skips executing those tool_use blocks
-  (side effects the model never confirmed), and calling it from the loop body bypasses that
-  guard and fires real writes at the eval workspace.
+- **Never execute tools on a refusal-terminated turn** (`stop_reason == "refusal"`), even if
+  the response also contains tool calls. Record the calls for auditability, then stop.
+- Pair every tool result to its call by call ID, never list position. Missing, duplicate, or
+  unknown IDs set `result_pair_mismatch`.
 - `wall_time_s` measures the agent loop only: start the clock after `list_tools()` returns,
   stop it when the loop exits — MCP subprocess spawn/teardown and post-loop token counting
   are excluded.
@@ -93,48 +56,44 @@ Notes:
   `PLANE_*` vars) — never inherit `os.environ`. `plane_mcp/client.py` prefers
   `PLANE_INTERNAL_BASE_URL` over `PLANE_BASE_URL`, so an inherited value silently points
   the agent at a different Plane instance than seed/verify.
-- A harness/API failure (SDK exception, MCP crash) is recorded as `error: "<msg>"` on the
+- A harness/API failure (provider exception, MCP crash) is recorded as `error: "<msg>"` on the
   row — it is neither a task failure nor a skip, and the row's zeroed metrics must not
   enter any statistic.
 - `SYSTEM_PREAMBLE` names the eval workspace slug and project name, states "complete the
   task using the available tools, then stop", and nothing else. Keep it under 100 words —
   it is part of the measured context.
-- Omit `thinking` and sampling params entirely (adaptive thinking is the default on
-  claude-sonnet-5; `temperature`/`top_p`/`top_k` are rejected).
-- Final assistant text = the last yielded message's text blocks (used by read-task verifiers).
+- Omit thinking and sampling parameters; the API backend only sets the model, token cap,
+  system/instructions, conversation, and tools.
+- Final assistant text = the last model turn's text (used by read-task verifiers).
 
-**Token counting of tool results:** use the API's count_tokens endpoint, never tiktoken
-(wrong tokenizer for Claude, ~15-20% off):
-
-```python
-n = (
-    await client.messages.count_tokens(
-        model=MODEL_ID,
-        messages=[{"role": "user", "content": result_text}],
-    )
-).input_tokens
-```
+**Token sizing of tool results:** the owned loop holds the complete text passed back to the
+model, so `result_chars` is always exact. A backend may expose a token counter; otherwise the
+driver uses a deterministic character estimate and sets `result_tokens_estimated: true` on
+the row. No provider token-count endpoint is required per tool result.
 
 Rules:
 - Run these counts **after** the agent loop finishes, not inline — they must not pollute
   `wall_time_s`. Buffer the raw result strings during the run, count at the end.
-- A tool_result's content may be a list of blocks. Concatenate the text of `text` blocks;
-  for non-text blocks (e.g. image) record `result_kind: "image"` with `result_tokens: null`
-  and `result_chars` of the raw payload. `is_error` results are counted like text.
+- A tool result's content may be a list of blocks. Text-only blocks are concatenated;
+  non-text or mixed content is serialized into the exact string sent to the model and marked
+  `result_kind: "image"` or `"mixed"`. Error results are sized like successful results.
 - Also record raw `len(chars)` alongside every count.
 
-**Models** (CLI aliases → IDs; these are deliberate, do not substitute):
+**API model aliases** (provider-specific):
 
-| alias | model id | role |
-|---|---|---|
-| `sonnet` | `claude-sonnet-5` | default / representative agent |
-| `haiku` | `claude-haiku-4-5` | canary — weaker models amplify tool-surface defects |
+| provider | alias | model id | role |
+|---|---|---|---|
+| Anthropic | `sonnet` | `claude-sonnet-5` | default / representative agent |
+| Anthropic | `haiku` | `claude-haiku-4-5` | weaker-model canary |
+| OpenAI | `sonnet` | `gpt-5` | representative agent |
+| OpenAI | `haiku` | `gpt-5-mini` | faster/weaker-model canary |
 
 ## Environment
 
 | var | purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | driver LLM auth (or an `ant auth` profile) |
+| `ANTHROPIC_API_KEY` | default API-provider authentication |
+| `OPENAI_API_KEY` | OpenAI provider authentication when its optional SDK is installed |
 | `EVAL_PLANE_API_KEY` | Plane API key for the **dedicated eval workspace** |
 | `EVAL_PLANE_WORKSPACE_SLUG` | eval workspace slug — never a production workspace |
 | `EVAL_PLANE_BASE_URL` | optional, defaults to `https://api.plane.so` |
@@ -149,6 +108,7 @@ Construct the client the same way `plane_mcp/client.py` does for stdio mode, but
 evals/
   __init__.py
   DESIGN.md      # this file
+  drivers/api/   # owned loop + neutral, Anthropic, and OpenAI backends
   tasks.py       # task definitions (plain dicts) + verifier functions
   seed.py        # per-run fixture create/teardown via plane-sdk
   run.py         # CLI driver (python -m evals.run)
@@ -160,13 +120,12 @@ Dependencies: add to `pyproject.toml`:
 
 ```toml
 [project.optional-dependencies]
-evals = ["anthropic[mcp]>=<latest at implementation time>"]
+evals = ["anthropic>=0.121.0"]
 ```
 
-Pin a `>=` floor at whatever the current anthropic release is when you implement, and
-verify `from anthropic.lib.tools.mcp import async_mcp_tool` actually imports in the venv.
-Do NOT change the existing `mcp==1.26.0` pin — `anthropic[mcp]` must coexist with it.
-No other new dependencies. Stdlib only otherwise (argparse, json, asyncio, uuid, time).
+Pin a `>=` floor for the stable Anthropic Messages client. OpenAI support stays optional:
+the module imports its SDK lazily only when that provider is selected, and tests inject a
+fake client. Do NOT change the existing `mcp==1.26.0` pin.
 
 ## Task schema (`tasks.py`)
 
