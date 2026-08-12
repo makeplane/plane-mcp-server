@@ -1,58 +1,55 @@
-"""Tools for Plane MCP Server."""
+"""Tool surface selection.
+
+`PLANE_MCP_TOOLS_VERSION` chooses the advertised catalogue:
+
+    v2  one action-dispatch tool per resource (29 tools) -- the default
+    v1  the original verb-per-endpoint catalogue (177 tools)
+
+An environment variable rather than a CLI flag because the default is the
+desired state: a lost variable yields v2, and it is settable on every transport
+including hosted.
+
+"tools v2" is the shape of the MCP surface. It is unrelated to Plane's API v2,
+which is a backend concern and will be selected separately.
+
+v1 is removed in the next major release.
+"""
+
+from __future__ import annotations
+
+import os
 
 from fastmcp import FastMCP
+from fastmcp.utilities.logging import get_logger
 
-from plane_mcp.tools.customers import register_customer_tools
-from plane_mcp.tools.cycles import register_cycle_tools
-from plane_mcp.tools.initiatives import register_initiative_tools
-from plane_mcp.tools.intake import register_intake_tools
-from plane_mcp.tools.labels import register_label_tools
-from plane_mcp.tools.milestones import register_milestone_tools
-from plane_mcp.tools.modules import register_module_tools
-from plane_mcp.tools.pages import register_page_tools
-from plane_mcp.tools.pql import register_pql_tools
-from plane_mcp.tools.projects import register_project_tools
-from plane_mcp.tools.releases import register_release_tools
-from plane_mcp.tools.roles import register_role_tools
-from plane_mcp.tools.states import register_state_tools
-from plane_mcp.tools.users import register_user_tools
-from plane_mcp.tools.work_item_activities import register_work_item_activity_tools
-from plane_mcp.tools.work_item_attachments import register_work_item_attachment_tools
-from plane_mcp.tools.work_item_comments import register_work_item_comment_tools
-from plane_mcp.tools.work_item_links import register_work_item_link_tools
-from plane_mcp.tools.work_item_properties import register_work_item_property_tools
-from plane_mcp.tools.work_item_relation_definitions import register_work_item_relation_definition_tools
-from plane_mcp.tools.work_item_relations import register_work_item_relation_tools
-from plane_mcp.tools.work_item_types import register_work_item_type_tools
-from plane_mcp.tools.work_items import register_work_item_tools
-from plane_mcp.tools.work_logs import register_work_log_tools
-from plane_mcp.tools.workspaces import register_workspace_tools
+DEFAULT_VERSION = "v2"
+VERSIONS = ("v1", "v2")
+ENV_VAR = "PLANE_MCP_TOOLS_VERSION"
+
+logger = get_logger(__name__)
+
+
+def selected_version() -> str:
+    """Read and validate the requested surface version."""
+    version = os.getenv(ENV_VAR, DEFAULT_VERSION).strip().lower() or DEFAULT_VERSION
+    if version not in VERSIONS:
+        raise ValueError(f"{ENV_VAR} must be one of {VERSIONS}, got {version!r}")
+    return version
 
 
 def register_tools(mcp: FastMCP) -> None:
-    """Register all tools with the MCP server."""
-    register_project_tools(mcp)
-    register_work_item_tools(mcp)
-    register_work_item_activity_tools(mcp)
-    register_work_item_attachment_tools(mcp)
-    register_work_item_comment_tools(mcp)
-    register_work_item_link_tools(mcp)
-    register_work_item_relation_definition_tools(mcp)
-    register_work_item_relation_tools(mcp)
-    register_work_log_tools(mcp)
-    register_cycle_tools(mcp)
-    register_user_tools(mcp)
-    register_module_tools(mcp)
-    register_initiative_tools(mcp)
-    register_intake_tools(mcp)
-    register_label_tools(mcp)
-    register_page_tools(mcp)
-    register_work_item_property_tools(mcp)
-    register_work_item_type_tools(mcp)
-    register_state_tools(mcp)
-    register_workspace_tools(mcp)
-    register_milestone_tools(mcp)
-    register_role_tools(mcp)
-    register_release_tools(mcp)
-    register_customer_tools(mcp)
-    register_pql_tools(mcp)
+    """Attach the selected tool surface to `mcp`."""
+    if selected_version() == "v1":
+        from plane_mcp.tools.v1 import register_tools as register
+
+        logger.warning(
+            "%s=v1 serves the legacy 177-tool surface, which is removed in the next "
+            "major release. Unset it to use the consolidated surface.",
+            ENV_VAR,
+        )
+        register(mcp)
+        return
+
+    from plane_mcp.tools.v2 import register_tools as register
+
+    register(mcp)

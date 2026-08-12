@@ -58,9 +58,22 @@ Three factory functions (`get_oauth_mcp`, `get_header_mcp`, `get_stdio_mcp`) eac
 
 ### Tools (`tools/`)
 
-29 tool modules organized by Plane domain (projects, work_items, cycles, modules, releases, etc.), totaling 160+ tools. Each module exports a `register_*_tools(mcp: FastMCP)` function called from `tools/__init__.py`.
+Two surfaces live side by side. `tools/__init__.py` picks one at registration time from `PLANE_MCP_TOOLS_VERSION`, so `server.py` and `__main__.py` never see the difference.
 
-**Tool pattern:**
+| Value | Surface | Tools | Advertised |
+|---|---|---|---|
+| `v2` (default) | `tools/v2/` — one action-dispatch tool per resource | 28 | ~55k chars |
+| `v1` | `tools/v1/` — the original flat tools | 177 | ~500k chars |
+
+`v1` is retained for one major release and logs a deprecation warning. Note that "tools v2" is this server's tool surface, not Plane's API v2 — they version independently.
+
+#### Consolidated surface (`tools/v2/`)
+
+One module per resource, each exporting `NAME`, `ACTIONS`, `LEGACY` and `register(mcp)`. `ACTIONS` is the single source of truth: the tool description and its `ToolAnnotations` are generated from it, and the conformance suite asserts they agree with the function signature. See `tools/v2/README.md` for the full convention and the rules that are easy to break.
+
+169 of the 177 v1 tool names still resolve, via a `Transform` that maps each to its `(tool, action)` pair with `action` hidden. The transforms implement `list_tools`/`get_tool` only — execution keeps the full schema, so tool results are unchanged.
+
+**Tool pattern (v1):**
 ```python
 def register_*_tools(mcp: FastMCP) -> None:
     @mcp.tool()
@@ -73,6 +86,8 @@ def register_*_tools(mcp: FastMCP) -> None:
 Tools return Pydantic models from `plane-sdk` and use Python 3.10+ union syntax (`str | None`).
 
 ### Testing
+
+`tests/tools/v2/` covers the consolidated surface with no network and no credentials: surface-wide invariants, plus every action of every resource executed against `SpyClient`, a stand-in that binds each call against the genuine SDK signature and type-checks its arguments.
 
 Integration tests in `tests/test_integration.py` use `FastMCP.Client` with `StreamableHttpTransport`. Tests run against a live Plane instance — configure via `.env.test` (copy to `.env.test.local` with real values).
 
@@ -88,3 +103,4 @@ Integration tests in `tests/test_integration.py` use `FastMCP.Client` with `Stre
 | `PLANE_OAUTH_PROVIDER_*` | http/sse OAuth | OAuth client credentials and base URL |
 | `PLANE_OAUTH_ALLOWED_REDIRECT_URIS` | http/sse OAuth (optional) | Comma-separated redirect URI patterns appended to the built-in allowlist (onboard clients without a release) |
 | `LOG_USER_INFO` | all (optional, default: false) | When `true`, include user info (PII such as display name) in logs alongside the opaque user id |
+| `PLANE_MCP_TOOLS_VERSION` | all (optional, default: v2) | `v2` for the 28-tool consolidated surface, `v1` for the legacy 177 flat tools |

@@ -153,9 +153,36 @@ The server emits structured JSON logs. Each tool call is logged with its tool na
 export LOG_USER_INFO="true"
 ```
 
+### Tool surface
+
+The server advertises **28 tools**, one per Plane resource, each taking an `action` parameter that selects the operation:
+
+```
+work_item(action="create", project_id=..., name="Fix login")
+work_item(action="list", project_id=..., pql='state__group = "started"')
+cycle(action="archive", project_id=..., cycle_id=...)
+```
+
+Before consolidation the same capability was 177 separate tools. That mattered for more than cost: several MCP clients cap how many tools they will accept (Cursor 40, Windsurf 100, Antigravity 100, VS Code Copilot 128) and silently truncate beyond it, which made much of the server unreachable there. 28 fits inside every published cap.
+
+**Existing integrations keep working.** 169 of the 177 previous tool names are still accepted — they are no longer advertised, but calling `create_work_item` or `list_cycles` resolves to the consolidated tool. The eight exceptions are tools that chose between two operations with a parameter (`manage_project_archive(archive=False)`); their replacements are named in the error you get back.
+
+| `PLANE_MCP_TOOLS_VERSION` | Surface |
+|---|---|
+| unset or `v2` | the 28-tool consolidated surface (default) |
+| `v1` | the original 177 flat tools |
+
+```bash
+export PLANE_MCP_TOOLS_VERSION="v1"   # opt back in to the flat surface
+```
+
+`v1` is kept for one major release to ease migration and logs a deprecation warning on start-up. This version selects **this server's tool surface** and is unrelated to Plane's API versions.
+
 ## Available Tools
 
 The server provides comprehensive tools for interacting with Plane. All tools use Pydantic models from the Plane SDK for type safety and validation.
+
+The tables below list operations by the names the flat surface used. On the default surface each becomes an `action` on its resource tool — `list_projects` is `project(action="list")` — and the old name is still accepted.
 
 ### Projects
 

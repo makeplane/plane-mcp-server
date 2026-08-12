@@ -5,8 +5,8 @@ import asyncio
 from fastmcp import Client, FastMCP
 from plane.models.work_items import WorkItem, WorkItemDetail
 
-from plane_mcp.tools import work_items as work_item_tools
-from plane_mcp.tools.work_items import _ids
+from plane_mcp.tools.v1 import work_items as work_item_tools
+from plane_mcp.tools.v1.work_items import _ids
 
 
 class FakeWorkItems:
