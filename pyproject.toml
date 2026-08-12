@@ -29,6 +29,10 @@ dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
 ]
+# Only the `sdk` eval driver needs this; the CLI drivers shell out to an agent.
+evals = [
+    "anthropic[mcp]>=0.121.0",
+]
 
 [project.scripts]
 plane-mcp-server = "plane_mcp.__main__:main"

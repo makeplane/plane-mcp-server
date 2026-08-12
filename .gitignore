@@ -44,6 +44,12 @@ htmlcov/
 .tox/
 .hypothesis/
 
+# Eval harness output + local env bootstrap state
+evals/results/
+evals/.env-pids
+evals/.api_runserver.log
+evals/.mock_flags.log
+
 # Mypy
 .mypy_cache/
 .dmypy.json
