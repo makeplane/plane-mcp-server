@@ -41,6 +41,42 @@ ID_IN_HAND_IDS = {"I1", "I2", "I3", "I4", "I5"}
 LONG_TAIL_IDS = {"L1", "L2", "L3", "L4", "L5"}
 # Workspace-scoped prompts that omit {project}
 NO_PROJECT_PROMPT_IDS = {"C2", "L3", "L4"}
+CATALOG_ID_ORDER = (
+    "R1",
+    "R2",
+    "R3",
+    "R4",
+    "R5",
+    "R6",
+    "W1",
+    "W2",
+    "W3",
+    "W4",
+    "W5",
+    "W6",
+    "W7",
+    "W8",
+    "W9",
+    "W10",
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "C1",
+    "C2",
+    "R7",
+    "I1",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "L1",
+    "L2",
+    "L3",
+    "L4",
+    "L5",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +95,10 @@ def test_catalog_includes_design_and_extras():
     assert ID_IN_HAND_IDS.issubset(ids), f"missing I-class: {ID_IN_HAND_IDS - ids}"
     assert LONG_TAIL_IDS.issubset(ids), f"missing L-class: {LONG_TAIL_IDS - ids}"
     assert len(TASKS) >= 20
+
+
+def test_catalog_id_order_is_pinned():
+    assert tuple(task["id"] for task in TASKS) == CATALOG_ID_ORDER
 
 
 def test_get_tasks_all_and_filter():
@@ -238,11 +278,19 @@ def test_seed_plan_empty_needs_only_project():
 
 
 def test_verifiers_are_async_and_importable():
+    modules = {
+        "R": "read",
+        "W": "write",
+        "S": "schema",
+        "C": "cross",
+        "I": "debias",
+        "L": "debias",
+    }
     for t in TASKS:
         fn = t["verify"]
         assert inspect.iscoroutinefunction(fn), t["id"]
         # Callables resolve without NameError
-        assert fn.__module__ == "evals.tasks"
+        assert fn.__module__ == f"evals.tasks.{modules[t['id'][0]]}"
 
 
 def test_cmd_list_prints_all_task_ids(capsys):
