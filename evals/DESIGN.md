@@ -1,321 +1,229 @@
 # Plane MCP Tool-Surface Eval Harness
 
-Measures how well an LLM agent completes real Plane tasks through this MCP server's tool
-surface. Produces decision-grade numbers for the tool-consolidation discussion: success rate,
-tool calls to done, wrong-tool picks, and per-call response token cost.
+This harness measures how well an LLM agent completes real Plane tasks through an MCP
+tool surface. It exists to replace predictions about a surface with observations from
+actual agent runs: whether the task succeeded, how many Plane calls it took, which tools
+were selected, and how much tool-result content was returned to the model.
 
-This document is the full spec. Phase 1 (walking skeleton) implements a subset — see
-"Phase 1 scope" at the bottom.
+This document explains why the harness is shaped this way. Operational commands live in
+`evals/README.md`.
 
-## Why
+## The questions it answers
 
-The live surface is 177 tools. A consolidation proposal (139→47) exists, but its cost
-claims were estimate-based and wrong by 3.4× when measured. Before reshaping anything we
-need empirical answers to:
+The original tool-consolidation question breaks down into three measurable questions:
 
-1. **Mispick rate** — how often does an agent choose the wrong tool among overlapping ones
-   (7 list-variants for work items, links vs relations, etc.)?
-2. **Calls-to-done vs optimal** — how much does the name→UUID resolution dance and
-   sub-object fan-out (item + comments + links as separate calls) cost?
-3. **Response bloat** — how many tokens does each tool result actually inject into context?
+1. **Mispick rate** — how often does an agent choose an alternate or out-of-set tool when
+   several tools have overlapping names or capabilities?
+2. **Calls-to-done versus optimal** — how much lookup, name-to-ID resolution, and
+   sub-object fan-out does the surface require before the task is complete?
+3. **Response bloat** — how much tool-result content is injected into the conversation?
 
-The harness must support A/B comparison: same tasks against different tool surfaces
-(`full` today; later `core` tag-filter and `v2` transform-layer variants).
+Success is the guardrail around all three. A surface that uses fewer calls or returns less
+text but fails the task is not an improvement. Conversely, success rate alone hides
+avoidable calls, wrong turns, and large responses. The harness therefore records all four
+dimensions for the same task execution.
 
-## Architecture
+The point is empirical comparison. Given the same task battery, model, and repetitions,
+different surfaces can be compared from observed behavior rather than from tool counts,
+schema inspection, or projected costs. The battery fingerprint records the prompt and
+tool-set definition used for a run so incompatible batteries are not silently compared.
 
-**Driver:** `ApiDriver` owns the model/tool loop and the stdio MCP session. Provider adapters
-own only conversation state and wire translation behind a neutral `ModelBackend` protocol:
-`start(system, prompt, tools)`, `next_turn()`, and `add_tool_results(results)`. Anthropic uses
-the stable Messages API; OpenAI uses Chat Completions function tools. CLI drivers keep the
-same `AgentDriver` boundary, so `run.py` has one execution path for every driver.
+## What is measured
 
-Neutral turns contain final text, tool calls keyed by provider call ID, normalized usage,
-and stop reason. The driver records calls, executes MCP tools, pairs results back by call ID,
-and passes neutral results to the backend for the next provider turn. This isolates tool-
-surface behavior without a coding-harness system prompt or built-in tools.
+### Success
 
-Notes:
-- One fresh stdio server subprocess per task run (cheap, isolates state).
-- Record provider usage from **every** model turn (input tokens, output tokens,
-  cache_read_input_tokens, cache_creation_input_tokens) — this is the exact context cost,
-  returned free; the per-result counts below are a size proxy, not the cost figure.
-- Record the final message's `stop_reason`, and whether the loop ended by exhausting
-  `max_iterations` — a capped/truncated run must be distinguishable from a genuine failure.
-  Detect the cap from `stop_reason` (a model can legitimately finish with `end_turn` on
-  exactly its last permitted iteration — an unconditional iteration-count check misreports
-  that as capped).
-- **Never execute tools on a refusal-terminated turn** (`stop_reason == "refusal"`), even if
-  the response also contains tool calls. Record the calls for auditability, then stop.
-- Pair every tool result to its call by call ID, never list position. Missing, duplicate, or
-  unknown IDs set `result_pair_mismatch`.
-- `wall_time_s` measures the agent loop only: start the clock after `list_tools()` returns,
-  stop it when the loop exits — MCP subprocess spawn/teardown and post-loop token counting
-  are excluded.
-- Build the stdio server env **from scratch** (`PATH`, `HOME`, plus exactly the three
-  `PLANE_*` vars) — never inherit `os.environ`. `plane_mcp/client.py` prefers
-  `PLANE_INTERNAL_BASE_URL` over `PLANE_BASE_URL`, so an inherited value silently points
-  the agent at a different Plane instance than seed/verify.
-- A harness/API failure (provider exception, MCP crash) is recorded as `error: "<msg>"` on the
-  row — it is neither a task failure nor a skip, and the row's zeroed metrics must not
-  enter any statistic.
-- `SYSTEM_PREAMBLE` names the eval workspace slug and project name, states "complete the
-  task using the available tools, then stop", and nothing else. Keep it under 100 words —
-  it is part of the measured context.
-- Omit thinking and sampling parameters; the API backend only sets the model, token cap,
-  system/instructions, conversation, and tools.
-- Final assistant text = the last model turn's text (used by read-task verifiers).
+Each task has an asynchronous verifier. Mutation tasks read Plane back through the API and
+check the resulting state. Read tasks compare the final assistant text with facts obtained
+from the seeded context or resolved through the API, using explicit answer contracts and
+exact-value matchers where the task defines them.
 
-**Token sizing of tool results:** the owned loop holds the complete text passed back to the
-model, so `result_chars` is always exact. A backend may expose a token counter; otherwise the
-driver uses a deterministic character estimate and sets `result_tokens_estimated: true` on
-the row. No provider token-count endpoint is required per tool result.
+This avoids using the agent's explanation, confidence, or self-reported completion as the
+source of truth. The model is also not asked to grade another model. Verification is tied to
+the fixture and the Plane state the task was meant to affect. The canary runs every eligible
+verifier against an empty agent result and fails if a do-nothing run passes.
 
-CLI rows use the same shared character estimator over proxy-recorded `result_chars`. Optional
-payload recording permits local tokenizer counting in the parent harness, but stays off by
-default; the stdlib-only proxy does not import tokenizers.
+Skipped tasks and infrastructure failures are recorded separately. The report excludes
+both from success denominators; a plan gate, unavailable fixture, provider failure, or MCP
+process failure is not rewritten as an agent task failure.
 
-Rules:
-- Run these counts **after** the agent loop finishes, not inline — they must not pollute
-  `wall_time_s`. Buffer the raw result strings during the run, count at the end.
-- A tool result's content may be a list of blocks. Text-only blocks are concatenated;
-  non-text or mixed content is serialized into the exact string sent to the model and marked
-  `result_kind: "image"` or `"mixed"`. Error results are sized like successful results.
-- Also record raw `len(chars)` alongside every count.
+### Calls to done
 
-**API model aliases** (provider-specific):
+`num_calls` counts Plane MCP calls made during the task. Each catalog entry also declares an
+`optimal_calls` baseline. The report shows the observed distribution rather than assuming
+one run is representative.
 
-| provider | alias | model id | role |
-|---|---|---|---|
-| Anthropic | `sonnet` | `claude-sonnet-5` | default / representative agent |
-| Anthropic | `haiku` | `claude-haiku-4-5` | weaker-model canary |
-| OpenAI | `sonnet` | `gpt-5` | representative agent |
-| OpenAI | `haiku` | `gpt-5-mini` | faster/weaker-model canary |
+Client-local tools such as shell or tool-search helpers are retained separately as
+`client_tool_calls`; they do not count as Plane calls. For an external server launched with
+`--server-cmd`, call counts still apply, but the runner marks classification as `external`
+and clears the row-level alternate/out-of-set counters because the catalog has no
+authoritative sets for foreign tool names.
 
-## Environment
+### Mispicks
 
-| var | purpose |
-|---|---|
-| `ANTHROPIC_API_KEY` | default API-provider authentication |
-| `OPENAI_API_KEY` | OpenAI provider authentication when its optional SDK is installed |
-| `EVAL_PLANE_API_KEY` | Plane API key for the **dedicated eval workspace** |
-| `EVAL_PLANE_WORKSPACE_SLUG` | eval workspace slug — never a production workspace |
-| `EVAL_PLANE_BASE_URL` | optional, defaults to `https://api.plane.so` |
+Every Plane call on a catalogued surface is classified by tool name as `optimal`,
+`alternate`, or `out_of_set`. The task owns disjoint optimal and alternate sets, including
+surface-specific overlays where present. The headline mispick rate is:
 
-Seeding and verification talk to Plane directly via `plane-sdk` (already a dependency).
-Construct the client the same way `plane_mcp/client.py` does for stdio mode, but from the
-`EVAL_*` vars.
-
-## Files
-
+```text
+(alternate calls + out-of-set calls) / all Plane calls
 ```
+
+`is_error` is independent of that classification. A valid call can still be an avoidable
+pick, and an optimal tool can return an error. The ordered call records are retained in the
+JSONL so a run can be audited after aggregation.
+
+### Response-token cost
+
+Every driver reports `result_chars` and `result_tokens` per Plane call. The character count
+comes from the serialized result text actually observed by the harness. Token counts carry
+an explicit provenance:
+
+- The API driver may use a backend token counter. If none is available or it fails, it uses
+  the shared deterministic character estimate.
+- CLI drivers estimate from the proxy-recorded character count by default.
+- With `--record-result-payloads`, CLI sidecars also retain the result text. The parent
+  harness uses `tiktoken` with `cl100k_base` when importable and otherwise falls back to the
+  same estimate.
+
+The estimate is `ceil(result_chars / 4)` for non-empty results. Rows and calls record
+whether their values are measured, estimated, or mixed, and the report marks estimated and
+mixed columns. An estimate is never presented as a measured tokenizer count.
+
+Payload recording is off by default because tool results contain live workspace data and
+make sidecars larger. The character-derived estimate remains useful for surface comparison
+because it is deterministic and monotonic in the recorded response size.
+
+Provider usage is a different measurement: where the driver supplies it, the harness keeps
+input, output, cache-read, and cache-creation usage. Tool-result sizing describes one source
+of context growth; it is not substituted for the provider's conversation-level usage.
+
+## Why calls are recorded at the transport boundary
+
+An agent's final answer is not a reliable call log. It may omit a failed lookup, summarize
+several calls as one action, or claim an action it did not perform. Call-count and mispick
+metrics therefore come from execution evidence.
+
+The API driver owns the MCP session and records each call it executes. The four CLI drivers
+put `evals.proxy` between the CLI and the stdio MCP server. The proxy relays JSON-RPC bytes
+without reserializing them, pairs `tools/call` requests and responses by JSON-RPC ID, and
+records a request sequence on each sidecar row. The sidecar loader restores request order.
+A complete proxy sidecar is authoritative; CLI event or transcript parsing is retained as
+a fallback when the sidecar is incomplete. Neither source depends on the agent describing
+its own behavior.
+
+The proxy remains standard-library-only because it runs inside the server process tree with
+a scrubbed `PYTHONPATH`. It records response payloads only when explicitly requested.
+Tokenization and row mapping happen later in the parent harness, where optional dependencies
+are safe to import.
+
+## Driver and backend boundaries
+
+All five driver implementations satisfy `AgentDriver.run_task(...) -> AgentRun`:
+
+- `ApiDriver`
+- `ClaudeCliDriver`
+- `CodexCliDriver`
+- `AntigravityCliDriver`
+- `OpencodeCliDriver`
+
+`sdk` is a legacy CLI alias for `ApiDriver`, not a sixth implementation. The runner has one
+path for all drivers: it supplies a prompt and MCP environment, receives a normalized
+`AgentRun`, maps it to the common row shape, and invokes the task verifier.
+
+The API implementation has one further seam. `ApiDriver` owns provider-independent policy:
+the stdio MCP session, tool execution loop, iteration budget, timing, result recording,
+call-ID pairing, and usage accumulation. A `ModelBackend` owns provider conversation state
+and wire format through three operations:
+
+```text
+start(system, prompt, tools)
+next_turn() -> Turn
+add_tool_results(results)
+```
+
+This is the narrowest boundary that keeps provider-specific message roles, content blocks,
+tool schemas, usage objects, and stop reasons out of the loop. `AnthropicBackend` translates
+to the stable Messages API. `OpenAIBackend` translates to Chat Completions function tools
+and imports the optional OpenAI SDK only when no client was injected. Both return neutral
+turns containing text, tool calls, normalized usage, and a stop reason.
+
+CLI agents already own their model conversation and tool loop, so they implement
+`AgentDriver` directly rather than pretending to be `ModelBackend` implementations. Their
+subprocess, configuration, transcript, and usage differences stay within their driver
+modules.
+
+Several loop rules are deliberately centralized in `ApiDriver`:
+
+- Tool results are paired to model calls by call ID, never by list position. Missing,
+  duplicate, or unknown IDs set `result_pair_mismatch`.
+- A refusal-terminated turn records any included calls for audit but executes none of them.
+- `hit_max_iterations` is set only when the iteration budget is exhausted while more tool
+  work remains, not merely because a valid final response used the last iteration.
+- `wall_time_s` covers the model/tool loop after `list_tools`; server startup, teardown, and
+  post-loop token counting are outside it.
+- The row records both the requested model and the provider-reported model that actually ran
+  when the provider returns one.
+
+## Task and run lifecycle
+
+The task catalog uses plain dictionaries. Each task stays beside its verifier in the module
+for its task class. The catalog package assembles those lists in a pinned historical order,
+builds `TASKS_BY_ID`, and computes the battery fingerprint.
+
+For each task repetition, the runner creates a fresh project and only the fixture groups
+declared by that task. The live sequence is:
+
+```text
+seed -> drive -> verify -> teardown -> append row
+```
+
+The row is assembled as the task progresses; teardown runs in `finally` before that row is
+appended. Workspace-scoped fixture objects are tracked separately from the project. A fresh
+stdio server is launched for each driven task. The server environment is built from `PATH`,
+`HOME`, the three Plane connection values, the selected built-in surface label when
+applicable, and explicit `--server-env` additions; unrelated parent environment variables
+are not inherited.
+
+The first line of a new result file is a meta row containing the run identity, surface,
+battery, requested model, driver, provider, and Git SHA. Resume checks those identities,
+skips completed task/repetition keys, and reruns rows that contain recorded errors. Result
+rows preserve the common fields consumed by `evals.report` and existing JSONL readers.
+
+## Module layout
+
+```text
 evals/
-  __init__.py
-  DESIGN.md      # this file
-  drivers/api/   # owned loop + neutral, Anthropic, and OpenAI backends
-  tasks.py       # task definitions (plain dicts) + verifier functions
-  seed.py        # per-run fixture create/teardown via plane-sdk
-  run.py         # CLI driver (python -m evals.run)
-  report.py      # summary table + A/B delta (python -m evals.report)
-  results/       # *.jsonl output — gitignored
+  cli.py                 argparse, command dispatch, and model-alias resolution
+  runner.py              live lifecycle, row assembly, resume/meta handling, and canary
+  run.py                 compatibility entry point for python -m evals.run
+  tasks/
+    __init__.py          ordered catalog assembly and public task API
+    common.py            prompt binding, matchers, and shared API lookups
+    read.py              R1-R7 tasks and verifiers
+    write.py             W1-W10 tasks and verifiers
+    schema.py            S1-S5 tasks and verifiers
+    cross.py             C1-C2 tasks and verifiers
+    debias.py            I1-I5 and L1-L5 tasks and verifiers
+  drivers/
+    __init__.py          public exports and driver registry
+    base.py              AgentDriver, AgentRun, normalization, and common row mapping
+    claude.py            Claude Code CLI driver
+    codex.py             Codex CLI driver
+    antigravity.py       Antigravity CLI driver
+    opencode.py          opencode CLI driver
+    process.py           shared subprocess lifecycle
+    sidecar.py           recording-proxy command and sidecar handling
+    api/
+      backend.py         neutral backend protocol and turn/tool dataclasses
+      driver.py          provider-neutral MCP/model loop
+      anthropic.py       Anthropic Messages translation
+      openai.py          OpenAI Chat Completions translation
+  proxy.py               stdlib-only JSON-RPC recording relay
+  seed.py                Plane fixture creation and teardown
+  report.py              summaries, A/B comparison, and multi-surface tables
+  token_counting.py      shared estimate and optional local tokenizer counting
 ```
 
-Dependencies: add to `pyproject.toml`:
-
-```toml
-[project.optional-dependencies]
-evals = ["anthropic>=0.121.0"]
-```
-
-Pin a `>=` floor for the stable Anthropic Messages client. OpenAI support stays optional:
-the module imports its SDK lazily only when that provider is selected, and tests inject a
-fake client. Do NOT change the existing `mcp==1.26.0` pin.
-
-## Task schema (`tasks.py`)
-
-Plain dicts, no classes:
-
-```python
-{
-    "id": "W1",
-    "tags": {"write", "tier1"},
-    "prompt": "Create a work item in project {project}: title 'Login page 500s on empty "
-    "password', priority urgent, assign it to me, and add the 'auth' label.",
-    "optimal_calls": 4,
-    "optimal_tools": {"get_me", "list_projects", "list_labels", "create_work_item"},
-    "alternate_tools": {
-        "search_work_items",
-        "list_states",
-        "retrieve_project",
-        "get_workspace_members",
-        "manage_work_item_assignee",
-        "manage_work_item_label",
-        "update_work_item",
-    },
-    "needs": {"labels"},  # fixture groups seed.py must create
-    "verify": verify_w1,  # async (plane, ctx, run) -> (bool, note)
-}
-```
-
-- `{project}` in prompts is formatted with the seeded project name at runtime.
-- `optimal_tools` and `alternate_tools` are **disjoint** sets. Every call is classified as
-  one of `optimal` / `alternate` / `out_of_set`, plus an independent `is_error` flag.
-  **Mispick = alternate + out_of_set** — this is the eval's headline metric, so authoring
-  matters: a tool that works but is the *wrong pick among overlapping variants* (a list
-  variant where search is optimal, a link where a relation is asked for) belongs in
-  `alternate_tools` or nowhere, never in `optimal_tools`. The full ordered call list is
-  kept in the JSONL so classifications can be re-derived offline if sets are revised.
-- **Action-dispatch surfaces need a finer mispick unit** (added 2026-08-11, for the P2
-  A/B that compares PR #195's 29-tool `action`-multiplexer variant): on such a surface
-  the model almost always picks the "right" *tool* and fails inside it — wrong `action`,
-  or params invalid for the chosen action. Tool-name classification alone would
-  under-count exactly that failure mode and bias the A/B toward consolidation. Rule: when
-  a surface under test multiplexes verbs through a parameter, the classification unit is
-  `(tool, action)` — task authors list optimal/alternate *(tool, action)* pairs — and a
-  schema-valid call whose params are invalid for its declared action counts as
-  `out_of_set`, not merely `is_error`. Flat surfaces are unaffected (their action unit is
-  the tool name). The stored ordered call list already carries arguments, so this scoring
-  can also be re-derived retroactively.
-- `verify` receives `run = {"final_text": str, "calls": [...]}` alongside the plane client
-  and seed ctx. Write tasks assert end state through the Plane API; read tasks match the
-  final text against seeded facts using **word-boundary regexes on exact seeded values**
-  (each verifier states its matching rule in a comment — naive substring matching is a
-  known false-positive source, e.g. bare "4" inside "24"). Resolve expected values via
-  API at verify time — never hardcode sequence numbers or UUIDs.
-
-## Fixtures (`seed.py`)
-
-Per run: create project named `EVAL {run8}` (`run8` = first 8 hex chars of `uuid4().hex`;
-identifier `EV` + 4 of those hex chars uppercased, ≤12 chars) in the eval workspace.
-Unique-per-run naming makes runs parallel-safe and crash-visible. Provide
-`seed(plane, run_id, needs) -> ctx` and `teardown(plane, ctx)`; `ctx` carries project_id,
-project name, and IDs of everything seeded.
-
-`seed()` must guarantee teardown information even on partial failure: it mutates a
-caller-provided ctx in place (or raises with the partial ctx attached), so a failure
-after project creation never leaks an untracked project. Feature probes must read the
-keys the API actually returns (workspace toggle: `is_work_item_types_enabled`) and a
-seed failure must fail loudly — never masquerade as a plan-gate skip.
-
-The R1 target item is seeded into a **non-default state** (e.g. a `started`-group state)
-so a guessed default state name cannot pass verification.
-
-Teardown deletes the project **plus every workspace-scoped object seeded** — customers
-(and any other object that survives project deletion) are tracked in `ctx` and deleted by
-ID explicitly; project deletion alone is not sufficient cleanup.
-
-Seed only the fixture groups the selected tasks declare in `needs`:
-
-| group | contents |
-|---|---|
-| `items` | ~12 work items with fixed titles/priorities incl. "Payment webhook drops retries" (urgent); exactly 4 urgent open items total |
-| `labels` | labels `auth`, `triage`, `perf` |
-| `cycles` | "Sprint 12" (past-dated), "Sprint 13" (current) |
-| `module` | "Checkout revamp" with 3 completed items |
-| `bug_type` | work item type "Bug" — **plan-gated feature**: if the API rejects creation, seed() records `bug_type: None` and dependent tasks are SKIPPED (recorded in JSONL with `"skipped": reason`), not failed |
-| `intake` | 2 intake items (one billing request, one obvious spam) |
-| `customer` | customer "Acme Corp" + request "SSO support" |
-| `release` | release "1.2.0" with 2 changelog entries |
-
-## Runner CLI (`run.py`)
-
-```
-python -m evals.run --tasks R1,W1,S1 --model sonnet --reps 1 \
-    --surface full --out evals/results/<run_id>.jsonl
-python -m evals.run --list          # print task table, no network
-python -m evals.run --dry-run --tasks R1   # print resolved prompt + seed plan, no network
-```
-
-- `--surface` is recorded in the JSONL and (for now) only `full` is implemented; it is the
-  future hook for tag-filtered/transformed variants. Unknown values error.
-- `--reps N` repeats each task N times (fresh seed + fresh server per rep).
-- Per task-rep flow: seed → run agent → verify → append JSONL row → teardown (teardown in
-  a `finally`; on crash, print the orphaned project name).
-
-One JSONL row per task-rep:
-
-```json
-{"run_id": "...", "ts": "...", "git_sha": "...", "surface": "full",
- "model": "claude-sonnet-5", "task_id": "W1", "rep": 0,
- "success": true, "verify_note": "...", "skipped": null, "error": null,
- "stop_reason": "end_turn", "hit_max_iterations": false,
- "calls": [{"tool": "list_projects", "class": "optimal", "args_chars": 42,
-            "result_tokens": 830, "result_chars": 3120, "result_kind": "text",
-            "is_error": false}],
- "num_calls": 4, "errored_calls": 0, "alternate_calls": 0, "out_of_set_calls": 0,
- "total_result_tokens": 2210,
- "usage_per_iteration": [{"in": 38210, "out": 412, "cache_read": 36100, "cache_write": 0}],
- "cum_input_tokens": 152840, "wall_time_s": 31.4}
-```
-
-## Report (`report.py`)
-
-```
-python -m evals.report evals/results/A.jsonl [evals/results/B.jsonl]
-```
-
-Single file, per task: `n`, success as `k/n` with a 95% Wilson interval, median calls
-(with IQR) vs optimal, mispick rate (alternate + out_of_set over total calls), errored
-calls, capped runs (`hit_max_iterations` or `stop_reason == "max_tokens"`) and harness-error
-rows (`error != null`) each reported as their own column — never silently folded into
-failures, and error rows excluded from success/medians entirely — median & p95 result_tokens per
-call, and median `cum_input_tokens`.
-
-Two files: same table with per-task deltas (B − A). **Refuse the delta mode (exit with a
-message) when either file has n < 5 for any shared task** — comparative claims below that
-floor are noise. Plain text, stdlib only.
-
-Optimal-path caveats discovered during review (bake into the sets and a comment):
-- **R1**: `search_work_items` returns no state field (`WorkItemSearchItem` has only
-  name/id/sequence_id/identifiers). The true 1-call path is `list_work_items` (WorkItem
-  carries `state: str | StateLite`; `expand=state` yields the name). search is alternate.
-- **S1**: `create_work_item_property` accepts inline `options`, so the optimal path is
-  3 calls (`list_projects` → `resolve_work_item_type` → `create_work_item_property`) —
-  separate option-creation / list_work_item_types calls are alternates, not optimal.
-
-## Full task list (target: 20 tasks)
-
-Defined in the consolidation analysis; implement incrementally. IDs are stable.
-
-| id | prompt (abbrev) | probes | optimal |
-|---|---|---|---|
-| R1 | state of item titled 'Payment webhook drops retries' | list vs search (search has no state) | 1 (`list_work_items`) |
-| R2 | how many urgent open items | count/list/search pick, UUID dance | 1–2 |
-| R3 | items assigned to me due this week | assignee resolution | 2 |
-| R4 | what's in the active cycle, anything overdue | PQL activeCycle() discovery | 1–2 |
-| R5 | summarize discussion on a known item | sub-object fan-out | 2 |
-| R6 | which project has more open bugs (needs 2nd project) | cross-project composition | 2–3 |
-| W1 | file a bug w/ priority+assignee+label | lookup overhead before create | 3–4 |
-| W2 | move item to Done | state name→UUID | 2–3 |
-| W3 | comment on an item | happy path baseline | 2 |
-| W4 | rename label triage→needs-triage | update_label pick | 2 |
-| W5 | archive all completed items in module | no-bulk N-call burn | 2+N |
-| W6 | move unfinished items Sprint 12→13, close Sprint 12 | transfer+complete workflow | 3–4 |
-| W7 | mark A blocking B + add reference URL | relations-vs-links confusion | 3 |
-| W8 | log 2h on an item for yesterday | worklog | 2 |
-| S1 | add Severity dropdown (Critical/Major/Minor) to Bug type | property + inline options | 3 |
-| S2 | add Fibonacci estimate scale, set item to 5 pts | estimates chain | 4–5 |
-| S3 | create type Incident w/ required text property | type+property+attach | 4–5 |
-| S4 | triage intake: accept billing, reject spam | workflow vs endpoint tools | 3–4 |
-| C1 | create customer Acme, link request to item | customers domain | 3–4 |
-| C2 | what shipped in release 1.2.0 | releases/changelog | 1–2 |
-
-## Phase 1 scope (walking skeleton)
-
-Implement end to end, nothing more:
-
-1. `tasks.py` with **R1, W1, S1 only** (verifiers included).
-2. `seed.py` covering fixture groups `items`, `labels`, `bug_type`.
-3. `run.py` with `--list`, `--dry-run`, and the full live path (seed→run→verify→teardown).
-4. `report.py` single-file mode (A/B delta mode can be a stub that errors clearly).
-5. `pyproject.toml` evals extra + `evals/results/` gitignored.
-
-Constraints:
-- Python 3.10+, ruff clean (`ruff format evals/ && ruff check evals/` — line length 120,
-  rules E,F,I,UP,B per pyproject).
-- Match the codebase's existing style; no classes where dicts do, no framework.
-- **No live credentials exist in this checkout** — done means: `--list` and `--dry-run`
-  work without network, imports resolve in a fresh venv after
-  `uv pip install -e ".[dev,evals]"`, ruff passes. The live path must be complete and
-  plausible but cannot be executed yet.
-- Do NOT commit. Do NOT touch `.ccwrc`, `.env*`, or anything under `plane_mcp/`.
+The stable import and command surfaces are intentional: `from evals.tasks import ...`,
+`from evals.drivers import ...`, and `python -m evals.run` remain the public boundaries even
+though their implementations are split across packages and focused modules.

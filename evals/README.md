@@ -1,20 +1,23 @@
 # Eval harness — runbook
 
 Measures how well an LLM agent completes real Plane tasks through an MCP tool surface.
-Every task runs against a **live** Plane API with fixtures seeded and torn down per run,
-and is graded by a verifier that reads the API back — not by inspecting the agent's prose.
+Every live task repetition uses a **live** Plane API with its own seeded fixtures and
+teardown. Mutation tasks are verified by reading Plane back; read tasks match the final
+answer against facts from the seed context or the API rather than trusting the agent's
+claim that it succeeded.
 
 The harness is agent-agnostic and surface-agnostic: any stdio MCP server can be measured
-(`--server-cmd`), driven by any of five agent backends. `DESIGN.md` explains why it is
+(`--server-cmd`), driven by any of five driver implementations. `DESIGN.md` explains why it is
 built this way; this file is how to run it.
 
 What you get per task: pass/fail, tool calls to done, which tools were picked (and whether
-they were the optimal ones), errors, and the agent's final text.
+they were the optimal ones), response size and token-count provenance, errors, and the
+agent's final text.
 
 ## Prerequisites
 
-1. **A local Plane API.** `evals/env.sh` starts plane-ee on `:8000` plus a mock
-   feature-flag server on `:9911` that turns every flag on.
+1. **A Plane API endpoint.** For local runs, `evals/env.sh` starts plane-ee on `:8000` plus
+   a mock feature-flag server on `:9911` that turns every discovered flag on.
 
    ```bash
    export PLANE_EE_API_DIR=/path/to/plane-ee/apps/api
@@ -22,14 +25,14 @@ they were the optimal ones), errors, and the agent's final text.
    evals/env.sh up       # down | status
    ```
 
-2. **A workspace and an API key** on that instance, with a Business/Enterprise license so
-   the gated fixtures (customers, releases) can be seeded.
+2. **A workspace and an API key** on that instance. The key must be able to create and
+   delete the catalog's project and workspace-scoped fixtures. Genuine plan or feature
+   gates are recorded as skips where the fixture code handles them.
 
    ```bash
    export EVAL_PLANE_BASE_URL=http://localhost:8000
    export EVAL_PLANE_WORKSPACE_SLUG=<slug>
    export EVAL_PLANE_API_KEY=plane_api_...
-   unset REDIS_HOST REDIS_PORT      # else the SDK client picks up a stale cache config
    ```
 
 3. **Model access for the driver you pick.** The API driver uses
@@ -43,34 +46,35 @@ they were the optimal ones), errors, and the agent's final text.
 .venv/bin/python -m evals.run --driver api --provider anthropic --model sonnet \
   --surface full --out results/api.jsonl
 
-# Everything, one surface
-.venv/bin/python -m evals.run --driver codex-cli --model gpt-5.6-sol \
+# Everything, one surface (free-form model IDs pass through to the CLI)
+.venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
   --surface full --out results/legacy.jsonl
 
 # A few tasks while iterating
-.venv/bin/python -m evals.run --driver codex-cli --model gpt-5.6-sol \
+.venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
   --surface full --tasks W5,W8 --out results/spot.jsonl
 
 # Someone else's server (a PR branch, another repo) — "external mode"
-.venv/bin/python -m evals.run --driver codex-cli --model gpt-5.6-sol \
+.venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
   --surface their-pr --server-cmd "/path/to/their/.venv/bin/plane-mcp-server stdio" \
   --server-env PLANE_MCP_TOOLS_VERSION=v2 --out results/their-pr.jsonl
 ```
 
-Useful flags: `--reps N` (repetitions per task), `--resume out.jsonl` (skip completed
-`(task, rep)` pairs, retry only infra failures), `--list` / `--dry-run` (no network).
+Useful flags: `--reps N` (repetitions per task), `--resume out.jsonl` (skip completed or
+skipped `(task, rep)` pairs and retry rows with recorded errors), `--list` / `--dry-run`
+(no network).
 
-**External mode** (`--server-cmd`) runs every task with no surface-based skips, and turns
-off mispick classification — foreign tool names have no optimal/alternate sets to score
-against, so call *counts* stay comparable but "mispicks" reads `n/a`.
+**External mode** (`--server-cmd`) runs every task with no surface-based skips and records
+`classification: "external"`. Foreign tool names have no catalogued optimal/alternate sets,
+so use success, call counts, and errors for those rows; their mispick values are not
+comparable to catalogued surfaces.
 
-**On surfaces.** `--surface` without `--server-cmd` runs this repo's own server, and passes
-the surface through as `PLANE_MCP_SURFACE`. This branch's server serves one surface, so
-only `full` is real here: `v2` / `v2-schema` set an env var nothing reads, and you would
-get legacy results labelled as something else. The task catalog keeps its per-surface
-overlays (`surface_tools`) so those surfaces score correctly if the server ever grows them.
-**Measure any other surface through `--server-cmd`** — that is how the PR surfaces were
-compared, and it is honest about what it ran because it launches the server you name.
+**On surfaces.** Without `--server-cmd`, `full` launches this repo's server with no surface
+variable. The `v2` and `v2-schema` labels set `PLANE_MCP_SURFACE`, and the task catalog has
+matching `surface_tools` overlays. This tree's `plane_mcp` server does not read that variable,
+so selecting either label here would run the same server under a misleading label. Use
+`--server-cmd` to launch a server that actually implements another surface; external rows
+intentionally do not use this catalog's tool-choice classification.
 
 ### Drivers
 
@@ -78,13 +82,14 @@ compared, and it is honest about what it ran because it launches the server you 
 |---|---|---|
 | `api` | Owned API + MCP loop | Provider-neutral; `--provider anthropic` (default) or `openai` |
 | `sdk` | Alias for `api` | Retained for old commands/result pipelines |
-| `codex-cli` | OpenAI Codex CLI | Pass a real model id (`gpt-5.6-sol`); the short-alias table is incomplete |
+| `codex-cli` | OpenAI Codex CLI | **Pass a real model id.** The harness forwards `sonnet` / `haiku` unchanged and Codex rejects them, so the short aliases fail on this driver |
 | `claude-cli` | Claude Code CLI | `--model sonnet` / `haiku` |
 | `antigravity-cli` | Antigravity CLI (`agy`) | Runs under a synthetic HOME so its MCP config is ours, not yours |
 | `opencode-cli` | opencode | Temp project config per run |
 
 Every CLI driver records the actual JSON-RPC traffic through a recording proxy, so tool
-calls are counted from the wire rather than from whatever the agent claims it did.
+calls are normally counted from the wire rather than from whatever the agent claims it did.
+If a sidecar is incomplete, the driver can fall back to its CLI event stream or transcript.
 
 The API driver executes MCP calls itself, records exact result character counts, and sizes
 result tokens without making a provider request per result. A backend may supply a token
@@ -111,8 +116,9 @@ habit; use it only when the more sensitive, larger sidecar is justified.
 
 Rows are deduped latest-wins per `(task_id, rep, surface)`, so a re-run of a single task
 supersedes its earlier row in the same file. Skipped tasks are excluded from success
-denominators — a surface that cannot do something is not punished as a failure, it is
-reported as a skip.
+denominators, as are rows with recorded errors. Result-token columns use `~` for estimates,
+`*` for mixed measured/estimated values, and `?` for legacy values whose provenance was not
+recorded.
 
 ## Running surfaces in parallel
 
@@ -130,7 +136,18 @@ in one workspace but not another skew every workspace-wide task in that column.
 
 ## Adding a task
 
-Tasks live in `evals/tasks.py`. A task is a dict:
+Tasks live in the `evals/tasks/` package, grouped by task class and kept beside their
+verifiers:
+
+- `read.py`: R1-R7
+- `write.py`: W1-W10
+- `schema.py`: S1-S5
+- `cross.py`: C1-C2
+- `debias.py`: I1-I5 and L1-L5
+
+Shared prompt, matcher, and API lookup machinery lives in `common.py`. `tasks/__init__.py`
+assembles the class lists in the pinned catalog order and re-exports the public task API.
+A task is a dict:
 
 ```python
 {
@@ -140,7 +157,12 @@ Tasks live in `evals/tasks.py`. A task is a dict:
     "optimal_calls": 3,
     "optimal_tools": {"list_cycles", "complete_cycle"},  # scored as optimal picks
     "alternate_tools": {"list_projects"},  # acceptable, not optimal
-    "surface_tools": {"v2": {"optimal_tools": {"close_cycle"}}},  # per-surface overlay
+    "surface_tools": {
+        "v2": {
+            "optimal_tools": {"close_cycle"},
+            "alternate_tools": {"list_cycles"},
+        }
+    },
     "needs": {"items", "cycles"},  # fixtures to seed
     "verify": verify_w11,
 }
@@ -156,13 +178,14 @@ genuinely cannot do the task. That is reported as a capability gap, not a failur
 
 ### Writing a verifier
 
-Verifiers are `async def verify_x(plane, ctx, run) -> (ok: bool, note: str)` and must read
-state back through the API. Two rules, both learned the hard way:
+Verifiers are `async def verify_x(plane, ctx, run) -> (ok: bool, note: str)`. Keep a new task
+and its verifier in the same class module, add it to that module's exported task list, and
+preserve the assembly order in `tasks/__init__.py`.
 
-**Never parse natural language.** Constrain the output in the prompt instead — end the
-prompt with `Answer with a line 'count: N'` and match that line exactly. Regex over prose
-produces both false passes ("10 attachments" satisfying a truth of 0) and false failures
-("three" for 3), and no amount of tuning fixes it.
+Mutation verifiers must read the resulting state through the Plane API. Read verifiers must
+derive the expected facts from the API or seed context and match an explicit answer contract
+or exact seeded values. For numeric answers, prefer a prompt such as `Answer with a line
+'count: N'` and the shared contract matcher; a loose substring can make `4` match `24`.
 
 **Check the shape the API actually returns.** Dates come back as timestamps
 (`2026-08-12T00:00:00Z`), so comparing one to a bare `2026-08-12` silently never matches —
@@ -175,24 +198,29 @@ Then prove the verifier can fail:
 .venv/bin/python -m evals.run --canary --surface full
 ```
 
-The canary seeds every task, calls each verifier with an **empty** agent result, and exits
-non-zero if any verifier passes a do-nothing agent. Run it after touching tasks, fixtures,
-or verifiers.
+The canary seeds each surface-eligible task, calls its verifier with an **empty** agent
+result, and exits non-zero if any verifier passes a do-nothing agent. Run it after touching
+tasks, fixtures, or verifiers.
 
-**Make the task achievable before blaming a surface.** A fixture that forbids what the
-prompt asks turns the task into a coin flip on tool choice and will implicate whichever
-server happens to pick differently. W6 was pre-closing a cycle the agent was asked to
-close; it took two full runs to notice, because a side effect of an unrelated call was
-tripping the verifier.
+**Make the task achievable before blaming a surface.** For example, W6 declares the
+`cycles_open_past` fixture variant because it asks the agent to close Sprint 12; the seeder
+must not pre-close the cycle that the task is meant to change.
 
 ## Local gotchas
 
-- **Comment activity never appears** without a running activity worker, so the tasks that
-  read the activity feed self-skip (`env:no-activity-worker`) rather than fail.
-- **A feature-flag cache poisoned by the wrong disco.** Anything that talks to the DB while
-  sourcing `plane-ee/apps/api/.env` uses the *remote* flag server (all flags off) and
-  caches that answer for a workspace the API server would otherwise serve from the local
-  mock. Symptom: gated endpoints 402 and the canary reports every verifier broken. Fix:
-  clear `ff:<slug>:*` and rotate `ff_ver:<slug>` (`plane.payment.flags.cache`).
+- If seeded comments do not materialize as activities, the activity-feed task self-skips
+  with `env:no-activity-worker` rather than failing the agent.
+- **Gated endpoints returning 402 on a workspace that should work.** Feature flags are
+  cached per workspace, and the cache does not record which flag server answered. Any
+  process that touches the DB while pointed at a *different* flag server than the running
+  API — sourcing `plane-ee/apps/api/.env` gets you the remote one, where these flags are
+  off — caches that answer for the workspace, and the API then serves the cached miss
+  instead of asking its own mock. The tell is a canary that reports every verifier broken
+  at once. Clear `ff:<slug>:*` and rotate `ff_ver:<slug>` (`plane.payment.flags.cache`)
+  and the next request refetches. Observed while creating a workspace from a Django
+  shell; a plan/licence problem looks identical from the outside, so check this first.
+- A workspace licence is **not** required for local runs: the mock flag server enables
+  every flag regardless, and an unlicensed workspace seeds all fixtures (verified by
+  canary against a workspace with no licence row).
 - **Offline tests** cover the harness itself and need no Plane instance:
   `env -u REDIS_HOST -u REDIS_PORT .venv/bin/python -m pytest -q --ignore=tests/test_integration.py`
