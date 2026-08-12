@@ -15,7 +15,7 @@ from plane.models.query_params import PaginatedQueryParams
 from plane.models.work_item_pages import CreateWorkItemPage, WorkItemPage
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, as_params, build_annotations, build_description, missing, opt
+from plane_mcp.toolkit import Action, as_params, build_annotations, build_description, envelope, missing, needs, opt
 
 NAME = "page"
 TITLE = "Pages"
@@ -84,7 +84,7 @@ def register(mcp: FastMCP) -> None:
         external_id: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> Page | list[Page] | WorkItemPage | list[WorkItemPage] | dict[str, Any] | str | None:
+    ) -> Page | WorkItemPage | list[WorkItemPage] | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if action == "list":
@@ -95,7 +95,7 @@ def register(mcp: FastMCP) -> None:
                 )
             else:
                 response = client.pages.list_workspace_pages(workspace_slug=workspace_slug, params=params)
-            return response.results
+            return envelope(response)
 
         if action == "retrieve":
             if not page_id:
@@ -107,8 +107,8 @@ def register(mcp: FastMCP) -> None:
             return client.pages.retrieve_workspace_page(workspace_slug=workspace_slug, page_id=page_id)
 
         if action == "create":
-            if not name or not description_html:
-                return missing(action, "name", "description_html")
+            if error := needs(action, name=name, description_html=description_html):
+                return error
             data = CreatePage(
                 name=name,
                 description_html=description_html,
@@ -122,8 +122,8 @@ def register(mcp: FastMCP) -> None:
                 return client.pages.create_project_page(workspace_slug=workspace_slug, project_id=project_id, data=data)
             return client.pages.create_workspace_page(workspace_slug=workspace_slug, data=data)
 
-        if not project_id or not work_item_id:
-            return missing(action, "project_id", "work_item_id")
+        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+            return error
 
         if action == "list_work_item_pages":
             response = client.work_items.pages.list(

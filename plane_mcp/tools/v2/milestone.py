@@ -2,20 +2,28 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastmcp import FastMCP
 from plane.models.milestones import (
     CreateMilestone,
     Milestone,
-    MilestoneWorkItem,
     PaginatedMilestoneResponse,
     PaginatedMilestoneWorkItemResponse,
     UpdateMilestone,
 )
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt, page_params
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    envelope,
+    missing,
+    opt,
+    page_params,
+)
 
 NAME = "milestone"
 TITLE = "Milestones"
@@ -79,7 +87,7 @@ def register(mcp: FastMCP) -> None:
         external_id: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> Milestone | list[Milestone] | list[MilestoneWorkItem] | str | None:
+    ) -> Milestone | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if not project_id:
@@ -91,7 +99,7 @@ def register(mcp: FastMCP) -> None:
                 project_id=project_id,
                 params=page_params(cursor, per_page),
             )
-            return response.results
+            return envelope(response)
 
         if action == "create":
             if not title:
@@ -139,7 +147,7 @@ def register(mcp: FastMCP) -> None:
                 milestone_id=milestone_id,
                 params=page_params(cursor, per_page),
             )
-            return items.results
+            return envelope(items)
 
         add = coerce_list(add_ids)
         remove = coerce_list(remove_ids)

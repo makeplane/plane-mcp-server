@@ -18,10 +18,19 @@ from plane.models.initiatives import (
     PaginatedInitiativeResponse,
     UpdateInitiative,
 )
-from plane.models.projects import PaginatedProjectResponse, Project
+from plane.models.projects import PaginatedProjectResponse
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, opt, page_params, require
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    envelope,
+    opt,
+    page_params,
+    require,
+)
 
 NAME = "initiative"
 TITLE = "Initiatives"
@@ -41,7 +50,7 @@ _PROJECTS_NEED_NATIVE = (
 )
 
 ACTIONS = (
-    Action("list", (), ("cursor", "per_page"), read=True),
+    Action("list", (), note="returns every initiative; this endpoint does not paginate", read=True),
     Action("retrieve", ("initiative_id",), read=True),
     Action("create", ("name",), ("description_html", "start_date", "end_date", "state", "lead")),
     Action(
@@ -110,7 +119,7 @@ def register(mcp: FastMCP) -> None:
         project_ids: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> Initiative | list[Initiative] | list[Project] | str | None:
+    ) -> Initiative | list[Initiative] | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if state and state not in STATES:
@@ -128,9 +137,10 @@ def register(mcp: FastMCP) -> None:
             _require_native(client, workspace_slug, _WORK_ITEM_FALLBACK)
 
         if action == "list":
-            response: PaginatedInitiativeResponse = client.initiatives.list(
-                workspace_slug=workspace_slug, params=page_params(cursor, per_page)
-            )
+            # No cursor or per_page: PaginatedInitiativeResponse carries `results`
+            # and nothing else, so a page size could only truncate the answer with
+            # no way to ask for the rest.
+            response: PaginatedInitiativeResponse = client.initiatives.list(workspace_slug=workspace_slug)
             return response.results
 
         if action == "create":
@@ -175,7 +185,7 @@ def register(mcp: FastMCP) -> None:
                 initiative_id=initiative_id,
                 params=page_params(cursor, per_page),
             )
-            return linked.results
+            return envelope(linked)
 
         ids = coerce_list(project_ids)
         mutate = projects.add if action == "add_projects" else projects.remove

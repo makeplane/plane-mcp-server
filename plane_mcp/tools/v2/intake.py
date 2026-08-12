@@ -6,7 +6,7 @@ id -- the `issue` field of an intake record -- not the intake record's own id.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastmcp import FastMCP
 from plane.models.intake import CreateIntakeWorkItem, IntakeWorkItem, UpdateIntakeWorkItem
@@ -14,7 +14,7 @@ from plane.models.query_params import PaginatedQueryParams, RetrieveQueryParams
 from plane.models.work_items import WorkItemForIntakeRequest
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, as_params, build_annotations, build_description, missing, opt
+from plane_mcp.toolkit import Action, as_params, build_annotations, build_description, envelope, missing, opt
 
 NAME = "intake"
 TITLE = "Intake queue"
@@ -71,7 +71,7 @@ def register(mcp: FastMCP) -> None:
         source_email: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> IntakeWorkItem | list[IntakeWorkItem] | str | None:
+    ) -> IntakeWorkItem | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if not project_id:
@@ -83,7 +83,7 @@ def register(mcp: FastMCP) -> None:
                 project_id=project_id,
                 params=as_params(PaginatedQueryParams, cursor=cursor, per_page=per_page),
             )
-            return response.results
+            return envelope(response)
 
         if action == "create":
             if not name:

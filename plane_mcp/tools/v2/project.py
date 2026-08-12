@@ -18,7 +18,7 @@ from plane.models.projects import (
 from plane.models.query_params import ProjectLiteListQueryParams
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, opt
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, opt
 
 NAME = "project"
 TITLE = "Projects"
@@ -178,8 +178,8 @@ def register(mcp: FastMCP) -> None:
             )
 
         if action == "create":
-            if not name or not identifier:
-                return missing(action, "name", "identifier")
+            if error := needs(action, name=name, identifier=identifier):
+                return error
             return client.projects.create(
                 workspace_slug=workspace_slug,
                 data=CreateProject(

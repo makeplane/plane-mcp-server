@@ -29,6 +29,7 @@ from plane_mcp.toolkit import (
     coerce_list,
     envelope,
     missing,
+    needs,
     opt,
     pql_failure,
 )
@@ -162,8 +163,8 @@ def register(mcp: FastMCP) -> None:
             )
 
         if action == "create":
-            if not name or not owned_by:
-                return missing(action, "name", "owned_by")
+            if error := needs(action, name=name, owned_by=owned_by):
+                return error
             return client.cycles.create(
                 workspace_slug=workspace_slug,
                 project_id=project_id,

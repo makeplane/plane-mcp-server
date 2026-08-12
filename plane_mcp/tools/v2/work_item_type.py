@@ -14,7 +14,16 @@ from plane.models.projects import ProjectFeature
 from plane.models.work_item_types import CreateWorkItemType, UpdateWorkItemType, WorkItemType
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt, page_params
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    missing,
+    needs,
+    opt,
+    page_params,
+)
 from plane_mcp.tools.v2.scope import WORK_ITEM_TYPE
 
 NAME = "work_item_type"
@@ -134,14 +143,14 @@ def register(mcp: FastMCP) -> None:
             return scope.namespace.list(workspace_slug=workspace_slug, **scope.scope_kwargs, **page)
 
         if action == "resolve":
-            if not project_id or not name:
-                return missing(action, "project_id", "name")
+            if error := needs(action, project_id=project_id, name=name):
+                return error
             return _resolve(client, workspace_slug, project_id, name)
 
         if action == "import_to_project":
             ids = coerce_list(work_item_type_ids)
-            if not project_id or not ids:
-                return missing(action, "project_id", "work_item_type_ids")
+            if error := needs(action, project_id=project_id, work_item_type_ids=work_item_type_ids):
+                return error
             client.work_item_types.import_to_project(
                 workspace_slug=workspace_slug, project_id=project_id, work_item_type_ids=ids
             )

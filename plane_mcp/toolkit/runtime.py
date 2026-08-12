@@ -18,6 +18,25 @@ def missing(action: str, *names: str) -> str:
     return f"Error: action '{action}' requires: {', '.join(names)}."
 
 
+def needs(action: str, **supplied: Any) -> str | None:
+    """Error naming only the absent parameters among those given, else None.
+
+    The shared-condition form -- `if not a or not b: return missing(action, "a",
+    "b")` -- blames both whenever either is absent, so a caller that supplied `a`
+    is told to send it again. Pass the values instead of the names and the
+    message narrows itself:
+
+        if error := needs(action, name=name, owned_by=owned_by):
+            return error
+
+    Takes the parameters the caller names, unlike `require`, which reads them
+    from the action declaration. Use this in a guard shared by several actions,
+    where the declaration for any one of them is the wrong list.
+    """
+    absent = [name for name, value in supplied.items() if not value]
+    return missing(action, *absent) if absent else None
+
+
 def require(actions: Any, action: str, **supplied: Any) -> str | None:
     """Check an action's declared required params up front, from the declaration.
 

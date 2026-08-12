@@ -19,7 +19,16 @@ from plane.models.releases import (
 )
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt, page_params
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    missing,
+    needs,
+    opt,
+    page_params,
+)
 
 NAME = "release_label"
 TITLE = "Release labels"
@@ -106,8 +115,8 @@ def register(mcp: FastMCP) -> None:
             return None
 
         ids = coerce_list(label_ids)
-        if not release_id or not ids:
-            return missing(action, "release_id", "label_ids")
+        if error := needs(action, release_id=release_id, label_ids=label_ids):
+            return error
 
         if action == "attach":
             item_labels.create(

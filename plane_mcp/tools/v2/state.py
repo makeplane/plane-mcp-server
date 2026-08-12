@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 from fastmcp import FastMCP
 from plane.models.enums import GroupEnum
 from plane.models.states import CreateState, PaginatedStateResponse, State, UpdateState
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, opt, page_params
+from plane_mcp.toolkit import Action, build_annotations, build_description, envelope, missing, needs, opt, page_params
 
 NAME = "state"
 TITLE = "Workflow states"
@@ -75,7 +75,7 @@ def register(mcp: FastMCP) -> None:
         external_id: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> State | list[State] | str | None:
+    ) -> State | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if not project_id:
@@ -87,11 +87,11 @@ def register(mcp: FastMCP) -> None:
                 project_id=project_id,
                 params=page_params(cursor, per_page),
             )
-            return response.results
+            return envelope(response)
 
         if action == "create":
-            if not name or not color:
-                return missing(action, "name", "color")
+            if error := needs(action, name=name, color=color):
+                return error
             return client.states.create(
                 workspace_slug=workspace_slug,
                 project_id=project_id,

@@ -28,7 +28,7 @@ from plane_mcp.attachments import (
     attachment_to_dict,
 )
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs
 
 NAME = "work_item_attachment"
 TITLE = "Work item attachments"
@@ -178,8 +178,8 @@ def register(mcp: FastMCP) -> None:
     ) -> Image | list[dict[str, Any]] | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
-        if not project_id or not work_item_id:
-            return missing(action, "project_id", "work_item_id")
+        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+            return error
 
         if action == "list":
             attachments = client.work_items.attachments.list(

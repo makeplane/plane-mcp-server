@@ -39,8 +39,13 @@ def dump_results(items: Any, fields: str | None) -> list[Any]:
     return dumped
 
 
-def envelope(response: Any, fields: str | None) -> dict[str, Any]:
-    """Keep the full pagination envelope so paging stays discoverable."""
+def envelope(response: Any, fields: str | None = None) -> dict[str, Any]:
+    """Keep the full pagination envelope so paging stays discoverable.
+
+    An action that takes a `cursor` must return one. Handing back only
+    `response.results` lets a caller page in but never page on, and makes a
+    truncated first page look like the whole set.
+    """
     return {
         "results": dump_results(response.results, fields),
         "total_count": response.total_count,

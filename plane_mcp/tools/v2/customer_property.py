@@ -19,7 +19,16 @@ from plane.models.customers import (
 from plane.models.work_item_property_configurations import DateAttributeSettings, TextAttributeSettings
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt, page_params
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    missing,
+    needs,
+    opt,
+    page_params,
+)
 
 NAME = "customer_property"
 TITLE = "Customer properties"
@@ -153,8 +162,8 @@ def register(mcp: FastMCP) -> None:
             return properties.list(workspace_slug=workspace_slug, params=page_params(cursor, per_page))
 
         if action == "create":
-            if not display_name or not property_type:
-                return missing(action, "display_name", "property_type")
+            if error := needs(action, display_name=display_name, property_type=property_type):
+                return error
             return properties.create(
                 workspace_slug=workspace_slug,
                 data=CreateCustomerProperty(
@@ -183,8 +192,8 @@ def register(mcp: FastMCP) -> None:
             return property_values.list(workspace_slug, customer_id)
 
         if action == "set_values":
-            if not customer_id or not values:
-                return missing(action, "customer_id", "values")
+            if error := needs(action, customer_id=customer_id, values=values):
+                return error
             parsed = _json(values, dict)
             if parsed is None:
                 return 'Error: values must be a JSON object, for example {"<property_id>": ["Enterprise"]}.'

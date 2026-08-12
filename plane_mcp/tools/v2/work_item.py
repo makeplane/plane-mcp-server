@@ -99,8 +99,10 @@ ACTIONS = (
     Action("delete", ("project_id", "work_item_id"), destructive=True),
     Action(
         "archive",
-        ("project_id", "work_item_id", "archive"),
-        note="archive=false unarchives; only completed or cancelled items can be archived",
+        ("project_id", "work_item_id"),
+        ("archive",),
+        note="archive defaults to true; pass archive=false to unarchive. Only completed or "
+        "cancelled items can be archived",
     ),
     Action(
         "manage_assignee",

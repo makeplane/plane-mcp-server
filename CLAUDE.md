@@ -96,7 +96,7 @@ Shared building blocks for tool surfaces, split by *when* they act:
 | Module | Acts at | Provides |
 |---|---|---|
 | `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
-| `runtime.py` | call | `missing`, `require`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
+| `runtime.py` | call | `missing`, `needs`, `require`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
 | `paging.py` | response | `envelope`, `dump_results`, `pql_failure` |
 | `transforms.py` | listing | `StripOutputSchemas` |
 

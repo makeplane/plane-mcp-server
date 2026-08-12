@@ -23,7 +23,7 @@ from plane.models.work_items import (
 )
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt
+from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, needs, opt
 
 NAME = "work_item_relation"
 TITLE = "Work item relations"
@@ -40,8 +40,10 @@ ACTIONS = (
     ),
     Action(
         "delete",
-        ("project_id", "work_item_id", "related_work_item_id", "is_dependency"),
-        note="removes one relation; dependencies and custom relations are independent",
+        ("project_id", "work_item_id", "related_work_item_id"),
+        ("is_dependency",),
+        note="removes one relation; dependencies and custom relations are independent, so "
+        "is_dependency must match the kind that was created (default false)",
         destructive=True,
     ),
     Action("list_definitions", optional=("is_default", "is_active"), read=True),
@@ -163,8 +165,8 @@ def register(mcp: FastMCP) -> None:
             client.work_item_relation_definitions.delete(workspace_slug=workspace_slug, definition_id=definition_id)
             return None
 
-        if not project_id or not work_item_id:
-            return missing(action, "project_id", "work_item_id")
+        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+            return error
 
         if action == "list":
             dependencies = client.work_items.dependencies.list(

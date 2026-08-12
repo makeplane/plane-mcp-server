@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastmcp import FastMCP
 from plane.models.work_items import PaginatedWorkItemActivityResponse, WorkItemActivity
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, page_params
+from plane_mcp.toolkit import Action, build_annotations, build_description, envelope, missing, needs, page_params
 
 NAME = "work_item_activity"
 TITLE = "Work item activity"
@@ -37,11 +37,11 @@ def register(mcp: FastMCP) -> None:
         activity_id: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> WorkItemActivity | list[WorkItemActivity] | str:
+    ) -> WorkItemActivity | dict[str, Any] | str:
         client, workspace_slug = get_plane_client_context()
 
-        if not project_id or not work_item_id:
-            return missing(action, "project_id", "work_item_id")
+        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+            return error
 
         if action == "list":
             response: PaginatedWorkItemActivityResponse = client.work_items.activities.list(
@@ -50,7 +50,7 @@ def register(mcp: FastMCP) -> None:
                 work_item_id=work_item_id,
                 params=page_params(cursor, per_page),
             )
-            return response.results
+            return envelope(response)
 
         if not activity_id:
             return missing(action, "activity_id")

@@ -34,7 +34,16 @@ from plane.models.work_item_properties import (
 from pydantic import ValidationError
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt, page_params
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    missing,
+    needs,
+    opt,
+    page_params,
+)
 
 NAME = "work_item_property"
 TITLE = "Work item properties"
@@ -296,8 +305,8 @@ def register(mcp: FastMCP) -> None:
         workspace_properties = client.workspace_work_item_properties
 
         if action.endswith("_value"):
-            if not project_id or not work_item_id or not property_id:
-                return missing(action, "project_id", "work_item_id", "property_id")
+            if error := needs(action, project_id=project_id, work_item_id=work_item_id, property_id=property_id):
+                return error
             values = properties.values
             target = {
                 "workspace_slug": workspace_slug,
@@ -356,8 +365,8 @@ def register(mcp: FastMCP) -> None:
             return _workspace_props_for_type(client, workspace_slug, work_item_type_id)
 
         if action == "create":
-            if not display_name or not property_type:
-                return missing(action, "display_name", "property_type")
+            if error := needs(action, display_name=display_name, property_type=property_type):
+                return error
             try:
                 parsed_options = _options(options)
             except ValueError as exc:
@@ -390,8 +399,8 @@ def register(mcp: FastMCP) -> None:
         if action == "manage_type_properties":
             attach = coerce_list(attach_ids)
             detach = coerce_list(detach_ids)
-            if not project_id or not work_item_type_id:
-                return missing(action, "project_id", "work_item_type_id")
+            if error := needs(action, project_id=project_id, work_item_type_id=work_item_type_id):
+                return error
             if not attach and not detach:
                 return missing(action, "attach_ids or detach_ids")
             attached = None

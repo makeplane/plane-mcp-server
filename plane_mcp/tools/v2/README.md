@@ -61,8 +61,21 @@ the dispatch has to check them. Without that check a bad value is silently
 dropped and the caller gets a plausible wrong answer — an unfiltered list, a
 release created with the default status — that reads as success.
 
-**Guard order is shared-prefix first.** Check what every action needs, then what
-one action needs, so each `missing()` names only what is actually absent.
+**A guard names only what is absent.** Guard order is shared-prefix first: check
+what every action needs, then what one action needs. For a guard covering more
+than one parameter, use `needs()` rather than a shared condition —
+
+```python
+if error := needs(action, name=name, owned_by=owned_by):   # names owned_by only
+    return error
+
+if not name or not owned_by:                               # blames both
+    return missing(action, "name", "owned_by")
+```
+
+The error string is the model's self-correction channel, so a message that
+blames a parameter the caller supplied costs a whole round trip.
+`test_guards.py` enforces this for every declared required parameter.
 
 **Match the SDK's `params` type.** Some endpoints take `Mapping[str, Any]`
 (`page_params`), others take a Pydantic query-params model (`as_params`) and
@@ -110,6 +123,15 @@ pytest tests/tools/v2/ -q
   `SpyClient`, which binds each call against the genuine SDK signature and
   type-checks the arguments. Also asserts that an action called bare names what
   it needs instead of reaching the network.
+- `test_pagination.py` — every action declaring `cursor` must return a
+  `next_cursor`, and an action whose endpoint does not paginate must not
+  advertise one. Derived from `ACTIONS`, so a new resource is covered
+  automatically.
+- `test_guards.py` — omitting one declared required parameter must produce an
+  error naming that parameter and no other.
+- `test_work_item_property.py` — the defects where this resource answered
+  plausibly instead of correctly: type-guessed values, swallowed option JSON,
+  and errors reported as an empty result.
 - `test_attachments.py` — the actions needing populated state or an outbound
   fetch, including the image-versus-text return channel and the SSRF guard.
 - `test_references.py` — every backticked `tool action` in a description

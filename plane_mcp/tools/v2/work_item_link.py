@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from plane.models.work_items import CreateWorkItemLink, UpdateWorkItemLink, WorkItemLink
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, page_params
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, page_params
 
 NAME = "work_item_link"
 TITLE = "Work item links"
@@ -47,8 +47,8 @@ def register(mcp: FastMCP) -> None:
     ) -> WorkItemLink | list[WorkItemLink] | str | None:
         client, workspace_slug = get_plane_client_context()
 
-        if not project_id or not work_item_id:
-            return missing(action, "project_id", "work_item_id")
+        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+            return error
 
         if action == "list":
             return client.work_items.links.list(
