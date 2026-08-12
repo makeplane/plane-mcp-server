@@ -33,6 +33,7 @@ from evals.drivers import (
     write_claude_mcp_config,
 )
 from evals.run import classify_call, parse_args, stdio_server_env
+from evals.token_counting import estimate_result_tokens
 
 # ---------------------------------------------------------------------------
 # Fixtures (constructed — never captured from live CLIs)
@@ -700,7 +701,6 @@ def test_agent_run_to_harness_dict_excludes_toolsearch_from_mispicks():
         optimal={"find_work_items"},
         alternate={"get_work_item"},
         classify=classify_call,
-        skip_result_tokens=True,
     )
     assert out["num_calls"] == 1
     assert out["out_of_set_calls"] == 0
@@ -712,7 +712,10 @@ def test_agent_run_to_harness_dict_excludes_toolsearch_from_mispicks():
     assert out["cum_input_tokens_reason"]
     assert out["usage_total"]["total_input_tokens_including_cache"] == 10 + 250433 + 33838
     assert out["usage_per_iteration"] == []
-    assert out["result_tokens_skipped_reason"]
+    assert out["calls"][0]["result_tokens"] == 0
+    assert out["calls"][0]["result_tokens_estimated"] is True
+    assert out["result_tokens_estimated"] is True
+    assert "result_tokens_skipped_reason" not in out
 
 
 def test_agent_run_hit_max_maps_to_hit_max_iterations():
@@ -755,10 +758,86 @@ def test_agent_run_to_harness_dict_does_not_guess_usage_total():
         optimal=set(),
         alternate=set(),
         classify=classify_call,
-        skip_result_tokens=True,
     )
     assert out["usage"] == run.usage
     assert out["usage_total"] is None
+
+
+def test_agent_run_payload_uses_importable_tokenizer(monkeypatch):
+    class FakeEncoding:
+        def encode(self, text):
+            assert text == "serialized workspace result"
+            return [10, 20, 30]
+
+    class FakeTiktoken:
+        @staticmethod
+        def get_encoding(name):
+            assert name == "cl100k_base"
+            return FakeEncoding()
+
+    monkeypatch.setitem(sys.modules, "tiktoken", FakeTiktoken)
+    run = AgentRun(
+        calls=[
+            {
+                "tool": "find_work_items",
+                "args": {},
+                "origin": "plane",
+                "result_chars": len("serialized workspace result"),
+                "result_text": "serialized workspace result",
+            }
+        ],
+        final_text="ok",
+        usage=None,
+        stopped_reason="completed",
+        usage_scope="run",
+        call_source="proxy",
+    )
+
+    out = agent_run_to_harness_dict(
+        run,
+        optimal={"find_work_items"},
+        alternate=set(),
+        classify=classify_call,
+    )
+
+    assert out["calls"][0]["result_tokens"] == 3
+    assert out["calls"][0]["result_tokens_estimated"] is False
+    assert out["calls"][0]["result_token_count_method"] == "tiktoken:cl100k_base"
+    assert out["result_tokens_estimated"] is False
+    assert out["result_tokens_mode"] == "measured"
+    assert "result_text" not in out["calls"][0]
+
+
+def test_agent_run_payload_falls_back_to_shared_estimator_without_tokenizer(monkeypatch):
+    monkeypatch.setitem(sys.modules, "tiktoken", None)
+    text = "payload without a tokenizer"
+    run = AgentRun(
+        calls=[
+            {
+                "tool": "find_work_items",
+                "args": {},
+                "origin": "plane",
+                "result_chars": len(text),
+                "result_text": text,
+            }
+        ],
+        final_text="ok",
+        usage=None,
+        stopped_reason="completed",
+        usage_scope="run",
+        call_source="proxy",
+    )
+
+    out = agent_run_to_harness_dict(
+        run,
+        optimal={"find_work_items"},
+        alternate=set(),
+        classify=classify_call,
+    )
+
+    assert out["calls"][0]["result_tokens"] == estimate_result_tokens(len(text))
+    assert out["calls"][0]["result_tokens_estimated"] is True
+    assert out["result_tokens_estimated"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -783,6 +862,9 @@ def test_parse_args_accepts_driver():
     b = parse_args(["--dry-run"])
     assert b.driver == "api"
     assert b.provider == "anthropic"
+    assert b.record_result_payloads is False
+    c = parse_args(["--driver", "claude-cli", "--record-result-payloads", "--dry-run"])
+    assert c.record_result_payloads is True
 
 
 def test_stdio_env_still_works_for_cli_drivers(monkeypatch):

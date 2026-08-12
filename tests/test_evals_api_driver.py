@@ -18,6 +18,7 @@ from evals.drivers.api import (
     ToolSpec,
     Turn,
 )
+from evals.token_counting import estimate_result_tokens
 
 
 class FakeBackend:
@@ -144,6 +145,10 @@ def test_api_driver_multi_turn_tool_loop_and_usage_accumulation():
         {"in": 30, "out": 6, "cache_read": 9, "cache_write": 0},
     ]
     assert [call["result_chars"] for call in run.calls] == [len("first result"), len("second")]
+    assert [call["result_tokens"] for call in run.calls] == [
+        estimate_result_tokens(len("first result")),
+        estimate_result_tokens(len("second")),
+    ]
     assert [call["is_error"] for call in run.calls] == [False, True]
     assert run.result_tokens_estimated is True
     assert run.token_count_failures == 0
@@ -297,7 +302,6 @@ def test_api_driver_maps_every_legacy_row_field():
         classify=lambda tool, optimal, alternate: (
             "optimal" if tool in optimal else "alternate" if tool in alternate else "out_of_set"
         ),
-        skip_result_tokens=False,
     )
 
     required = {
@@ -327,7 +331,7 @@ def test_api_driver_maps_every_legacy_row_field():
         "is_error",
     } <= row["calls"][0].keys()
     assert row["calls"][0]["result_chars"] == 5
-    assert row["calls"][0]["result_tokens"] == 2
+    assert row["calls"][0]["result_tokens"] == estimate_result_tokens(5) == 2
     assert row["result_tokens_estimated"] is True
     assert row["provider"] == "fake"
     assert row["model"] == "fake-actual"

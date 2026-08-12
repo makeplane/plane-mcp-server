@@ -142,6 +142,57 @@ def test_summarize_aggregate_wilson_and_call_variance():
     assert 0.0 <= meta["aggregate_wilson_lo"] <= meta["aggregate_wilson_hi"] <= 1.0
 
 
+def test_report_marks_entirely_estimated_result_token_columns(capsys):
+    rows = [
+        {
+            "task_id": "R1",
+            "rep": 0,
+            "success": True,
+            "num_calls": 1,
+            "calls": [{"result_tokens": 12, "result_tokens_estimated": True}],
+            "result_tokens_estimated": True,
+        }
+    ]
+    summary = summarize(rows)
+    assert summary["_meta"]["result_tokens_mode"] == "estimated"
+    assert summary["R1"]["result_tokens_mode"] == "estimated"
+
+    report_mod.print_table(summary, "estimated")
+    output = capsys.readouterr().out
+    assert "entirely estimated" in output
+    assert "med_rtok~" in output
+    assert "~12" in output
+
+
+def test_report_marks_mixed_measured_and_estimated_columns(capsys):
+    rows = [
+        {
+            "task_id": "R1",
+            "rep": 0,
+            "success": True,
+            "num_calls": 1,
+            "calls": [{"result_tokens": 8, "result_tokens_estimated": False}],
+            "result_tokens_estimated": False,
+        },
+        {
+            "task_id": "R1",
+            "rep": 1,
+            "success": True,
+            "num_calls": 1,
+            "calls": [{"result_tokens": 10, "result_tokens_estimated": True}],
+            "result_tokens_estimated": True,
+        },
+    ]
+    summary = summarize(rows)
+    assert summary["_meta"]["result_tokens_mode"] == "mixed"
+    assert summary["R1"]["result_tokens_mode"] == "mixed"
+
+    report_mod.print_table(summary, "mixed")
+    output = capsys.readouterr().out
+    assert "mixed measured and estimated" in output
+    assert "med_rtok*" in output
+
+
 # ---------------------------------------------------------------------------
 # A/B compare
 # ---------------------------------------------------------------------------

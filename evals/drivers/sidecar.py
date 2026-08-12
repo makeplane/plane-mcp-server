@@ -17,10 +17,14 @@ def proxy_wrap_server_command(
     *,
     sidecar_path: Path,
     python_bin: str | None = None,
+    record_result_payloads: bool = False,
 ) -> list[str]:
     """Return ``[python, -m, evals.proxy, --log, sidecar, --, *real_command]``."""
     py = python_bin or sys.executable
-    return [py, "-m", "evals.proxy", "--log", str(sidecar_path), "--", *real_command]
+    command = [py, "-m", "evals.proxy", "--log", str(sidecar_path)]
+    if record_result_payloads:
+        command.append("--record-result-payloads")
+    return [*command, "--", *real_command]
 
 
 def ensure_proxy_pythonpath(env: dict[str, str]) -> dict[str, str]:
@@ -91,17 +95,19 @@ def load_proxy_sidecar(
         tool = row.get("tool")
         if not tool:
             continue
-        calls.append(
-            {
-                "tool": str(tool),
-                "args": row.get("args") if isinstance(row.get("args"), dict) else (row.get("args") or {}),
-                "origin": "plane",
-                "is_error": bool(row.get("is_error")),
-                "result_chars": int(row.get("result_chars") or 0),
-                "duration_ms": row.get("duration_ms"),
-                "seq": row.get("seq"),
-            }
-        )
+        call = {
+            "tool": str(tool),
+            "args": row.get("args") if isinstance(row.get("args"), dict) else (row.get("args") or {}),
+            "origin": "plane",
+            "is_error": bool(row.get("is_error")),
+            "result_chars": int(row.get("result_chars") or 0),
+            "duration_ms": row.get("duration_ms"),
+            "seq": row.get("seq"),
+        }
+        # Optional in new sidecars; old payload-free rows remain valid.
+        if isinstance(row.get("result_text"), str):
+            call["result_text"] = row["result_text"]
+        calls.append(call)
 
     # Score order must match request seq, not response-append order.
     calls.sort(key=lambda c: (c.get("seq") is None, c.get("seq") if c.get("seq") is not None else 0))

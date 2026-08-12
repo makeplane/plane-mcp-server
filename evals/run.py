@@ -381,6 +381,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=("anthropic", "openai"),
         help="Model API provider for --driver api/sdk (default: anthropic).",
     )
+    p.add_argument(
+        "--record-result-payloads",
+        action="store_true",
+        help=(
+            "CLI drivers only: record serialized tool-result text for tokenizer counting "
+            "(off by default; sidecars may contain live workspace data)"
+        ),
+    )
     p.add_argument("--out", type=str, default=None, help="JSONL output path")
     p.add_argument(
         "--resume",
@@ -478,7 +486,6 @@ async def run_agent_task_via_driver(
         optimal=optimal,
         alternate=alternate,
         classify=classify_call,
-        skip_result_tokens=agent_run.result_tokens_estimated is None,
     )
 
 
@@ -544,6 +551,7 @@ async def run_live(
     server_cmd: list[str] | None = None,
     server_env: dict[str, str] | None = None,
     resume: bool = False,
+    record_result_payloads: bool = False,
 ) -> int:
     surface = (surface or "full").strip().lower()
     external = server_cmd is not None
@@ -608,6 +616,8 @@ async def run_live(
         driver_kwargs.update({"provider": provider, "max_tokens": MAX_TOKENS})
     if driver_name == "codex-cli":
         driver_kwargs["allow_live"] = True
+    if not is_api_driver:
+        driver_kwargs["record_result_payloads"] = record_result_payloads
     # --server-cmd must reach every driver; otherwise we
     # silently benchmark the wrong server.
     if server_cmd is not None:
@@ -968,6 +978,7 @@ def main(argv: list[str] | None = None) -> int:
             server_cmd=server_cmd,
             server_env=server_env or None,
             resume=bool(args.resume),
+            record_result_payloads=bool(args.record_result_payloads),
         )
     )
 

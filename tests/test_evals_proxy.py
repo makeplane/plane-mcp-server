@@ -40,6 +40,7 @@ from evals.proxy import (
 )
 from evals.proxy import main as proxy_main
 from evals.run import resolve_model_for_driver
+from evals.token_counting import estimate_result_tokens
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -261,11 +262,67 @@ def test_sidecar_recorder_unit(tmp_path: Path):
     rec.on_server_message({"jsonrpc": "2.0", "id": 9, "result": {"content": [], "isError": False}})
     rec.write_meta()
     calls = load_proxy_sidecar_calls(tmp_path / "a.jsonl")
+    raw_rows = [json.loads(line) for line in (tmp_path / "a.jsonl").read_text().splitlines()]
+    raw_call = next(row for row in raw_rows if row.get("row_type") != "proxy_meta")
     assert len(calls) == 1
     assert calls[0]["tool"] == "t"
     assert calls[0]["args"] == {"a": 1}
     assert calls[0]["origin"] == "plane"
+    assert "result_text" not in calls[0]
+    assert "result_text" not in raw_call
     assert rec.finalized is True
+
+
+def test_sidecar_result_payload_round_trips_only_when_enabled(tmp_path: Path):
+    path = tmp_path / "payload.jsonl"
+    rec = SidecarRecorder(path, record_result_payloads=True)
+    rec.on_client_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "find_work_items", "arguments": {}},
+        }
+    )
+    result = {"content": [{"type": "text", "text": "workspace result"}], "isError": False}
+    rec.on_server_message({"jsonrpc": "2.0", "id": 3, "result": result})
+    rec.write_meta()
+
+    expected_text = json.dumps(result, default=str, ensure_ascii=False)
+    raw_call = next(
+        row
+        for row in (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
+        if row.get("row_type") != "proxy_meta"
+    )
+    assert raw_call["result_text"] == expected_text
+    calls = load_proxy_sidecar_calls(path)
+    assert calls[0]["result_text"] == expected_text
+    assert calls[0]["result_chars"] == len(expected_text)
+
+
+def test_old_payload_free_sidecar_still_parses(tmp_path: Path):
+    path = tmp_path / "old.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "tool": "legacy",
+                "args": {},
+                "is_error": False,
+                "result_chars": 17,
+                "duration_ms": 1,
+                "seq": 1,
+            }
+        )
+        + "\n"
+        + json.dumps({"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    calls, status = load_proxy_sidecar(path)
+    assert status["state"] == "complete"
+    assert calls[0]["result_chars"] == 17
+    assert "result_text" not in calls[0]
 
 
 def test_append_after_finalize_is_dropped(tmp_path: Path):
@@ -507,6 +564,9 @@ def test_agent_run_to_harness_propagates_proxy_fields():
     )
     assert d["calls"][0]["is_error"] is True
     assert d["calls"][0]["result_chars"] == 99
+    assert d["calls"][0]["result_tokens"] == estimate_result_tokens(99)
+    assert d["calls"][0]["result_tokens_estimated"] is True
+    assert d["result_tokens_estimated"] is True
     assert d["calls"][0]["duration_ms"] == 42
     assert d["errored_calls"] == 1
 
@@ -610,6 +670,14 @@ def test_proxy_wrap_server_command():
     assert out[:5] == ["/venv/bin/python", "-m", "evals.proxy", "--log", "/tmp/s.jsonl"]
     assert out[5] == "--"
     assert out[6:] == ["python", "-m", "plane_mcp", "stdio"]
+
+    with_payloads = proxy_wrap_server_command(
+        ["server"],
+        sidecar_path=Path("/tmp/s.jsonl"),
+        python_bin="python",
+        record_result_payloads=True,
+    )
+    assert with_payloads[5:7] == ["--record-result-payloads", "--"]
 
 
 def test_proxy_main_requires_command():
@@ -937,6 +1005,7 @@ def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
         kwargs = {
             "runner": make_fake(Driver, seen),
             "use_proxy": True,
+            "record_result_payloads": True,
             "python_bin": sys.executable,
             "server_command": ["/ext/bin/foreign-mcp", "stdio", "--v2"],
         }
@@ -953,6 +1022,7 @@ def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
         )
         blob = json.dumps(seen)
         assert "foreign-mcp" in blob or "foreign-mcp" in seen.get("cmd_joined", "")
+        assert "record-result-payloads" in blob or "record-result-payloads" in seen.get("cmd_joined", "")
 
 
 def test_use_proxy_false_call_source_not_proxy(tmp_path: Path):

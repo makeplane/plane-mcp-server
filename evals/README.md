@@ -89,8 +89,17 @@ calls are counted from the wire rather than from whatever the agent claims it di
 The API driver executes MCP calls itself, records exact result character counts, and sizes
 result tokens without making a provider request per result. A backend may supply a token
 counter; otherwise rows set `result_tokens_estimated: true` and use a deterministic
-character-based estimate. CLI drivers retain null result-token counts because they do not
-always expose complete tool result text.
+character-based estimate. CLI drivers use that same shared estimate from the result character
+counts in the recording sidecar, so every driver reports response-token cost and estimated
+counts are explicitly marked.
+
+Exact CLI-side counting is opt-in with `--record-result-payloads`. It makes the proxy retain
+the serialized tool-result text long enough for the harness to count it with a locally
+importable tokenizer (`tiktoken`/`cl100k_base`); if that tokenizer is unavailable, the harness
+falls back to the same marked estimate. The default stays **off** because payloads contain live
+workspace data and bloat the sidecar. For comparing tool surfaces, the default chars-derived
+estimate is monotonic in the thing being compared anyway. Do not enable payload recording by
+habit; use it only when the more sensitive, larger sidecar is justified.
 
 ### Reading results
 

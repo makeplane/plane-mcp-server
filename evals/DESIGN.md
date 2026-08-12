@@ -71,6 +71,10 @@ model, so `result_chars` is always exact. A backend may expose a token counter; 
 driver uses a deterministic character estimate and sets `result_tokens_estimated: true` on
 the row. No provider token-count endpoint is required per tool result.
 
+CLI rows use the same shared character estimator over proxy-recorded `result_chars`. Optional
+payload recording permits local tokenizer counting in the parent harness, but stays off by
+default; the stdlib-only proxy does not import tokenizers.
+
 Rules:
 - Run these counts **after** the agent loop finishes, not inline — they must not pollute
   `wall_time_s`. Buffer the raw result strings during the run, count at the end.

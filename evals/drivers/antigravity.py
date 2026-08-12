@@ -130,12 +130,14 @@ class AntigravityCliDriver:
         runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
         server_command: list[str] | None = None,
         use_proxy: bool = True,
+        record_result_payloads: bool = False,
     ) -> None:
         self.agy_bin = agy_bin
         self.python_bin = python_bin or sys.executable
         self._runner = runner or run_cli_subprocess
         self.server_command = list(server_command) if server_command else None
         self.use_proxy = use_proxy
+        self.record_result_payloads = record_result_payloads
 
     def run_task(
         self,
@@ -161,7 +163,12 @@ class AntigravityCliDriver:
             else:
                 real_cmd = [self.python_bin, "-m", "plane_mcp", "stdio"]
             if self.use_proxy:
-                wrapped = proxy_wrap_server_command(real_cmd, sidecar_path=sidecar, python_bin=self.python_bin)
+                wrapped = proxy_wrap_server_command(
+                    real_cmd,
+                    sidecar_path=sidecar,
+                    python_bin=self.python_bin,
+                    record_result_payloads=self.record_result_payloads,
+                )
                 server_cmd, server_args = wrapped[0], wrapped[1:]
                 child_env_plane = ensure_proxy_pythonpath(child_env_plane)
             else:

@@ -1,7 +1,7 @@
 """Stdio MCP recording proxy — byte-faithful JSON-RPC relay with sidecar call log.
 
 Usage:
-  python -m evals.proxy --log SIDECAR.jsonl -- <target server command...>
+  python -m evals.proxy --log SIDECAR.jsonl [--record-result-payloads] -- <target server command...>
 
 Spawns the target as a child, relays parent stdin → child stdin and child
 stdout → parent stdout as raw bytes (byte-faithful; does not re-serialize).
@@ -46,6 +46,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=True,
         type=Path,
         help="Sidecar JSONL path for recorded tool calls + proxy_meta summary",
+    )
+    p.add_argument(
+        "--record-result-payloads",
+        action="store_true",
+        help="Also store serialized tool-result text (off by default; may contain workspace data)",
     )
     p.add_argument(
         "command",
@@ -116,8 +121,9 @@ class SidecarRecorder:
     last sidecar line even if daemon pumps keep running briefly.
     """
 
-    def __init__(self, log_path: Path) -> None:
+    def __init__(self, log_path: Path, *, record_result_payloads: bool = False) -> None:
         self.log_path = log_path
+        self.record_result_payloads = record_result_payloads
         self._lock = threading.Lock()
         self._pending: dict[Any, dict[str, Any]] = {}
         self._seq = 0
@@ -216,19 +222,20 @@ class SidecarRecorder:
                 is_error = bool(result.get("isError") or result.get("is_error"))
             result_payload = result
         try:
-            result_chars = len(json.dumps(result_payload, default=str, ensure_ascii=False))
+            result_text = json.dumps(result_payload, default=str, ensure_ascii=False)
         except Exception:
-            result_chars = len(str(result_payload))
-        self._append(
-            {
-                "tool": pending["tool"],
-                "args": pending["args"],
-                "is_error": is_error,
-                "result_chars": result_chars,
-                "duration_ms": duration_ms,
-                "seq": pending["seq"],
-            }
-        )
+            result_text = str(result_payload)
+        row = {
+            "tool": pending["tool"],
+            "args": pending["args"],
+            "is_error": is_error,
+            "result_chars": len(result_text),
+            "duration_ms": duration_ms,
+            "seq": pending["seq"],
+        }
+        if self.record_result_payloads:
+            row["result_text"] = result_text
+        self._append(row)
 
     def write_meta(self) -> None:
         """Write proxy_meta as the last row and seal the sidecar (atomic under lock)."""
@@ -390,7 +397,12 @@ def reap_timeout(deadline_at: float | None, floor: float = 0.1) -> float:
     return max(floor, _remaining(deadline_at))
 
 
-def run_proxy(command: list[str], log_path: Path) -> int:
+def run_proxy(
+    command: list[str],
+    log_path: Path,
+    *,
+    record_result_payloads: bool = False,
+) -> int:
     """Spawn ``command`` as the real MCP server and relay with recording.
 
     Returns the child's exit code (or 1 on spawn failure). Guarantees
@@ -398,7 +410,7 @@ def run_proxy(command: list[str], log_path: Path) -> int:
     crash paths. Pump threads are daemon so a blocked write cannot hold the
     process past the shutdown deadline.
     """
-    recorder = SidecarRecorder(log_path)
+    recorder = SidecarRecorder(log_path, record_result_payloads=record_result_payloads)
     child: subprocess.Popen[bytes] | None = None
     # Scrub repo PYTHONPATH so the real server does not import from this tree.
     child_env = scrub_child_pythonpath()
@@ -580,7 +592,11 @@ def main(argv: list[str] | None = None) -> int:
         # Already a session leader, or platform forbids setsid — continue.
         pass
     args = parse_args(argv)
-    return run_proxy(list(args.command), Path(args.log))
+    return run_proxy(
+        list(args.command),
+        Path(args.log),
+        record_result_payloads=bool(args.record_result_payloads),
+    )
 
 
 if __name__ == "__main__":

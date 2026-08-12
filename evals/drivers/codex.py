@@ -257,6 +257,7 @@ class CodexCliDriver:
         allow_live: bool = False,
         server_command: list[str] | None = None,
         use_proxy: bool = True,
+        record_result_payloads: bool = False,
     ) -> None:
         self.codex_bin = codex_bin
         self.python_bin = python_bin or sys.executable
@@ -264,6 +265,7 @@ class CodexCliDriver:
         self.allow_live = allow_live
         self.server_command = list(server_command) if server_command else None
         self.use_proxy = use_proxy
+        self.record_result_payloads = record_result_payloads
 
     def run_task(
         self,
@@ -292,7 +294,12 @@ class CodexCliDriver:
             else:
                 real_cmd = [self.python_bin, "-m", "plane_mcp", "stdio"]
             if self.use_proxy:
-                wrapped = proxy_wrap_server_command(real_cmd, sidecar_path=sidecar, python_bin=self.python_bin)
+                wrapped = proxy_wrap_server_command(
+                    real_cmd,
+                    sidecar_path=sidecar,
+                    python_bin=self.python_bin,
+                    record_result_payloads=self.record_result_payloads,
+                )
                 server_cmd, server_args = wrapped[0], wrapped[1:]
                 child_env = ensure_proxy_pythonpath(child_env)
             else:

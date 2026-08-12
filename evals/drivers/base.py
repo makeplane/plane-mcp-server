@@ -9,6 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from evals.token_counting import (
+    TOKEN_ESTIMATE_METHOD,
+    count_result_text_tokens,
+    estimate_result_tokens,
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # mcp__plane__list_work_items  → list_work_items
@@ -43,8 +49,9 @@ class AgentRun:
     cum_input_tokens: int | None = None
     result_pair_mismatch: bool = False
     token_count_failures: int = 0
-    # None means result token sizing was skipped (CLI drivers). False means a
-    # backend counter was used; True means at least one result used estimation.
+    # False means a tokenizer/backend counter was used for every result; True
+    # means at least one result used the shared character estimate. None lets
+    # the common row mapper determine the status from the recorded calls.
     result_tokens_estimated: bool | None = None
     provider: str | None = None
     model: str | None = None
@@ -154,7 +161,6 @@ def agent_run_to_harness_dict(
     optimal: set[str],
     alternate: set[str],
     classify: Callable[[str, set[str], set[str]], str],
-    skip_result_tokens: bool = True,
 ) -> dict[str, Any]:
     """Map an ``AgentRun`` onto the dict shape expected by ``run_live`` rows.
 
@@ -170,7 +176,9 @@ def agent_run_to_harness_dict(
     plane_src, client_extra = split_plane_and_client_calls(list(run.calls))
     client_src = list(run.client_tool_calls) + client_extra
 
+    is_cli = run.call_source in ("json", "transcript", "stream", "proxy") or run.usage_scope == "run"
     calls: list[dict[str, Any]] = []
+    local_token_count_failures = 0
     for c in plane_src:
         tool = c.get("tool") or ""
         args = c.get("args") or {}
@@ -178,14 +186,37 @@ def agent_run_to_harness_dict(
             args_chars = len(json.dumps(args, default=str))
         except Exception:
             args_chars = len(str(args))
+        result_chars = int(c["result_chars"]) if c.get("result_chars") is not None else 0
+        result_tokens = c.get("result_tokens")
+        estimated = c.get("result_tokens_estimated")
+        count_method = c.get("result_token_count_method")
+        if result_tokens is not None:
+            result_tokens = int(result_tokens)
+            if estimated is None:
+                estimated = bool(run.result_tokens_estimated)
+            if count_method is None:
+                count_method = TOKEN_ESTIMATE_METHOD if estimated else "backend"
+        elif isinstance(c.get("result_text"), str):
+            count = count_result_text_tokens(c["result_text"])
+            result_tokens = count.value
+            estimated = count.estimated
+            count_method = count.method
+            local_token_count_failures += int(count.tokenizer_failed)
+        else:
+            result_tokens = estimate_result_tokens(result_chars)
+            estimated = True
+            count_method = TOKEN_ESTIMATE_METHOD
+
         rec: dict[str, Any] = {
             "tool": tool,
             "class": classify(str(tool), optimal, alternate),
             "args_chars": args_chars,
-            "result_tokens": None if skip_result_tokens else c.get("result_tokens"),
-            "result_chars": int(c["result_chars"]) if c.get("result_chars") is not None else 0,
+            "result_tokens": result_tokens,
+            "result_chars": result_chars,
             "result_kind": str(c.get("result_kind") or "text"),
             "is_error": bool(c.get("is_error")),
+            "result_tokens_estimated": bool(estimated),
+            "result_token_count_method": str(count_method),
         }
         if c.get("duration_ms") is not None:
             rec["duration_ms"] = c["duration_ms"]
@@ -193,8 +224,6 @@ def agent_run_to_harness_dict(
         # tool choice — keep it (args content is otherwise not persisted).
         if isinstance(args, dict) and isinstance(args.get("action"), str):
             rec["action"] = args["action"]
-        if skip_result_tokens:
-            rec["result_tokens_skipped"] = "CLI driver does not expose complete result text"
         calls.append(rec)
 
     client_tool_calls: list[dict[str, Any]] = []
@@ -225,7 +254,6 @@ def agent_run_to_harness_dict(
     # CLI path: never write misleading cum_input_tokens from uncached-only field.
     # usage_total is driver-owned — do not re-derive it here (Claude vs Codex
     # shapes differ; a generic Claude rebuild mislabels other vendors).
-    is_cli = run.call_source in ("json", "transcript", "stream", "proxy") or run.usage_scope == "run"
     usage_total = run.usage_total
 
     if run.usage_per_iteration:
@@ -236,7 +264,7 @@ def agent_run_to_harness_dict(
             else sum(item.get("in", 0) for item in usage_per_iteration)
         )
         cum_reason = None
-    elif is_cli and skip_result_tokens:
+    elif is_cli:
         cum_input: int | None = None
         cum_reason: str | None = (
             "CLI driver: Claude usage.input_tokens is uncached-only; "
@@ -250,6 +278,25 @@ def agent_run_to_harness_dict(
         if run.usage and run.usage_scope == "iteration":
             pass
 
+    estimated_states = [bool(c["result_tokens_estimated"]) for c in calls]
+    if estimated_states:
+        result_tokens_estimated = any(estimated_states)
+        result_tokens_mode = (
+            "estimated" if all(estimated_states) else "measured" if not any(estimated_states) else "mixed"
+        )
+    else:
+        result_tokens_estimated = (
+            bool(run.result_tokens_estimated) if run.result_tokens_estimated is not None else is_cli
+        )
+        result_tokens_mode = "estimated" if result_tokens_estimated else "measured"
+
+    count_methods = {str(c["result_token_count_method"]) for c in calls}
+    if not count_methods:
+        result_token_count_method = "none"
+    elif len(count_methods) == 1:
+        result_token_count_method = next(iter(count_methods))
+    else:
+        result_token_count_method = "mixed"
     result = {
         "final_text": run.final_text,
         "calls": calls,
@@ -259,9 +306,7 @@ def agent_run_to_harness_dict(
         "errored_calls": errored,
         "alternate_calls": alternate_n,
         "out_of_set_calls": out_of_set_n,
-        "total_result_tokens": 0
-        if skip_result_tokens
-        else sum(c["result_tokens"] or 0 for c in calls if c.get("result_tokens") is not None),
+        "total_result_tokens": sum(int(c["result_tokens"]) for c in calls),
         "usage_per_iteration": usage_per_iteration,
         "cum_input_tokens": cum_input,
         "cum_input_tokens_reason": cum_reason,
@@ -269,15 +314,14 @@ def agent_run_to_harness_dict(
         "stop_reason": stop_reason,
         "hit_max_iterations": hit_max,
         "result_pair_mismatch": run.result_pair_mismatch,
-        "token_count_failures": run.token_count_failures,
-        "result_tokens_estimated": run.result_tokens_estimated,
+        "token_count_failures": run.token_count_failures + local_token_count_failures,
+        "result_tokens_estimated": result_tokens_estimated,
+        "result_tokens_mode": result_tokens_mode,
+        "result_token_count_method": result_token_count_method,
         "usage_scope": run.usage_scope,
         "call_source": run.call_source,
         "driver_raw_ref": run.raw_ref,
         "driver_notes": list(run.notes),
-        "result_tokens_skipped_reason": (
-            "CLI driver: complete tool result text is unavailable; skipped" if skip_result_tokens else None
-        ),
         "usage": run.usage,
         "usage_total": usage_total,
     }

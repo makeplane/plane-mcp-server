@@ -20,6 +20,7 @@ from typing import Any, Literal
 from evals.tasks import TASKS_BY_ID
 
 DedupeMode = Literal["latest", "none"]
+ResultTokensMode = Literal["measured", "estimated", "mixed", "unlabeled", "unavailable"]
 
 
 def wilson_interval(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -80,6 +81,32 @@ def _percentile(xs: list[float], p: float) -> float | None:
 
 def _iqr(xs: list[float]) -> tuple[float | None, float | None, float | None]:
     return (_percentile(xs, 0.25), _median(xs), _percentile(xs, 0.75))
+
+
+def result_tokens_mode(rows: list[dict[str, Any]]) -> ResultTokensMode:
+    """Classify token counts without treating unmarked legacy data as measured."""
+    labels: set[str] = set()
+    for row in rows:
+        row_estimated = row.get("result_tokens_estimated")
+        for call in row.get("calls") or []:
+            if call.get("result_tokens") is None:
+                continue
+            estimated = call.get("result_tokens_estimated", row_estimated)
+            if estimated is True:
+                labels.add("estimated")
+            elif estimated is False:
+                labels.add("measured")
+            else:
+                labels.add("unlabeled")
+    if not labels:
+        return "unavailable"
+    if labels == {"estimated"}:
+        return "estimated"
+    if labels == {"measured"}:
+        return "measured"
+    if "unlabeled" in labels:
+        return "unlabeled"
+    return "mixed"
 
 
 def is_meta_row(row: dict[str, Any]) -> bool:
@@ -230,6 +257,7 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "infra_err": infra_err_by_task.get(task_id, 0),
             "med_result_tokens": _median(result_tokens),
             "p95_result_tokens": _percentile(result_tokens, 0.95),
+            "result_tokens_mode": result_tokens_mode(trs),
             "med_cum_input": _median(cum_inputs),
         }
     agg_lo, agg_hi = wilson_interval(total_k, total_n) if total_n else (0.0, 0.0)
@@ -239,6 +267,7 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         "aggregate_n": total_n,
         "aggregate_wilson_lo": agg_lo,
         "aggregate_wilson_hi": agg_hi,
+        "result_tokens_mode": result_tokens_mode([r for trs in by_task.values() for r in trs]),
     }
     return out
 
@@ -249,9 +278,27 @@ def _fmt(x: float | None, digits: int = 1) -> str:
     return f"{x:.{digits}f}"
 
 
+def _result_tokens_marker(mode: str) -> str:
+    return {"estimated": "~", "mixed": "*", "unlabeled": "?"}.get(mode, "")
+
+
+def _fmt_result_tokens(x: float | None, mode: str) -> str:
+    value = _fmt(x, 0)
+    if value == "-":
+        return value
+    return f"{_result_tokens_marker(mode)}{value}"
+
+
 def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
     meta = summary.get("_meta") or {}
     print(title)
+    token_mode = str(meta.get("result_tokens_mode") or "unavailable")
+    if token_mode == "estimated":
+        print("result-token columns marked ~: entirely estimated from result characters")
+    elif token_mode == "mixed":
+        print("result-token columns marked *: mixed measured and estimated values (~ marks estimated tasks)")
+    elif token_mode == "unlabeled":
+        print("result-token columns marked ?: include legacy values with unknown measurement status")
     if meta.get("infra_errors"):
         print(f"infra errors: {meta['infra_errors']}")
     agg_n = int(meta.get("aggregate_n") or 0)
@@ -263,18 +310,23 @@ def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
         print(f"aggregate success: {agg_k}/{agg_n} ({rate:.1%}) Wilson95 [{alo:.2f},{ahi:.2f}]")
     # Show min/med/max call columns when any task has n>1.
     show_var = any(s.get("n", 0) > 1 for tid, s in summary.items() if tid != "_meta")
+    token_marker = _result_tokens_marker(token_mode)
+    med_rtok_header = f"med_rtok{token_marker}"
+    p95_rtok_header = f"p95_rtok{token_marker}"
     if show_var:
         header = (
             f"{'task':<6} {'n':>3} {'success':>8} {'wilson95':>16} "
             f"{'calls_min':>9} {'med_calls':>9} {'calls_max':>9} {'opt':>4} "
             f"{'IQR':>11} {'mispick':>8} {'err':>4} "
-            f"{'capped':>6} {'h_err':>5} {'i_err':>5} {'med_rtok':>8} {'p95_rtok':>8} {'med_cum_in':>10}"
+            f"{'capped':>6} {'h_err':>5} {'i_err':>5} {med_rtok_header:>9} {p95_rtok_header:>9} "
+            f"{'med_cum_in':>10}"
         )
     else:
         header = (
             f"{'task':<6} {'n':>3} {'success':>8} {'wilson95':>16} "
             f"{'med_calls':>9} {'opt':>4} {'IQR':>11} {'mispick':>8} {'err':>4} "
-            f"{'capped':>6} {'h_err':>5} {'i_err':>5} {'med_rtok':>8} {'p95_rtok':>8} {'med_cum_in':>10}"
+            f"{'capped':>6} {'h_err':>5} {'i_err':>5} {med_rtok_header:>9} {p95_rtok_header:>9} "
+            f"{'med_cum_in':>10}"
         )
     print(header)
     print("-" * len(header))
@@ -284,6 +336,7 @@ def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
         wilson = f"[{s['wilson_lo']:.2f},{s['wilson_hi']:.2f}]"
         iqr = f"{_fmt(s['calls_q1'])}-{_fmt(s['calls_q3'])}"
         opt = s["optimal_calls"] if s["optimal_calls"] is not None else "-"
+        task_token_mode = str(s.get("result_tokens_mode") or "unavailable")
         if show_var:
             print(
                 f"{task_id:<6} {s['n']:>3} {s['success']:>8} {wilson:>16} "
@@ -291,7 +344,8 @@ def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
                 f"{opt!s:>4} {iqr:>11} {s['mispick_rate']:>7.1%} "
                 f"{s['errored_calls']:>4} {s['capped']:>6} {s['harness_err']:>5} "
                 f"{s.get('infra_err', 0):>5} "
-                f"{_fmt(s['med_result_tokens'], 0):>8} {_fmt(s['p95_result_tokens'], 0):>8} "
+                f"{_fmt_result_tokens(s['med_result_tokens'], task_token_mode):>9} "
+                f"{_fmt_result_tokens(s['p95_result_tokens'], task_token_mode):>9} "
                 f"{_fmt(s['med_cum_input'], 0):>10}"
             )
         else:
@@ -300,7 +354,8 @@ def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
                 f"{_fmt(s['med_calls']):>9} {opt!s:>4} {iqr:>11} {s['mispick_rate']:>7.1%} "
                 f"{s['errored_calls']:>4} {s['capped']:>6} {s['harness_err']:>5} "
                 f"{s.get('infra_err', 0):>5} "
-                f"{_fmt(s['med_result_tokens'], 0):>8} {_fmt(s['p95_result_tokens'], 0):>8} "
+                f"{_fmt_result_tokens(s['med_result_tokens'], task_token_mode):>9} "
+                f"{_fmt_result_tokens(s['p95_result_tokens'], task_token_mode):>9} "
                 f"{_fmt(s['med_cum_input'], 0):>10}"
             )
 

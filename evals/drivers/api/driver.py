@@ -19,19 +19,13 @@ from evals.drivers.api.anthropic import AnthropicBackend
 from evals.drivers.api.backend import ModelBackend, ToolResult, ToolSpec
 from evals.drivers.api.openai import OpenAIBackend
 from evals.drivers.base import AgentRun
+from evals.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
 
 DEFAULT_MAX_TOKENS = 8192
 KNOWN_API_PROVIDERS = frozenset({"anthropic", "openai"})
 
 BackendFactory = Callable[[str, int], ModelBackend]
 McpSessionFactory = Callable[[StdioServerParameters], Any]
-
-
-def estimate_tokens(text: str) -> int:
-    """Estimate token count from recorded text without a provider request."""
-    if not text:
-        return 0
-    return max(1, (len(text) + 3) // 4)
 
 
 def tool_spec_from_mcp(tool: Any) -> ToolSpec:
@@ -301,6 +295,7 @@ class ApiDriver:
         result_tokens_estimated = False
         for idx, result_text in pending_results:
             counted: int | None = None
+            count_estimated = False
             if callable(counter):
                 try:
                     raw_count = counter(result_text)
@@ -310,9 +305,12 @@ class ApiDriver:
                 except Exception:
                     token_count_failures += 1
             if counted is None:
-                counted = estimate_tokens(result_text)
+                counted = estimate_result_tokens(len(result_text))
+                count_estimated = True
                 result_tokens_estimated = True
             calls[idx]["result_tokens"] = counted
+            calls[idx]["result_tokens_estimated"] = count_estimated
+            calls[idx]["result_token_count_method"] = TOKEN_ESTIMATE_METHOD if count_estimated else "backend"
 
         usage_total = {
             "input_tokens": sum(item.get("in", 0) for item in usage_per_iteration),
@@ -348,7 +346,6 @@ __all__ = [
     "ApiDriver",
     "BackendFactory",
     "McpSessionFactory",
-    "estimate_tokens",
     "tool_result_from_mcp",
     "tool_spec_from_mcp",
 ]
