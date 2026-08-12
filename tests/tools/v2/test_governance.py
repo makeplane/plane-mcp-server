@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from plane_mcp.tools.v2._scope import WORK_ITEM_TYPE
+from plane_mcp.tools.v2.scope import WORK_ITEM_TYPE
 
 PROJECT = "project-1"
 TYPE_ID = "type-1"

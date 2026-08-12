@@ -151,7 +151,12 @@ class _Method:
                 continue
             _validate(self._path, param, self._hints.get(name, param.annotation), value)
         self._spy.recorder.calls.append(Call(self._path, dict(bound.arguments)))
-        return self._spy.returns.get(self._path, self._spy.default)
+        prepared = self._spy.returns.get(self._path, self._spy.default)
+        # An exception queued in `returns` is raised rather than handed back, so
+        # a test can exercise how dispatch reacts to a 404 or a 401.
+        if isinstance(prepared, BaseException):
+            raise prepared
+        return prepared
 
 
 class _Namespace:

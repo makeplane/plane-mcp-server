@@ -14,8 +14,7 @@ from plane.models.query_params import PaginatedQueryParams, RetrieveQueryParams
 from plane.models.work_items import WorkItemForIntakeRequest
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import as_params, missing, opt
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, as_params, build_annotations, build_description, missing, opt
 
 NAME = "intake"
 TITLE = "Intake queue"

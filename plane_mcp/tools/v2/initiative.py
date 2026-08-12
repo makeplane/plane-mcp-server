@@ -21,8 +21,7 @@ from plane.models.initiatives import (
 from plane.models.projects import PaginatedProjectResponse, Project
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import coerce_list, opt, page_params, require
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, opt, page_params, require
 
 NAME = "initiative"
 TITLE = "Initiatives"

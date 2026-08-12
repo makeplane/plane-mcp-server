@@ -71,6 +71,10 @@ Two surfaces live side by side. `tools/__init__.py` picks one at registration ti
 
 One module per resource, each exporting `NAME`, `ACTIONS`, `LEGACY` and `register(mcp)`. `ACTIONS` is the single source of truth: the tool description and its `ToolAnnotations` are generated from it, and the conformance suite asserts they agree with the function signature. See `tools/v2/README.md` for the full convention and the rules that are easy to break.
 
+`tools/v2/` contains resource modules plus `registry.py` (the `RESOURCES` tuple and alias tables), `legacy.py` (v1 name resolution) and `scope.py` (governance declarations). Shared helpers live in `plane_mcp/toolkit/`, not here — see below.
+
+`RESOURCES` is an explicit tuple, not a directory scan. Its order is the advertised order and therefore a wire-format guarantee: tool definitions head a client's prompt cache, so reordering invalidates live conversations. Append; never re-sort. `test_resource_order_is_pinned` holds it to a literal list.
+
 169 of the 177 v1 tool names still resolve, via a `Transform` that maps each to its `(tool, action)` pair with `action` hidden. The transforms implement `list_tools`/`get_tool` only — execution keeps the full schema, so tool results are unchanged.
 
 **Tool pattern (v1):**
@@ -84,6 +88,23 @@ def register_*_tools(mcp: FastMCP) -> None:
 ```
 
 Tools return Pydantic models from `plane-sdk` and use Python 3.10+ union syntax (`str | None`).
+
+### Toolkit (`toolkit/`)
+
+Shared building blocks for tool surfaces, split by *when* they act:
+
+| Module | Acts at | Provides |
+|---|---|---|
+| `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
+| `runtime.py` | call | `missing`, `require`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
+| `paging.py` | response | `envelope`, `dump_results`, `pql_failure` |
+| `transforms.py` | listing | `StripOutputSchemas` |
+
+Names are re-exported from `plane_mcp/toolkit/__init__.py`, so a resource module needs one import: `from plane_mcp.toolkit import Action, build_description, missing, opt`.
+
+These sit outside `tools/` deliberately. They were previously `_`-prefixed modules inside `tools/v2/`, where the underscore was the module-discovery filter rather than a privacy marker — which made helper filenames load-bearing and made the most widely imported module in the package look private. Nothing here knows which catalogue is calling it, and `tools/v2/` is scheduled to be renamed when v1 is dropped.
+
+Anything that encodes one catalogue's history — `LegacyNames`, the `RESOURCES` tuple — belongs under `tools/`, not here.
 
 ### Testing
 

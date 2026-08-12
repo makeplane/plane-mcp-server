@@ -8,8 +8,7 @@ from fastmcp import FastMCP
 from plane.models.work_items import WorkItemWorkLog
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import missing, page_params
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, page_params
 
 NAME = "work_log"
 TITLE = "Work logs"

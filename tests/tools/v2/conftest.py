@@ -13,7 +13,7 @@ os.environ.setdefault("PLANE_WORKSPACE_SLUG", "test")
 
 from plane_mcp.tools.v1 import register_tools as register_v1  # noqa: E402
 from plane_mcp.tools.v2 import register_tools as register_v2  # noqa: E402
-from plane_mcp.tools.v2._registry import alias_table, modules, unmapped_table  # noqa: E402
+from plane_mcp.tools.v2.registry import RESOURCES, alias_table, unmapped_table  # noqa: E402
 
 from ._spyclient import SpyClient  # noqa: E402
 
@@ -31,7 +31,7 @@ class _AllFeaturesOn:
 
 @pytest.fixture(scope="session")
 def resource_modules():
-    return modules()
+    return RESOURCES
 
 
 @pytest.fixture(scope="session")
@@ -76,7 +76,7 @@ def spy(monkeypatch):
     # Resources gated on a workspace feature probe it first; answer yes so the
     # dispatch under test is what gets exercised.
     client.returns["workspaces.get_features"] = _AllFeaturesOn()
-    for mod in modules():
+    for mod in RESOURCES:
         if hasattr(mod, "get_plane_client_context"):
             monkeypatch.setattr(mod, "get_plane_client_context", lambda: (client, "acme"))
     return client

@@ -5,17 +5,20 @@ from __future__ import annotations
 from fastmcp import FastMCP
 from fastmcp.utilities.logging import get_logger
 
-from plane_mcp.tools.v2._legacy import LegacyNames
-from plane_mcp.tools.v2._output import StripOutputSchemas
-from plane_mcp.tools.v2._registry import alias_table, modules
+from plane_mcp.toolkit import StripOutputSchemas
+from plane_mcp.tools.v2.legacy import LegacyNames
 
 logger = get_logger(__name__)
 
 
 def register_tools(mcp: FastMCP, *, legacy_names: bool = True) -> int:
     """Register every resource tool. Returns the number advertised."""
-    resources = modules()
-    for mod in resources:
+    # Imported here, not at module scope: `registry` imports the resource modules
+    # out of this package, so a top-level import would run while this module is
+    # still initialising.
+    from plane_mcp.tools.v2.registry import RESOURCES, alias_table
+
+    for mod in RESOURCES:
         mod.register(mcp)
 
     mcp.add_transform(StripOutputSchemas())
@@ -24,5 +27,5 @@ def register_tools(mcp: FastMCP, *, legacy_names: bool = True) -> int:
 
     # Several clients cap how many tools they load and drop the rest silently.
     # One number in the log lets an operator compare against their client's limit.
-    logger.info("Plane MCP: advertising %d tools", len(resources))
-    return len(resources)
+    logger.info("Plane MCP: advertising %d tools", len(RESOURCES))
+    return len(RESOURCES)

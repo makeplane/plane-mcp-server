@@ -16,7 +16,7 @@ import inspect
 
 import pytest
 
-from plane_mcp.tools.v2._spec import action_names
+from plane_mcp.toolkit.spec import action_names
 
 # Values that satisfy a parameter well enough to reach the SDK call. Enum-valued
 # parameters need a member of their own vocabulary; the rest take a plausible id.
@@ -102,9 +102,9 @@ def _cases(mods):
 
 def pytest_generate_tests(metafunc):
     if {"mod", "action"} <= set(metafunc.fixturenames):
-        from plane_mcp.tools.v2._registry import modules
+        from plane_mcp.tools.v2.registry import RESOURCES
 
-        metafunc.parametrize(("mod", "action"), list(_cases(modules())))
+        metafunc.parametrize(("mod", "action"), list(_cases(RESOURCES)))
 
 
 def test_action_reaches_the_sdk(mod, action, registered, spy):

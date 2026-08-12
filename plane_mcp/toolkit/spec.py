@@ -4,6 +4,9 @@ The Python signature of the registered tool stays the source of truth for the
 JSON schema -- FastMCP derives it. This module is the source of truth for the
 generated description, the tool annotations, and the legacy-name alias entries.
 `tests/tools/v2/test_conformance.py` asserts the two agree.
+
+Rendering one house style from a declaration is what stops 28 hand-written
+descriptions from drifting apart; it is not specific to any one catalogue.
 """
 
 from __future__ import annotations

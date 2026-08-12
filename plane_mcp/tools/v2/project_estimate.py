@@ -22,8 +22,7 @@ from plane.models.estimates import (
 from plane.models.projects import Project
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import missing, opt
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, opt
 
 NAME = "project_estimate"
 TITLE = "Project estimates"

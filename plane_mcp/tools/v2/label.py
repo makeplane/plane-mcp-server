@@ -8,8 +8,7 @@ from fastmcp import FastMCP
 from plane.models.labels import CreateLabel, Label, PaginatedLabelResponse, UpdateLabel
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import missing, opt, page_params
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, opt, page_params
 
 NAME = "label"
 TITLE = "Labels"

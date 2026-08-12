@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from plane_mcp.tools.v2._spec import action_names
+from plane_mcp.toolkit.spec import action_names
 
 BACKTICKED = re.compile(r"`([^`]+)`")
 REFERENCE = re.compile(r"^([a-z][a-z0-9_]*)(?:\s+([a-z][a-z0-9_]*))?$")

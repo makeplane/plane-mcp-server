@@ -19,8 +19,7 @@ from plane.models.releases import (
 )
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import coerce_list, missing, opt, page_params
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt, page_params
 
 NAME = "release_label"
 TITLE = "Release labels"

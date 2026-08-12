@@ -23,8 +23,7 @@ from plane.models.work_items import (
 )
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import coerce_list, missing, opt
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt
 
 NAME = "work_item_relation"
 TITLE = "Work item relations"

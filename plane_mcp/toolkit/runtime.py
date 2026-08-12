@@ -1,8 +1,11 @@
-"""Runtime helpers shared by every resource module.
+"""Call-time parameter validation and payload shaping.
 
 Validation failures are returned as strings rather than raised. The MCP spec
 designates tool execution errors as the model's self-correction channel, so the
 message must name exactly what to supply.
+
+Nothing here knows about a particular tool surface: these take values in and
+give SDK-shaped values back, so any surface can use them.
 """
 
 from __future__ import annotations
@@ -13,10 +16,6 @@ from typing import Any
 
 def missing(action: str, *names: str) -> str:
     return f"Error: action '{action}' requires: {', '.join(names)}."
-
-
-def bad_action(action: str, allowed: tuple[str, ...]) -> str:
-    return f"Error: unknown action '{action}'. Must be one of: {', '.join(allowed)}."
 
 
 def require(actions: Any, action: str, **supplied: Any) -> str | None:

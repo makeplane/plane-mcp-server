@@ -12,7 +12,7 @@ from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from plane_mcp.pql_reference import PQL_FIELD_DESCRIPTION, PQL_FULL_REFERENCE
-from plane_mcp.tools.v2._spec import Action, build_description
+from plane_mcp.toolkit import Action, build_description
 
 NAME = "get_pql_reference"
 TITLE = "PQL reference"

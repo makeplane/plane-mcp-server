@@ -74,10 +74,12 @@ front.
 
 Two `Transform`s wrap the registered tools:
 
-- `StripOutputSchemas` removes `outputSchema` from the listing. It was two
-  thirds of the v1 payload and no client forwards it to a model.
-- `LegacyNames` resolves each v1 tool name to its `(tool, action)` pair on
-  lookup, with `action` hidden and pre-filled.
+- `StripOutputSchemas` (`plane_mcp/toolkit/transforms.py`) removes `outputSchema`
+  from the listing. It was two thirds of the v1 payload and no client forwards it
+  to a model. It is catalogue-agnostic, so it lives in the toolkit.
+- `LegacyNames` (`tools/v2/legacy.py`) resolves each v1 tool name to its
+  `(tool, action)` pair on lookup, with `action` hidden and pre-filled. It
+  encodes this catalogue's history, so it stays with the catalogue.
 
 Both implement `list_tools`/`get_tool` only. Execution keeps the full schema, so
 results — including `structuredContent` — are unchanged.
@@ -102,7 +104,8 @@ pytest tests/tools/v2/ -q
 
 - `test_conformance.py` — surface-wide invariants: tool count within client
   caps, listing within budget, strict-mode compatible schemas, annotations
-  correct, deterministic ordering, every legacy name accounted for.
+  correct, catalogue order pinned to a literal list, every legacy name
+  accounted for.
 - `test_dispatch.py` — every action of every resource, executed against
   `SpyClient`, which binds each call against the genuine SDK signature and
   type-checks the arguments. Also asserts that an action called bare names what
@@ -120,18 +123,44 @@ pytest tests/tools/v2/ -q
 
 Plane governs some resources at the workspace as well as the project — the same
 resource under two SDK namespaces, with different id keyword names and sometimes
-a smaller set of operations. `_scope.py` declares that once per resource instead
+a smaller set of operations. `scope.py` declares that once per resource instead
 of each module hand-rolling `if project_id:`.
 
 The idiom the model sees is uniform: **supply `project_id` for the project's own
 set, omit it for the workspace's.** Work item types are the only governed
-resource today; `_scope.py` records what adding another takes.
+resource today; `scope.py` records what adding another takes.
+
+## Where the code lives
+
+This package holds resource modules and the catalogue, nothing else:
+
+| Path | What |
+|---|---|
+| `tools/v2/<resource>.py` | one module per resource — the 28 tools |
+| `tools/v2/registry.py` | `RESOURCES`, in advertised order, plus the alias tables |
+| `tools/v2/legacy.py` | `LegacyNames` — a v1 migration artefact; dies with v1 |
+| `tools/v2/scope.py` | project-vs-workspace governance declarations |
+| `plane_mcp/toolkit/` | everything shared: `spec`, `runtime`, `paging`, `transforms` |
+
+The helpers used to live here as `_`-prefixed modules, where the underscore was
+not a privacy marker — it was the filter the discovery loop used to tell helpers
+from resources. That made an ordinary helper's *filename* load-bearing and made
+`spec`, imported by all 28 resource modules, look private. They now sit in
+`plane_mcp/toolkit/`, outside a directory that is scheduled to be renamed when
+v1 is dropped.
+
+`RESOURCES` is an explicit tuple rather than a `pkgutil` scan. The order is a
+wire-format guarantee — tool definitions head a client's prompt cache — and
+`test_resource_order_is_pinned` holds it to a literal list, so a change shows up
+as a diff instead of as a silent cache-buster.
 
 ## Adding a resource
 
 1. Copy the five-part shape from `label.py`.
 2. Declare `ACTIONS` first; the description and annotations follow from it.
 3. Map every v1 name in `LEGACY`, or explain the break in `LEGACY_UNMAPPED`.
-4. Run `pytest tests/tools/v2/ -q`. The new resource is picked up
-   automatically — discovery is by module, and the dispatch suite parametrises
-   over `ACTIONS`.
+4. Append the module to `RESOURCES` in `registry.py` and to `CATALOGUE` in
+   `test_conformance.py`. Append — do not re-sort; re-sorting invalidates every
+   live client's prompt cache.
+5. Run `pytest tests/tools/v2/ -q`. The dispatch suite parametrises over
+   `ACTIONS`, so the new resource is exercised action by action.

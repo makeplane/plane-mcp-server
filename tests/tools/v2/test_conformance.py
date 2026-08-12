@@ -12,7 +12,7 @@ from typing import Literal, get_args, get_origin, get_type_hints
 
 import pytest
 
-from plane_mcp.tools.v2._spec import action_names
+from plane_mcp.toolkit.spec import action_names
 
 # Ratchets. Lowering these is routine; raising one is a design decision.
 LISTING_BUDGET_CHARS = 70_000
@@ -29,8 +29,57 @@ def _module_ids(mods):
     return [m.NAME for m in mods]
 
 
-def test_modules_are_discovered(resource_modules):
-    assert resource_modules, "no resource modules found"
+# The advertised catalogue, in order. Tool definitions sit at the front of a
+# client's prompt cache, so changing this order invalidates every live
+# conversation. Editing this list is the deliberate act that makes that happen;
+# appending to it is not.
+CATALOGUE = [
+    "customer",
+    "customer_property",
+    "customer_request",
+    "cycle",
+    "get_pql_reference",
+    "initiative",
+    "intake",
+    "label",
+    "member",
+    "milestone",
+    "module",
+    "page",
+    "project",
+    "project_estimate",
+    "release",
+    "release_label",
+    "release_tag",
+    "state",
+    "work_item",
+    "work_item_activity",
+    "work_item_attachment",
+    "work_item_comment",
+    "work_item_link",
+    "work_item_property",
+    "work_item_relation",
+    "work_item_type",
+    "work_log",
+    "workspace",
+]
+
+
+def test_resource_order_is_pinned(resource_modules):
+    """The catalogue order is a wire-format guarantee, not an artefact of `sorted()`.
+
+    It used to be whatever `pkgutil` yielded over sorted filenames, so renaming a
+    module silently reordered the listing and busted every client's prompt cache
+    with a green suite. Pinning it here turns that into a visible diff.
+    """
+    assert _module_ids(resource_modules) == CATALOGUE
+
+
+def test_module_filename_matches_its_tool_name(resource_modules):
+    """Keeps the catalogue greppable: `work_item` lives in `work_item.py`."""
+    for mod in resource_modules:
+        filename = mod.__name__.rsplit(".", 1)[-1]
+        assert filename == mod.NAME, f"{filename}.py declares NAME = {mod.NAME!r}"
 
 
 def test_every_module_declares_its_contract(resource_modules):

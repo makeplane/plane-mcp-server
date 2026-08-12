@@ -19,9 +19,16 @@ from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.pql_reference import PQL_FIELD_HINT
-from plane_mcp.tools.v2._listing import envelope, pql_failure
-from plane_mcp.tools.v2._runtime import coerce_list, missing, opt
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    envelope,
+    missing,
+    opt,
+    pql_failure,
+)
 
 NAME = "module"
 TITLE = "Modules"

@@ -15,6 +15,7 @@ import json
 from typing import Any, Literal, get_args
 
 from fastmcp import FastMCP
+from plane.errors.errors import HttpError
 from plane.models.work_item_properties import (
     CreateWorkItemProperty,
     CreateWorkItemPropertyOption,
@@ -30,10 +31,10 @@ from plane.models.work_item_properties import (
     WorkItemPropertyOption,
     WorkItemPropertyValueDetail,
 )
+from pydantic import ValidationError
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import coerce_list, missing, opt, page_params
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt, page_params
 
 NAME = "work_item_property"
 TITLE = "Work item properties"
@@ -132,10 +133,12 @@ FOOTER = (
     "project, and neither is every workspace property. To filter by property name in PQL, call "
     "list with no ids -- one workspace-wide fetch beats iterating types -- then match "
     "display_name in memory to get the id for a cf[] condition. "
-    "The *_value actions read and write a property on one work item: value is a string read "
-    "according to the property type -- TEXT/URL/EMAIL/FILE as text; DATETIME as YYYY-MM-DD or "
-    "YYYY-MM-DD HH:MM:SS; DECIMAL as a number; BOOLEAN as true or false; OPTION and RELATION as "
-    "an option or record id, or a JSON array of them when the property is multi-value."
+    "The *_value actions read and write a property on one work item: pass value in the type the "
+    "property expects -- TEXT/URL/EMAIL/FILE as a string; DATETIME as a YYYY-MM-DD or "
+    "YYYY-MM-DD HH:MM:SS string; DECIMAL as a number; BOOLEAN as true or false; OPTION and "
+    "RELATION as an option or record id string, or an array of them when the property is "
+    'multi-value. Send the value\'s own type, not a stringified form: "007" stays the text 007, '
+    "whereas 7 is the number."
 )
 
 LEGACY = {
@@ -169,40 +172,37 @@ def _settings(property_type: str, display_format: str) -> PropertySettings:
     return None
 
 
+OPTIONS_SHAPE = 'options must be a JSON array of {"name", "color", "is_default"} objects'
+
+
 def _options(options: str) -> list[CreateWorkItemPropertyOption] | None:
+    """Parse the options array, raising ValueError with a correctable message.
+
+    Silently returning None on malformed input created the property with no
+    options at all and reported success -- the caller had no way to notice.
+    """
     if not options:
         return None
     try:
         parsed = json.loads(options)
-    except ValueError:
-        return None
-    return [CreateWorkItemPropertyOption(**item) for item in parsed] if isinstance(parsed, list) else None
+    except ValueError as exc:
+        raise ValueError(f"{OPTIONS_SHAPE}; it is not valid JSON ({exc})") from exc
+    if not isinstance(parsed, list):
+        raise ValueError(f"{OPTIONS_SHAPE}; got {type(parsed).__name__}")
+    try:
+        return [CreateWorkItemPropertyOption(**item) for item in parsed]
+    except (TypeError, ValidationError) as exc:
+        raise ValueError(f"{OPTIONS_SHAPE}; one entry is unusable ({exc})") from exc
 
 
-def _coerce_value(value: str) -> Any:
-    """Read the string back into the shape the property expects.
+def _absent(exc: HttpError) -> bool:
+    """Whether an error means "nothing here", as opposed to "the call failed".
 
-    A tool schema cannot say "whatever this property's type is", so value is
-    typed str and narrowed here.
+    Only 404 is a fallback signal. Swallowing everything turned an expired token
+    or a 500 into an empty list, which reads to a model as "no custom properties
+    exist" -- and it then drops the `cf[]` filter it was about to build.
     """
-    text = value.strip()
-    lowered = text.lower()
-    if lowered in ("true", "false"):
-        return lowered == "true"
-    if text.startswith("["):
-        try:
-            parsed = json.loads(text)
-        except ValueError:
-            return value
-        return parsed if isinstance(parsed, list) else value
-    try:
-        return int(text)
-    except ValueError:
-        pass
-    try:
-        return float(text)
-    except ValueError:
-        return value
+    return exc.status_code == 404
 
 
 def _workspace_props_for_type(client, workspace_slug: str, type_id: str) -> list:
@@ -214,8 +214,10 @@ def _workspace_props_for_type(client, workspace_slug: str, type_id: str) -> list
         wanted = {str(pid) for pid in property_ids}
         everything = client.workspace_work_item_properties.list(workspace_slug=workspace_slug)
         return [p for p in everything if str(p.id) in wanted]
-    except Exception:
-        return []
+    except HttpError as exc:
+        if _absent(exc):
+            return []
+        raise
 
 
 def register(mcp: FastMCP) -> None:
@@ -256,7 +258,11 @@ def register(mcp: FastMCP) -> None:
         default_value: str = "",
         options: str = "",
         display_format: str = "",
-        value: str = "",
+        # A property value is genuinely polymorphic -- the property's own type
+        # decides. Typing it `str` and re-deriving the type from how the string
+        # looked corrupted real data ("007" -> 7). The anyOf block this renders
+        # costs 92 characters of listing; the guessing cost correctness.
+        value: str | bool | int | float | list[str] = "",
         attach_ids: str = "",
         detach_ids: str = "",
         is_required: bool | None = None,
@@ -302,12 +308,14 @@ def register(mcp: FastMCP) -> None:
             if action == "get_value":
                 return values.retrieve(**target)
             if action == "set_value":
-                if not value:
+                # Compared against "" rather than tested for falsiness: `False`
+                # and `0` are values a BOOLEAN or DECIMAL property can hold.
+                if value == "":
                     return missing(action, "value")
                 return values.create(
                     **target,
                     data=CreateWorkItemPropertyValue(
-                        value=_coerce_value(value),
+                        value=value,
                         external_id=opt(external_id),
                         external_source=opt(external_source),
                     ),
@@ -324,8 +332,10 @@ def register(mcp: FastMCP) -> None:
             if not work_item_type_id:
                 try:
                     return properties.list_project(workspace_slug=workspace_slug, project_id=project_id, params=params)
-                except Exception:
-                    return []
+                except HttpError as exc:
+                    if _absent(exc):
+                        return []
+                    raise
             scoped = properties.list(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
@@ -340,13 +350,18 @@ def register(mcp: FastMCP) -> None:
                 flat = properties.list_project(workspace_slug=workspace_slug, project_id=project_id, params=params)
                 if flat:
                     return flat
-            except Exception:
-                pass
+            except HttpError as exc:
+                if not _absent(exc):
+                    raise
             return _workspace_props_for_type(client, workspace_slug, work_item_type_id)
 
         if action == "create":
             if not display_name or not property_type:
                 return missing(action, "display_name", "property_type")
+            try:
+                parsed_options = _options(options)
+            except ValueError as exc:
+                return f"Error: {exc}."
             data = CreateWorkItemProperty(
                 display_name=display_name,
                 property_type=PropertyType(property_type),
@@ -359,7 +374,7 @@ def register(mcp: FastMCP) -> None:
                 is_multi=is_multi,
                 external_source=opt(external_source),
                 external_id=opt(external_id),
-                options=_options(options),
+                options=parsed_options,
             )
             if project_id and work_item_type_id:
                 return properties.create(

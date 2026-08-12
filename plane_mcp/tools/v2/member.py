@@ -8,8 +8,7 @@ from fastmcp import FastMCP
 from plane.models.query_params import MemberListQueryParams
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.tools.v2._runtime import missing, opt
-from plane_mcp.tools.v2._spec import Action, build_annotations, build_description
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, opt
 
 NAME = "member"
 TITLE = "Members and roles"

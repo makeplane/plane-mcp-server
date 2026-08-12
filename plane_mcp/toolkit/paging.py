@@ -1,8 +1,11 @@
-"""Helpers for endpoints that return a page of work items.
+"""Pagination envelopes and PQL failure handling for Plane list endpoints.
 
-Three resources list work items -- work_item, cycle and module -- and all three
-must return the same envelope shape and handle an invalid PQL filter the same
-way. Keeping that here is what makes them consistent.
+Several resources list work items -- work_item, cycle and module -- and all of
+them must return the same envelope shape and handle an invalid PQL filter the
+same way. Keeping that here is what makes them consistent.
+
+This is Plane's pagination contract, not one tool surface's: any surface talking
+to these endpoints needs the same envelope and the same 400-on-bad-PQL answer.
 """
 
 from __future__ import annotations
@@ -18,12 +21,22 @@ logger = get_logger(__name__)
 
 
 def dump_results(items: Any, fields: str | None) -> list[Any]:
-    """Serialise a page, honouring `fields` as a sparse fieldset."""
+    """Serialise a page, honouring `fields` as a sparse fieldset.
+
+    Written as a loop rather than a nested ternary: the previous one-liner read
+    as though `hasattr` guarded both branches, when it guarded only the second,
+    so a page of plain dicts raised AttributeError as soon as `fields` was set.
+    """
     requested = {name.strip() for name in fields.split(",")} - {""} if fields else None
-    return [
-        item.model_dump(include=requested) if requested else item.model_dump() if hasattr(item, "model_dump") else item
-        for item in (items or [])
-    ]
+    dumped: list[Any] = []
+    for item in items or []:
+        if not hasattr(item, "model_dump"):
+            dumped.append(item)
+        elif requested:
+            dumped.append(item.model_dump(include=requested))
+        else:
+            dumped.append(item.model_dump())
+    return dumped
 
 
 def envelope(response: Any, fields: str | None) -> dict[str, Any]:
