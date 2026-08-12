@@ -1684,7 +1684,7 @@ def test_claude_mcp_env_has_pythonpath_when_proxied(tmp_path: Path):
 
 def test_run_live_passes_server_cmd_to_non_claude(monkeypatch, tmp_path: Path):
     """--server-cmd must not be Claude-only."""
-    from evals import run as run_mod
+    from evals import runner as run_mod
 
     captured: dict = {}
 

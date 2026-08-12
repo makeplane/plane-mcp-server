@@ -14,6 +14,7 @@ from plane.errors.errors import HttpError
 
 from evals import report as report_mod
 from evals import run as run_mod
+from evals import runner as runner_mod
 from evals import seed as seed_mod
 from evals.drivers import AgentRun, ClaudeCliDriver, parse_claude_json_result
 from evals.report import is_infra_error_row, load_rows, summarize
@@ -182,14 +183,14 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
     out = tmp_path / "rows.jsonl"
 
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
 
     def boom_seed(plane, run_id, needs, ctx):
         ctx["project_name"] = "EVAL deadbeef"
         raise HttpError("identifier already taken", 409)
 
-    monkeypatch.setattr(run_mod, "seed", boom_seed)
-    monkeypatch.setattr(run_mod, "teardown", lambda plane, ctx: None)
+    monkeypatch.setattr(runner_mod, "seed", boom_seed)
+    monkeypatch.setattr(runner_mod, "teardown", lambda plane, ctx: None)
 
     task = {
         "id": "T1",
@@ -226,13 +227,13 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
 def test_run_live_driver_exception_is_infra_cli(tmp_path: Path, monkeypatch):
     out = tmp_path / "rows.jsonl"
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
 
     def ok_seed(plane, run_id, needs, ctx):
         ctx.update({"project_name": "EVAL deadbeef", "project_id": "p1"})
 
-    monkeypatch.setattr(run_mod, "seed", ok_seed)
-    monkeypatch.setattr(run_mod, "teardown", lambda plane, ctx: None)
+    monkeypatch.setattr(runner_mod, "seed", ok_seed)
+    monkeypatch.setattr(runner_mod, "teardown", lambda plane, ctx: None)
 
     class BoomDriver:
         name = "claude-cli"
@@ -240,7 +241,7 @@ def test_run_live_driver_exception_is_infra_cli(tmp_path: Path, monkeypatch):
         def run_task(self, *args, **kwargs):
             raise RuntimeError("claude cli failed: json_parse_failed")
 
-    monkeypatch.setattr(run_mod, "get_driver", lambda name, **kw: BoomDriver())
+    monkeypatch.setattr(runner_mod, "get_driver", lambda name, **kw: BoomDriver())
 
     task = {
         "id": "T2",
@@ -275,9 +276,9 @@ def test_run_live_timeout_agent_is_infra_cli(tmp_path: Path, monkeypatch):
 
     out = tmp_path / "rows.jsonl"
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
-    monkeypatch.setattr(run_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
-    monkeypatch.setattr(run_mod, "teardown", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
+    monkeypatch.setattr(runner_mod, "teardown", lambda *a, **k: None)
 
     class TimeoutDriver:
         name = "claude-cli"
@@ -291,7 +292,7 @@ def test_run_live_timeout_agent_is_infra_cli(tmp_path: Path, monkeypatch):
                 notes=["timeout after 900s"],
             )
 
-    monkeypatch.setattr(run_mod, "get_driver", lambda name, **kw: TimeoutDriver())
+    monkeypatch.setattr(runner_mod, "get_driver", lambda name, **kw: TimeoutDriver())
 
     verify_calls: list[Any] = []
 
@@ -339,9 +340,9 @@ def test_run_live_error_during_execution_is_infra_cli(tmp_path: Path, monkeypatc
     """exit 1 + parseable JSON subtype error_during_execution → infra_cli; verify not called."""
     out = tmp_path / "rows.jsonl"
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
-    monkeypatch.setattr(run_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
-    monkeypatch.setattr(run_mod, "teardown", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
+    monkeypatch.setattr(runner_mod, "teardown", lambda *a, **k: None)
 
     payload = {
         "type": "result",
@@ -356,7 +357,7 @@ def test_run_live_error_during_execution_is_infra_cli(tmp_path: Path, monkeypatc
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 1, stdout=json.dumps(payload), stderr="claude boom")
 
-    monkeypatch.setattr(run_mod, "get_driver", lambda name, **kw: ClaudeCliDriver(runner=fake_run))
+    monkeypatch.setattr(runner_mod, "get_driver", lambda name, **kw: ClaudeCliDriver(runner=fake_run))
 
     verify_calls: list[Any] = []
 
@@ -396,9 +397,9 @@ def test_run_live_error_max_turns_is_task_path(tmp_path: Path, monkeypatch):
     """exit 1 + subtype error_max_turns stays in the task denominator (not infra_cli)."""
     out = tmp_path / "rows.jsonl"
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
-    monkeypatch.setattr(run_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
-    monkeypatch.setattr(run_mod, "teardown", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
+    monkeypatch.setattr(runner_mod, "teardown", lambda *a, **k: None)
 
     payload = {
         "type": "result",
@@ -413,7 +414,7 @@ def test_run_live_error_max_turns_is_task_path(tmp_path: Path, monkeypatch):
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 1, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr(run_mod, "get_driver", lambda name, **kw: ClaudeCliDriver(runner=fake_run))
+    monkeypatch.setattr(runner_mod, "get_driver", lambda name, **kw: ClaudeCliDriver(runner=fake_run))
 
     verify_calls: list[Any] = []
 
@@ -777,9 +778,9 @@ def test_load_rows_no_dedupe_warns_on_duplicate_keys(tmp_path: Path, capsys):
 
 def test_canary_detects_broken_verifier(monkeypatch):
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
-    monkeypatch.setattr(run_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
-    monkeypatch.setattr(run_mod, "teardown", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
+    monkeypatch.setattr(runner_mod, "teardown", lambda *a, **k: None)
 
     async def always_ok(plane, ctx, run):
         return True, "false positive"
@@ -813,9 +814,9 @@ def test_canary_detects_broken_verifier(monkeypatch):
 
 def test_canary_passes_when_all_verifiers_reject(monkeypatch):
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
-    monkeypatch.setattr(run_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
-    monkeypatch.setattr(run_mod, "teardown", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "seed", lambda *a, **k: k["ctx"].update({"project_name": "P", "project_id": "1"}))
+    monkeypatch.setattr(runner_mod, "teardown", lambda *a, **k: None)
 
     async def reject(plane, ctx, run):
         assert run == {"final_text": "", "calls": []}
@@ -838,11 +839,11 @@ def test_canary_passes_when_all_verifiers_reject(monkeypatch):
 
 def test_canary_exits_1_when_all_tasks_skipped(monkeypatch):
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
-    monkeypatch.setattr(run_mod, "seed", lambda *a, **k: None)
-    monkeypatch.setattr(run_mod, "teardown", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "seed", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "teardown", lambda *a, **k: None)
     monkeypatch.setattr(
-        run_mod,
+        runner_mod,
         "resolve_surface_tool_sets",
         lambda task, surface: {
             "skip": "unsupported on surface",
@@ -901,7 +902,7 @@ def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypat
     out.write_text("\n".join(json.dumps(r) for r in prior) + "\n", encoding="utf-8")
 
     fake_plane = MagicMock()
-    monkeypatch.setattr(run_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
     seed_calls: list[str] = []
 
     def ok_seed(plane, run_id, needs, ctx):
@@ -909,8 +910,8 @@ def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypat
         ctx.update({"project_name": "EVAL resume", "project_id": "p1"})
         seed_calls.append(run_id)
 
-    monkeypatch.setattr(run_mod, "seed", ok_seed)
-    monkeypatch.setattr(run_mod, "teardown", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "seed", ok_seed)
+    monkeypatch.setattr(runner_mod, "teardown", lambda *a, **k: None)
 
     class OkDriver:
         name = "claude-cli"
@@ -923,7 +924,7 @@ def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypat
                 stopped_reason="end_turn",
             )
 
-    monkeypatch.setattr(run_mod, "get_driver", lambda name, **kw: OkDriver())
+    monkeypatch.setattr(runner_mod, "get_driver", lambda name, **kw: OkDriver())
 
     async def verify_ok(plane, ctx, run):
         return True, "ok"
