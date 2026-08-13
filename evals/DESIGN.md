@@ -209,23 +209,31 @@ evals/
     debias.py            I1-I5 and L1-L5 tasks and verifiers
   drivers/
     __init__.py          public exports and driver registry
-    base.py              AgentDriver, AgentRun, normalization, and common row mapping
+    protocol.py          AgentDriver, AgentRun, normalization, and common row mapping
     token_counting.py    tool-result token sizing
-    claude.py            Claude Code CLI driver
-    codex.py             Codex CLI driver
-    antigravity.py       Antigravity CLI driver
-    opencode.py          opencode CLI driver
-    process.py           shared subprocess lifecycle
-    sidecar.py           recording-proxy command and sidecar handling
     api/
       backend.py         neutral backend protocol and turn/tool dataclasses
       driver.py          provider-neutral MCP/model loop
       anthropic.py       Anthropic Messages translation
       openai.py          OpenAI Chat Completions translation
+    cli/
+      template.py        shared CLI driver template
+      process.py         subprocess lifecycle
+      sidecar.py         recording-proxy command and sidecar handling
+      claude.py          Claude Code CLI driver
+      codex.py           Codex CLI driver
+      antigravity.py     Antigravity CLI driver
+      opencode.py        OpenCode CLI driver
   proxy.py               stdlib-only JSON-RPC recording relay
   seed/                  Plane fixture creation and teardown
   report/                summaries, A/B comparison, and multi-surface tables
+
 ```
+
+Booting a Plane instance to measure against is deliberately outside this tree. The
+harness reaches its target through three `EVAL_PLANE_*` variables and knows nothing
+else about how that instance runs, so a local plane-ee, a shared staging box, and a
+hosted workspace are the same thing to it.
 
 The stable import and command surfaces are intentional: `from evals.tasks import ...`,
 `from evals.drivers import ...`, and `python -m evals` remain the public boundaries even

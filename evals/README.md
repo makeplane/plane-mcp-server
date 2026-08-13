@@ -16,26 +16,18 @@ agent's final text.
 
 ## Prerequisites
 
-1. **A Plane API endpoint.** For local runs, `evals/env.sh` starts plane-ee on `:8000` plus
-   a mock feature-flag server on `:9911` that turns every discovered flag on.
+1. **A reachable Plane instance and API key.** Any reachable instance works, local or
+   hosted. The key must be able to create and delete the catalog's project and
+   workspace-scoped fixtures. Genuine plan or feature gates are recorded as skips where
+   the fixture code handles them. Configure the harness with exactly these three values:
 
    ```bash
-   export PLANE_EE_API_DIR=/path/to/plane-ee/apps/api
-   export PLANE_EE_VENV=/path/to/plane-ee-venv
-   evals/env.sh up       # down | status
+   export EVAL_PLANE_BASE_URL=https://your-plane.example.com
+   export EVAL_PLANE_WORKSPACE_SLUG=your-workspace-slug
+   export EVAL_PLANE_API_KEY=plane_api_your_key
    ```
 
-2. **A workspace and an API key** on that instance. The key must be able to create and
-   delete the catalog's project and workspace-scoped fixtures. Genuine plan or feature
-   gates are recorded as skips where the fixture code handles them.
-
-   ```bash
-   export EVAL_PLANE_BASE_URL=http://localhost:8000
-   export EVAL_PLANE_WORKSPACE_SLUG=<slug>
-   export EVAL_PLANE_API_KEY=plane_api_...
-   ```
-
-3. **Model access for the driver you pick.** The API driver uses
+2. **Model access for the driver you pick.** The API driver uses
    `ANTHROPIC_API_KEY` by default; OpenAI requires its SDK and `OPENAI_API_KEY`.
    CLI drivers require their corresponding local CLI to already be authenticated.
 
@@ -155,8 +147,13 @@ Tasks that touch **workspace-scoped** fixtures (release tags, customer propertie
 if two runs share a workspace. Give each concurrent run its own workspace:
 
 ```bash
-EVAL_PLANE_WORKSPACE_SLUG=ws1 ... --label local     --out evals/output/local.jsonl &
-EVAL_PLANE_WORKSPACE_SLUG=ws2 ... --label their-pr  --out evals/output/their-pr.jsonl &
+EVAL_PLANE_WORKSPACE_SLUG=ws1 .venv/bin/python -m evals \
+  --driver codex-cli --model YOUR_CODEX_MODEL_ID \
+  --label local --out evals/output/local.jsonl &
+EVAL_PLANE_WORKSPACE_SLUG=ws2 .venv/bin/python -m evals \
+  --driver codex-cli --model YOUR_CODEX_MODEL_ID \
+  --label their-pr --server-cmd "/path/to/their/.venv/bin/plane-mcp-server stdio" \
+  --out evals/output/their-pr.jsonl &
 wait
 ```
 
@@ -228,6 +225,19 @@ tasks, fixtures, or verifiers.
 `cycles_open_past` fixture variant because it asks the agent to close Sprint 12; the seeder
 must not pre-close the cycle that the task is meant to change.
 
+## Running a local Plane
+
+Any reachable Plane works, so how you get one is your own setup and is not kept in this
+repo. If you run plane-ee locally, two things make it usable for evals:
+
+- Point `FEATURE_FLAG_SERVER_BASE_URL` at a flag server that answers every flag as on.
+  The gated tasks (releases, customers, worklogs, work item types) need it, and the
+  hosted flag server has them off for a local workspace.
+- Raise `API_KEY_RATE_LIMIT`; a full battery makes far more API calls than the default
+  allows.
+
+Keep such scripts outside version control — `localdev/` is ignored for exactly this.
+
 ## Local gotchas
 
 - If seeded comments do not materialize as activities, the activity-feed task self-skips
@@ -236,11 +246,12 @@ must not pre-close the cycle that the task is meant to change.
   cached per workspace, and the cache does not record which flag server answered. Any
   process that touches the DB while pointed at a *different* flag server than the running
   API — sourcing `plane-ee/apps/api/.env` gets you the remote one, where these flags are
-  off — caches that answer for the workspace, and the API then serves the cached miss
-  instead of asking its own mock. The tell is a canary that reports every verifier broken
-  at once. Clear `ff:<slug>:*` and rotate `ff_ver:<slug>` (`plane.payment.flags.cache`)
-  and the next request refetches. Observed while creating a workspace from a Django
-  shell; a plan/licence problem looks identical from the outside, so check this first.
+  off — caches that answer for the workspace, and
+  the API then serves the cached miss instead of asking its own mock. The tell is a canary
+  that reports every verifier broken at once. Clear `ff:<slug>:*` and rotate
+  `ff_ver:<slug>` (`plane.payment.flags.cache`) and the next request refetches. Observed
+  while creating a workspace from a Django shell; a plan/licence problem looks identical
+  from the outside, so check this first.
 - A workspace licence is **not** required for local runs: the mock flag server enables
   every flag regardless, and an unlicensed workspace seeds all fixtures (verified by
   canary against a workspace with no licence row).
