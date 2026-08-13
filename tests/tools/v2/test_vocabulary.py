@@ -78,6 +78,21 @@ def test_unmapped_reasons_do_not_cite_a_retired_action(unmapped):
     assert not stale, "an unmapped reason points at a name that no longer exists:\n  " + "\n  ".join(stale)
 
 
+def test_a_retired_name_accepts_the_retired_parameter_spelling(registered_with_aliases):
+    """Resolving the name but rejecting its parameters is not compatibility.
+
+    `update_work_item` shipped taking `work_item_id`; a caller reaching it by that
+    name has no reason to have followed the rename to `workitem_id`.
+    """
+    wrong = []
+    for name, tool in registered_with_aliases.items():
+        params = set((tool.parameters or {}).get("properties", {}))
+        for param in sorted(params):
+            if "workitem" in param:
+                wrong.append(f"{name} exposes {param!r}, not its retired spelling")
+    assert not wrong, "a retired tool name changed its parameter names:\n  " + "\n  ".join(wrong)
+
+
 def test_the_legacy_aliases_keep_the_v1_spelling(aliases):
     """The other direction: a v1 name is history and must not be modernised.
 

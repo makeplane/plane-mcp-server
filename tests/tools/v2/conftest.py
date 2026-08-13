@@ -80,3 +80,15 @@ def spy(monkeypatch):
         if hasattr(mod, "get_plane_client_context"):
             monkeypatch.setattr(mod, "get_plane_client_context", lambda: (client, "acme"))
     return client
+
+
+@pytest.fixture(scope="session")
+def registered_with_aliases():
+    """Every retired tool name as it resolves, keyed by name.
+
+    Aliases are absent from `list_tools` by design, so they have to be fetched
+    one at a time through `get_tool`.
+    """
+    mcp = FastMCP("aliases")
+    register_v2(mcp)
+    return {name: _run(mcp.get_tool(name)) for name in alias_table()}

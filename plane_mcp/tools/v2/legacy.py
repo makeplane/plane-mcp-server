@@ -19,6 +19,16 @@ from fastmcp.utilities.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _legacy_parameter_names(parent: Tool) -> dict[str, ArgTransform]:
+    """Rename `workitem_*` parameters back to the `work_item_*` v1 spelling."""
+    properties = (parent.parameters or {}).get("properties", {})
+    return {
+        name: ArgTransform(name=name.replace("workitem", "work_item"))
+        for name in properties
+        if "workitem" in name
+    }
+
+
 class LegacyNames(Transform):
     def __init__(self, aliases: dict[str, tuple[str, str]]) -> None:
         self._aliases = aliases
@@ -38,5 +48,8 @@ class LegacyNames(Transform):
         return Tool.from_tool(
             parent,
             name=name,
-            transform_args={"action": ArgTransform(hide=True, default=action)},
+            transform_args={
+                "action": ArgTransform(hide=True, default=action),
+                **_legacy_parameter_names(parent),
+            },
         )

@@ -1,10 +1,19 @@
-"""
-Simple integration test for Plane MCP Server.
+"""End-to-end test for the Plane MCP Server, against a live workspace.
 
-Environment Variables Required:
-    PLANE_TEST_API_KEY: API key for authentication
-    PLANE_TEST_WORKSPACE_SLUG: Workspace slug for testing
-    PLANE_TEST_MCP_URL: MCP server URL (default: http://localhost:8211)
+Drives a running server over streamable HTTP and writes real data: a project,
+work items, an epic and a milestone, then deletes all of it.
+
+Targets a server on the **default tool surface**. Tools are called by their
+pre-consolidation names, which the default surface still resolves, so this also
+covers that compatibility path. One call is surface-specific: `add_ids` takes a
+comma-separated string on the default surface and a list on `v1`.
+
+Environment variables:
+    PLANE_TEST_API_KEY:        API key for authentication (required)
+    PLANE_TEST_WORKSPACE_SLUG: Workspace slug to write to (required)
+    PLANE_TEST_MCP_URL:        Server URL (default: http://localhost:8211)
+
+Skipped unless the two required variables are set.
 """
 
 import asyncio
@@ -190,22 +199,33 @@ async def run_integration_test():
         epics = extract_result(epics_result)["results"]
         print(f"Epics in project: {[e['id'] for e in epics]}")
 
-        # 8. Create a milestone and associate it with the project and work items
+        # 8. Create a milestone and associate work items with it.
+        # A milestone is named by `title`, and work items are linked afterwards --
+        # `create` takes no work-item ids.
         print("Creating milestone...")
         milestone_result = await client.call_tool(
             "create_milestone",
             {
                 "project_id": project_id,
-                "name": f"Milestone {unique_id}",
-                "description": "Integration test milestone",
-                "associated_work_item_ids": [epic_id, work_item_1_id, work_item_2_id],
+                "title": f"Milestone {unique_id}",
+                "target_date": "2030-01-01",
             },
         )
         milestone = extract_result(milestone_result)
         milestone_id = milestone["id"]
+        print(f"Created milestone: {milestone_id}")
+
+        print("Associating work items with milestone...")
+        await client.call_tool(
+            "manage_milestone_work_items",
+            {
+                "project_id": project_id,
+                "milestone_id": milestone_id,
+                "add_ids": ",".join([epic_id, work_item_1_id, work_item_2_id]),
+            },
+        )
 
         print("List work items associated with milestone...")
-
         milestone_details_result = await client.call_tool(
             "list_milestone_work_items",
             {
@@ -213,21 +233,20 @@ async def run_integration_test():
                 "milestone_id": milestone_id,
             },
         )
-
-        milestone_work_items = extract_result(milestone_details_result)
+        linked = extract_result(milestone_details_result)
+        # A paginated action answers with an envelope; a bare list means the whole set.
+        milestone_work_items = linked["results"] if isinstance(linked, dict) else linked
         print(f"Work items associated with milestone: {[wi['id'] for wi in milestone_work_items]}")
+        assert len(milestone_work_items) == 3, milestone_work_items
 
-        print(f"Created milestone: {milestone_id}")
-
-        # 9. Update the milestone to change its name and description
+        # 9. Update the milestone's title
         print("Updating milestone...")
         await client.call_tool(
             "update_milestone",
             {
                 "project_id": project_id,
                 "milestone_id": milestone_id,
-                "name": f"Updated Milestone {unique_id}",
-                "description": "Updated description for integration test milestone",
+                "title": f"Updated Milestone {unique_id}",
             },
         )
 
