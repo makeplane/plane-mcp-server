@@ -28,19 +28,19 @@ def is_infra_error_row(row: ResultRow) -> bool:
     """True when a row failed for infrastructure reasons, not task verification.
 
     Any ``error_class`` starting with ``infra_`` (``infra_seed``, ``infra_cli``,
-    ``infra_api``, ``infra_sdk``, …) is excluded from success-rate denominators.
+    ``infra_api``, …) is excluded from success-rate denominators.
     """
     error_class = read_result(row).error_class
     return isinstance(error_class, str) and error_class.startswith("infra_")
 
 
 def dedupe_rows_latest(rows: list[ResultRow]) -> list[TaskResult]:
-    """Keep only the last row per (task_id, rep, surface); preserve key insertion order."""
+    """Keep only the last row per (task_id, rep, label); preserve key insertion order."""
     latest: dict[tuple[str, int, str], TaskResult] = {}
     order: list[tuple[str, int, str]] = []
     for raw_row in rows:
         row = read_result(raw_row)
-        key = (row.task_id, row.rep, row.surface)
+        key = (row.task_id, row.rep, row.label)
         if key not in latest:
             order.append(key)
         latest[key] = row
@@ -50,7 +50,7 @@ def dedupe_rows_latest(rows: list[ResultRow]) -> list[TaskResult]:
 def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[TaskResult]:
     """Load JSONL data rows (skip meta / missing task_id).
 
-    Default ``dedupe="latest"`` keeps the last row per (task_id, rep, surface)
+    Default ``dedupe="latest"`` keeps the last row per (task_id, rep, label)
     so resume appends do not double-count. Pass ``dedupe="none"`` for forensics.
     """
     rows: list[TaskResult] = []
@@ -78,10 +78,10 @@ def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[TaskResult]:
     # Forensics: warn on duplicates but keep all.
     seen_keys: set[tuple[str, int, str]] = set()
     for row in rows:
-        key = (row.task_id, row.rep, row.surface)
+        key = (row.task_id, row.rep, row.label)
         if key in seen_keys:
             print(
-                f"warning: {path}: duplicate (task_id, rep, surface)={key} "
+                f"warning: {path}: duplicate (task_id, rep, label)={key} "
                 f"(--no-dedupe keeps all rows; bare --out reuse double-counts)",
                 file=sys.stderr,
             )

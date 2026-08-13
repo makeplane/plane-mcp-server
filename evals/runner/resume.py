@@ -17,7 +17,7 @@ def should_skip_resume_row(row: TaskResult | dict[str, Any]) -> bool:
 
     Re-run when ``error_class`` starts with ``infra_`` or when ``error`` is non-null.
     Rows with ``skipped`` set are treated as complete and are not retried (intentional:
-    surface/plan skips are stable outcomes, not infra failures).
+    environment/fixture skips are stable outcomes, not infra failures).
     Pure function — unit-tested without the live battery.
     """
     result = row if isinstance(row, TaskResult) else TaskResult.from_row(row)
@@ -41,8 +41,8 @@ def _resume_field_mismatch(
     raw = row.get(field)
     if raw is None or raw == "":
         return None  # back-compat: older rows without the key pass
-    # Surface/driver/provider compare case-insensitively; battery/model are exact.
-    if field in ("surface", "driver", "provider"):
+    # Driver/provider compare case-insensitively; label/battery/model are exact.
+    if field in ("driver", "provider"):
         received, wanted = str(raw).strip().lower(), expected.strip().lower()
     else:
         received, wanted = str(raw).strip(), expected.strip()
@@ -54,24 +54,24 @@ def _resume_field_mismatch(
 def load_resume_skip_keys(
     path: Path,
     *,
-    surface: str,
+    label: str,
     battery: str | None = None,
     model: str | None = None,
     driver: str | None = None,
     provider: str | None = None,
-) -> tuple[set[tuple[str, int]], int, int]:
-    """Load existing JSONL rows and decide which (task_id, rep) pairs to skip.
+) -> tuple[set[tuple[str, int, str]], int, int]:
+    """Load existing JSONL rows and decide which (task_id, rep, label) keys to skip.
 
     Returns ``(skip_keys, n_skip, n_retry)`` where ``n_retry = len(seen - skip_keys)``
-    (keys that still need a re-run). Raises ``SystemExit`` when a row's surface /
+    (keys that still need a re-run). Raises ``SystemExit`` when a row's label /
     battery / model / driver / provider disagrees with the current run (missing keys pass for
     back-compat). Meta lines (``row_type=meta`` or no task_id) are mismatch-checked
     but not counted as task rows. Truncated/invalid JSON lines are warned and skipped.
     """
     if not path.is_file():
         return set(), 0, 0
-    skip_keys: set[tuple[str, int]] = set()
-    seen: set[tuple[str, int]] = set()
+    skip_keys: set[tuple[str, int, str]] = set()
+    seen: set[tuple[str, int, str]] = set()
     with path.open(encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
             line = line.strip()
@@ -88,7 +88,7 @@ def load_resume_skip_keys(
             if not isinstance(row, dict):
                 continue
             for field, expected in (
-                ("surface", surface),
+                ("label", label),
                 ("battery", battery),
                 ("driver", driver),
                 ("provider", provider),
@@ -113,7 +113,7 @@ def load_resume_skip_keys(
             result = TaskResult.from_row(row)
             if not result.task_id:
                 continue
-            key = (result.task_id, result.rep)
+            key = (result.task_id, result.rep, result.label)
             seen.add(key)
             if should_skip_resume_row(result):
                 skip_keys.add(key)

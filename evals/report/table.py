@@ -137,7 +137,7 @@ def format_surface_cell(row: ResultRow | None) -> str:
         return "ERR"
     passed = "✅" if result.success else "❌"
     call_count = str(result.num_calls)
-    if result.classification == "external":
+    if result.server == "external":
         return f"{passed} {call_count}c"
     alternate = result.alternate_calls
     outside_set = result.out_of_set_calls
@@ -180,7 +180,7 @@ def build_multi_surface_table(
     """Build a per-task × per-surface grid from labeled row sets.
 
     ``file_rows`` is a list of ``(column_label, rows)``. Column labels default
-    to each file's dominant ``surface`` field when the caller passes that label.
+    to each file's dominant ``label`` field when the caller passes that label.
     Rows are grouped by task and repetition. Single-rep columns retain the
     historical one-cell rendering; multi-rep columns aggregate all repetitions.
     """
@@ -241,7 +241,7 @@ def build_multi_surface_table(
                 if row.success:
                     successes += 1
                 calls += row.num_calls
-                if row.classification == "external":
+                if row.server == "external":
                     mispicks_comparable = False
                 else:
                     alternate = row.alternate_calls
@@ -348,12 +348,12 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
 
 
 def surface_label_for_file(path: Path, rows: list[TaskResult]) -> str:
-    """Pick a column label from the file's dominant surface field, else stem."""
+    """Pick a column label from the file's dominant label field, else stem."""
     counts: dict[str, int] = defaultdict(int)
     for row in rows:
-        surface = row.surface
-        if surface:
-            counts[str(surface)] += 1
+        label = row.label
+        if label:
+            counts[str(label)] += 1
     if counts:
         return max(counts, key=counts.get)  # type: ignore[arg-type]
     return path.stem

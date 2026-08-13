@@ -101,19 +101,6 @@ W1_TASK: dict[str, Any] = {
         "update_work_item",
         "list_work_items",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 2,
-            "optimal_tools": {"get_workspace_context", "create_work_item"},
-            "alternate_tools": {
-                "search_projects",
-                "list_labels",
-                "find_work_items",
-                "get_work_item",
-                "update_work_item",
-            },
-        },
-    },
     "needs": {"labels"},
     "verify": verify_w1,
 }
@@ -145,18 +132,6 @@ W2_TASK: dict[str, Any] = {
         "retrieve_work_item",
         "retrieve_state",
         "list_projects",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 2,
-            "optimal_tools": {"find_work_items", "update_work_item"},
-            "alternate_tools": {
-                "list_states",
-                "get_work_item",
-                "list_available_transitions",
-                "search_projects",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_w2,
@@ -205,17 +180,6 @@ W3_TASK: dict[str, Any] = {
         "list_work_item_comments",
         "list_projects",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 2,
-            "optimal_tools": {"find_work_items", "create_comment"},
-            "alternate_tools": {
-                "get_work_item",
-                "modify_comment",
-                "search_projects",
-            },
-        },
-    },
     "needs": {"items"},
     "verify": verify_w3,
 }
@@ -263,23 +227,6 @@ W4_TASK: dict[str, Any] = {
         "create_label",
         "delete_label",
         "list_projects",
-    },
-    "surface_tools": {
-        "v2": {
-            # Default v2 has list_labels but no update_label (schema tier).
-            "unsupported": True,
-            "reason": ("W4 needs update_label which is only on the v2-schema surface — use --surface v2-schema"),
-        },
-        "v2-schema": {
-            "optimal_calls": 2,
-            "optimal_tools": {"list_labels", "update_label"},
-            "alternate_tools": {
-                "create_label",
-                "delete_label",
-                "search_projects",
-                "get_workspace_context",
-            },
-        },
     },
     "needs": {"labels"},
     "verify": verify_w4,
@@ -354,18 +301,6 @@ W5_TASK: dict[str, Any] = {
         "retrieve_module",
         "list_projects",
         "list_states",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 5,
-            "optimal_tools": {"list_modules", "find_work_items", "archive_work_item"},
-            "alternate_tools": {
-                "get_work_item",
-                "assign_to_module",
-                "search_projects",
-                "list_states",
-            },
-        },
     },
     "needs": {"module"},
     "verify": verify_w5,
@@ -462,19 +397,6 @@ W6_TASK: dict[str, Any] = {
         "list_work_items",
         "list_projects",
     },
-    "surface_tools": {
-        "v2": {
-            # close_cycle with transfer_to is the consolidated path.
-            "optimal_calls": 2,
-            "optimal_tools": {"list_cycles", "close_cycle"},
-            "alternate_tools": {
-                "assign_to_cycle",
-                "find_work_items",
-                "search_projects",
-                "get_workspace_context",
-            },
-        },
-    },
     # cycles_open_past: Sprint 12 must still be open, or "close it" is impossible —
     # Plane rejects every edit to an ended cycle. See _seed_cycles.
     "needs": {"items", "cycles", "cycles_open_past"},
@@ -566,17 +488,6 @@ W7_TASK: dict[str, Any] = {
         "list_work_item_links",
         "retrieve_work_item",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 3,
-            "optimal_tools": {"find_work_items", "link_work_items", "add_work_item_link"},
-            "alternate_tools": {
-                "get_work_item",
-                "search_projects",
-                "update_work_item",
-            },
-        },
-    },
     "needs": {"items"},
     "verify": verify_w7,
 }
@@ -616,17 +527,6 @@ W8_TASK: dict[str, Any] = {
         "list_work_logs",
         "retrieve_work_item",
         "list_projects",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 2,
-            "optimal_tools": {"find_work_items", "log_work"},
-            "alternate_tools": {
-                "get_work_item",
-                "search_projects",
-                "update_work_item",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_w8,
@@ -679,17 +579,6 @@ W9_TASK: dict[str, Any] = {
         "list_projects",
         "retrieve_work_item",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 2,
-            "optimal_tools": {"find_work_items", "bulk_update_work_items"},
-            "alternate_tools": {
-                "update_work_item",
-                "get_work_item",
-                "search_projects",
-            },
-        },
-    },
     "needs": {"items"},
     "verify": verify_w9,
 }
@@ -724,18 +613,6 @@ W10_TASK: dict[str, Any] = {
         "list_pages",
         "retrieve_page",
         "attach_page_to_work_item",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"create_page"},
-            "alternate_tools": {
-                "list_pages",
-                "get_page",
-                "search_projects",
-                "get_workspace_context",
-            },
-        },
     },
     "needs": set(),
     "verify": verify_w10,

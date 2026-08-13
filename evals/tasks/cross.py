@@ -115,23 +115,6 @@ C1_TASK: dict[str, Any] = {
         "search_work_items",
         "list_projects",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 4,
-            "optimal_tools": {
-                "list_customers",
-                "create_customer",
-                "log_customer_request",
-                "link_customer_work_items",
-            },
-            "alternate_tools": {
-                "get_customer",
-                "find_work_items",
-                "update_customer",
-                "search_projects",
-            },
-        },
-    },
     # No pre-seeded customer — agent creates; items needed for link target.
     "needs": {"items"},
     "verify": verify_c1,
@@ -183,17 +166,6 @@ C2_TASK: dict[str, Any] = {
         "retrieve_release",
         "list_release_work_items",
         "update_release_changelog",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"get_release"},
-            "alternate_tools": {
-                "list_releases",
-                "assign_to_release",
-                "get_workspace_context",
-            },
-        },
     },
     "needs": {"release"},
     "verify": verify_c2,

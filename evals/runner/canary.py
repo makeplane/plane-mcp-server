@@ -7,43 +7,29 @@ import uuid
 from typing import Any
 
 from evals.seed import make_plane_client, seed, teardown
-from evals.tasks import TaskSkipped, battery_fingerprint, resolve_surface_tool_sets
-
-from .live import KNOWN_SURFACES
+from evals.tasks import TaskSkipped, battery_fingerprint
 
 
 async def run_canary(
     tasks: list[dict[str, Any]],
     *,
-    surface: str,
+    label: str,
 ) -> int:
     """Seed + verify(empty agent) + teardown per task; no driver/model.
 
     Passes only when every verifier returns falsy ok on a do-nothing agent.
     Any ok=True is a broken verifier (false positive).
     """
-    surface = (surface or "full").strip().lower()
-    if surface not in KNOWN_SURFACES:
-        print(
-            f"error: unknown --surface {surface!r}; expected one of {sorted(KNOWN_SURFACES)}",
-            file=sys.stderr,
-        )
-        return 2
-
+    label = (label or "local").strip() or "local"
     battery = battery_fingerprint(tasks)
     plane, _workspace_slug = make_plane_client()
-    print(f"canary battery={battery} surface={surface} tasks={[task['id'] for task in tasks]}")
+    print(f"canary battery={battery} label={label} tasks={[task['id'] for task in tasks]}")
 
     broken: list[str] = []
     verified_count = 0
     empty_agent = {"final_text": "", "calls": []}
 
     for task in tasks:
-        surface_sets = resolve_surface_tool_sets(task, surface)
-        if surface_sets.get("skip"):
-            print(f"  {task['id']} SKIPPED (surface): {surface_sets['skip']}")
-            continue
-
         context: dict[str, Any] = {}
         task_needs = set(task.get("needs") or set())
         try:
@@ -82,7 +68,8 @@ async def run_canary(
         return 1
     if verified_count == 0:
         print(
-            "error: canary verified 0 tasks (all skipped by surface/plan gates) — nothing exercised; refusing exit 0",
+            "error: canary verified 0 tasks (all skipped by environment/fixture gates) "
+            "— nothing exercised; refusing exit 0",
             file=sys.stderr,
         )
         return 1

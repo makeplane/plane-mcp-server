@@ -2,7 +2,6 @@
 
 from .canary import run_canary
 from .live import (
-    KNOWN_SURFACES,
     MAX_ITERATIONS,
     MAX_TOKENS,
     classify_call,
@@ -15,7 +14,6 @@ from .meta import is_meta_or_non_task_row, make_run_meta_row, maybe_write_run_me
 from .resume import load_resume_skip_keys, should_skip_resume_row
 
 __all__ = [
-    "KNOWN_SURFACES",
     "MAX_ITERATIONS",
     "MAX_TOKENS",
     "classify_call",

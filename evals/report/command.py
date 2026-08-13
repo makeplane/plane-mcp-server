@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--table",
         action="store_true",
-        help="Multi-surface per-task table (one column per file, labeled by surface)",
+        help="Multi-surface per-task table (one column per file, using its run label)",
     )
     parser.add_argument(
         "--markdown",
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-dedupe",
         action="store_true",
-        help="Keep all rows (forensics); default is latest-wins per (task_id,rep,surface)",
+        help="Keep all rows (forensics); default is latest-wins per (task_id,rep,label)",
     )
     arguments = parser.parse_args(argv)
     dedupe: DedupeMode = "none" if arguments.no_dedupe else "latest"
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         for path in paths:
             rows = load_rows(path, dedupe=dedupe)
             label = surface_label_for_file(path, rows)
-            # Disambiguate duplicate surface labels (e.g. two external files).
+            # Disambiguate duplicate run labels (e.g. two external files).
             label_root = label
             number = 2
             while label in used_labels:

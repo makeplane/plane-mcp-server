@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 RESULT_SCHEMA_VERSION = 1
 
@@ -55,10 +55,10 @@ class TaskResult:
     ts: str = ""
     git_sha: str = ""
     battery: str = ""
-    surface: str = ""
+    label: str = ""
     driver: str = ""
     provider: str | None = None
-    classification: str = ""
+    server: Literal["local", "external"] = "local"
     model: str | None = None
     requested_model: str | None = None
     requested_tier: str | None = None
@@ -188,10 +188,10 @@ class TaskResult:
             "ts": self.ts,
             "git_sha": self.git_sha,
             "battery": self.battery,
-            "surface": self.surface,
+            "label": self.label,
             "driver": self.driver,
             "provider": self.provider,
-            "classification": self.classification,
+            "server": self.server,
             "model": self.model,
             "requested_model": self.requested_model,
             "requested_tier": self.requested_tier,
@@ -308,10 +308,10 @@ class TaskResult:
             ts=str(row.get("ts") or ""),
             git_sha=str(row.get("git_sha") or ""),
             battery=str(row.get("battery") or ""),
-            surface=str(row.get("surface") or ""),
+            label=str(row.get("label") or ""),
             driver=str(row.get("driver") or ""),
             provider=(str(row["provider"]) if row.get("provider") is not None else None),
-            classification=str(row.get("classification") or ""),
+            server="external" if row.get("server") == "external" else "local",
             model=(str(row["model"]) if row.get("model") is not None else None),
             requested_model=(str(row["requested_model"]) if row.get("requested_model") is not None else None),
             requested_tier=(str(row["requested_tier"]) if row.get("requested_tier") is not None else None),

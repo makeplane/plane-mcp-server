@@ -57,19 +57,6 @@ R1_TASK: dict[str, Any] = {
         "list_projects",
         "list_states",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"find_work_items"},
-            "alternate_tools": {
-                "get_work_item",
-                "search_projects",
-                "list_states",
-                "get_workspace_context",
-                "get_pql_reference",
-            },
-        },
-    },
     "needs": {"items"},
     "verify": verify_r1,
 }
@@ -101,20 +88,6 @@ R2_TASK: dict[str, Any] = {
         "list_projects",
         "list_states",
         "get_pql_reference",
-    },
-    "surface_tools": {
-        "v2": {
-            # No count tool on v2 — find_work_items with priority/state filters is optimal.
-            "optimal_calls": 1,
-            "optimal_tools": {"find_work_items"},
-            "alternate_tools": {
-                "get_work_item",
-                "search_projects",
-                "list_states",
-                "get_workspace_context",
-                "get_pql_reference",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_r2,
@@ -148,18 +121,6 @@ R3_TASK: dict[str, Any] = {
         "get_workspace_members",
         "get_pql_reference",
         "retrieve_work_item",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"find_work_items"},
-            "alternate_tools": {
-                "get_workspace_context",
-                "get_work_item",
-                "search_projects",
-                "get_pql_reference",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_r3,
@@ -217,19 +178,6 @@ R4_TASK: dict[str, Any] = {
         "list_projects",
         "get_pql_reference",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"find_work_items"},
-            "alternate_tools": {
-                "list_cycles",
-                "get_work_item",
-                "get_pql_reference",
-                "search_projects",
-                "get_workspace_context",
-            },
-        },
-    },
     "needs": {"items", "cycles"},
     "verify": verify_r4,
 }
@@ -261,19 +209,6 @@ R5_TASK: dict[str, Any] = {
         "retrieve_work_item_by_identifier",
         "list_work_item_activities",
         "list_projects",
-    },
-    "surface_tools": {
-        "v2": {
-            # include= depth: single get_work_item with include=comments after resolve,
-            # or find + get with include.
-            "optimal_calls": 2,
-            "optimal_tools": {"find_work_items", "get_work_item"},
-            "alternate_tools": {
-                "search_projects",
-                "get_workspace_context",
-                "create_comment",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_r5,
@@ -307,28 +242,6 @@ R6_TASK: dict[str, Any] = {
         "list_work_item_types",
         "retrieve_project",
         "get_pql_reference",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 3,
-            "optimal_tools": {"search_projects", "find_work_items", "get_workspace_context"},
-            "alternate_tools": {
-                "get_work_item",
-                "get_pql_reference",
-                "list_states",
-            },
-        },
-        # Type id resolution cleaner on v2-schema
-        "v2-schema": {
-            "optimal_calls": 3,
-            "optimal_tools": {"search_projects", "find_work_items", "resolve_work_item_type"},
-            "alternate_tools": {
-                "list_work_item_types",
-                "get_workspace_context",
-                "get_work_item",
-                "get_pql_reference",
-            },
-        },
     },
     "needs": {"items", "bug_type", "second_project"},
     "verify": verify_r6,
@@ -374,18 +287,6 @@ R7_TASK: dict[str, Any] = {
         "retrieve_work_item",
         "search_work_items",
         "list_projects",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"list_available_transitions"},
-            "alternate_tools": {
-                "find_work_items",
-                "get_work_item",
-                "list_states",
-                "search_projects",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_r7,

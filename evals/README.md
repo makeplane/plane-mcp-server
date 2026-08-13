@@ -43,45 +43,36 @@ agent's final text.
 
 ```bash
 # Provider-neutral API loop (default provider: Anthropic)
-.venv/bin/python -m evals.run --driver api --provider anthropic --model standard \
-  --surface full --out evals/output/api.jsonl
+.venv/bin/python -m evals --driver api --provider anthropic --model standard \
+  --label local --out evals/output/api.jsonl
 
 # Everything, one surface (free-form model IDs pass through to the CLI)
-.venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
-  --surface full --out evals/output/legacy.jsonl
+.venv/bin/python -m evals --driver codex-cli --model YOUR_CODEX_MODEL_ID \
+  --label local --out evals/output/local.jsonl
 
 # A few tasks while iterating
-.venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
-  --surface full --tasks W5,W8 --out evals/output/spot.jsonl
+.venv/bin/python -m evals --driver codex-cli --model YOUR_CODEX_MODEL_ID \
+  --label local --tasks W5,W8 --out evals/output/spot.jsonl
 
 # Someone else's server (a PR branch, another repo) — "external mode"
-.venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
-  --surface their-pr --server-cmd "/path/to/their/.venv/bin/plane-mcp-server stdio" \
-  --server-env PLANE_MCP_TOOLS_VERSION=v2 --out evals/output/their-pr.jsonl
+.venv/bin/python -m evals --driver codex-cli --model YOUR_CODEX_MODEL_ID \
+  --label their-pr --server-cmd "/path/to/their/.venv/bin/plane-mcp-server stdio" \
+  --server-env KEY=VALUE --out evals/output/their-pr.jsonl
 ```
 
 Useful flags: `--reps N` (repetitions per task), `--resume out.jsonl` (skip completed or
-skipped `(task, rep)` pairs and retry rows with recorded errors), `--list` / `--dry-run`
+skipped `(task, rep, label)` keys and retry rows with recorded errors), `--list` / `--dry-run`
 (no network).
 
-**External mode** (`--server-cmd`) runs every task with no surface-based skips and records
-`classification: "external"`. Foreign tool names have no catalogued optimal/alternate sets,
+**External mode** (`--server-cmd`) records `server: "external"`. Foreign tool names have no catalogued optimal/alternate sets,
 so use success, call counts, and errors for those rows; their mispick values are not
 comparable to catalogued surfaces.
-
-**On surfaces.** Without `--server-cmd`, `full` launches this repo's server with no surface
-variable. The `v2` and `v2-schema` labels set `PLANE_MCP_SURFACE`, and the task catalog has
-matching `surface_tools` overlays. This tree's `plane_mcp` server does not read that variable,
-so selecting either label here would run the same server under a misleading label. Use
-`--server-cmd` to launch a server that actually implements another surface; external rows
-intentionally do not use this catalog's tool-choice classification.
 
 ### Drivers
 
 | Driver | Backend | Notes |
 |---|---|---|
 | `api` | Owned API + MCP loop | Provider-neutral; tiers resolve for `--provider anthropic` (default) or `openai` |
-| `sdk` | Alias for `api` | Retained for old commands/result pipelines |
 | `codex-cli` | OpenAI Codex CLI | `standard` and `fast` resolve to verified GPT-5.6 IDs |
 | `claude-cli` | Claude Code CLI | `standard` resolves to `sonnet`; `fast` resolves to `haiku` |
 | `antigravity-cli` | Antigravity CLI (`agy`) | Verified against `agy models`; runs under a synthetic HOME so its MCP config is ours, not yours |
@@ -94,8 +85,8 @@ battery, and `fast`, the lower-cost option. Resolution is scoped to both driver 
 
 | Driver | Provider | `standard` | `fast` |
 |---|---|---|---|
-| `api` / `sdk` | Anthropic | `claude-sonnet-5` | `claude-haiku-4-5` |
-| `api` / `sdk` | OpenAI | `gpt-5.6-sol` | `gpt-5.6-luna` |
+| `api` | Anthropic | `claude-sonnet-5` | `claude-haiku-4-5` |
+| `api` | OpenAI | `gpt-5.6-sol` | `gpt-5.6-luna` |
 | `claude-cli` | Anthropic | `sonnet` | `haiku` |
 | `codex-cli` | OpenAI | `gpt-5.6-sol` | `gpt-5.6-luna` |
 | `antigravity-cli` | Google | `gemini-3.6-flash-high` | `gemini-3.6-flash-low` |
@@ -133,12 +124,12 @@ habit; use it only when the more sensitive, larger sidecar is justified.
 ### Reading results
 
 ```bash
-.venv/bin/python -m evals.report evals/output/legacy.jsonl                    # one surface
+.venv/bin/python -m evals.report evals/output/local.jsonl                     # one surface
 .venv/bin/python -m evals.report --table evals/output/*.jsonl                 # side by side
 .venv/bin/python -m evals.report --table --markdown evals/output/*.jsonl      # for a PR
 ```
 
-Rows are deduped latest-wins per `(task_id, rep, surface)`, so a re-run of a single task
+Rows are deduped latest-wins per `(task_id, rep, label)`, so a re-run of a single task
 supersedes its earlier row in the same file. Skipped tasks are excluded from success
 denominators, as are rows with recorded errors. Result-token columns use `~` for estimates,
 `*` for mixed measured/estimated values, and `?` for legacy values whose provenance was not
@@ -164,8 +155,8 @@ Tasks that touch **workspace-scoped** fixtures (release tags, customer propertie
 if two runs share a workspace. Give each concurrent run its own workspace:
 
 ```bash
-EVAL_PLANE_WORKSPACE_SLUG=ws1 ... --surface full      --out evals/output/legacy.jsonl &
-EVAL_PLANE_WORKSPACE_SLUG=ws2 ... --surface their-pr  --out evals/output/their-pr.jsonl &
+EVAL_PLANE_WORKSPACE_SLUG=ws1 ... --label local     --out evals/output/local.jsonl &
+EVAL_PLANE_WORKSPACE_SLUG=ws2 ... --label their-pr  --out evals/output/their-pr.jsonl &
 wait
 ```
 
@@ -195,12 +186,6 @@ A task is a dict:
     "optimal_calls": 3,
     "optimal_tools": {"list_cycles", "complete_cycle"},  # scored as optimal picks
     "alternate_tools": {"list_projects"},  # acceptable, not optimal
-    "surface_tools": {
-        "v2": {
-            "optimal_tools": {"close_cycle"},
-            "alternate_tools": {"list_cycles"},
-        }
-    },
     "needs": {"items", "cycles"},  # fixtures to seed
     "verify": verify_w11,
 }
@@ -210,9 +195,6 @@ A task is a dict:
 `intake`, `customer`, `release`, `activity_feed`, `second_project`,
 `leave_cycles_worklogs_off`. Each task gets its own freshly seeded project, so fixture
 variants (e.g. `cycles_open_past`) don't leak between tasks.
-
-A `surface_tools` overlay may set `"expected_skip": True` to declare that a surface
-genuinely cannot do the task. That is reported as a capability gap, not a failure.
 
 ### Writing a verifier
 
@@ -235,10 +217,10 @@ shape.
 Then prove the verifier can fail:
 
 ```bash
-.venv/bin/python -m evals.run --canary --surface full
+.venv/bin/python -m evals --canary --label local
 ```
 
-The canary seeds each surface-eligible task, calls its verifier with an **empty** agent
+The canary seeds each task, calls its verifier with an **empty** agent
 result, and exits non-zero if any verifier passes a do-nothing agent. Run it after touching
 tasks, fixtures, or verifiers.
 

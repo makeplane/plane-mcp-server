@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from evals.cli import parse_args
 from evals.drivers import (
     KNOWN_DRIVERS,
     AgentRun,
@@ -33,7 +34,7 @@ from evals.drivers import (
     write_claude_mcp_config,
 )
 from evals.drivers.token_counting import estimate_result_tokens
-from evals.run import classify_call, parse_args, stdio_server_env
+from evals.runner.live import classify_call, stdio_server_env
 
 # ---------------------------------------------------------------------------
 # Fixtures (constructed — never captured from live CLIs)
@@ -539,7 +540,7 @@ def test_claude_driver_writes_mcp_config_and_cmd_flags(tmp_path: Path):
             "PLANE_API_KEY": "key",
             "PLANE_WORKSPACE_SLUG": "slug",
             "PLANE_BASE_URL": "https://api.example",
-            "PLANE_MCP_SURFACE": "v2",
+            "CUSTOM_SETTING": "enabled",
             "PATH": "/usr/bin",
         },
         model="sonnet",
@@ -586,11 +587,11 @@ def test_claude_driver_server_command_override(tmp_path: Path):
 
     driver = ClaudeCliDriver(
         runner=fake_run,
-        server_command=["/elsewhere/.venv/bin/plane-mcp-server", "stdio", "--v2"],
+        server_command=["/elsewhere/.venv/bin/plane-mcp-server", "stdio", "--mode", "candidate"],
     )
     driver.run_task(
         "hello",
-        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "s", "PLANE_MCP_TOOLS_VERSION": "v2"},
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "s", "PLANE_FOREIGN_MODE": "candidate"},
         model="sonnet",
         max_turns=3,
         cwd=tmp_path,
@@ -600,9 +601,14 @@ def test_claude_driver_server_command_override(tmp_path: Path):
     assert server["args"][:3] == ["-m", "evals.proxy", "--log"]
     assert "--" in server["args"]
     dash = server["args"].index("--")
-    assert server["args"][dash + 1 :] == ["/elsewhere/.venv/bin/plane-mcp-server", "stdio", "--v2"]
-    # PLANE_-prefixed env (incl. foreign selection vars) passes through to the child.
-    assert server["env"]["PLANE_MCP_TOOLS_VERSION"] == "v2"
+    assert server["args"][dash + 1 :] == [
+        "/elsewhere/.venv/bin/plane-mcp-server",
+        "stdio",
+        "--mode",
+        "candidate",
+    ]
+    # Explicit foreign selection variables pass through to the child.
+    assert server["env"]["PLANE_FOREIGN_MODE"] == "candidate"
 
 
 def test_agent_run_dict_keeps_action_arg():
@@ -846,12 +852,11 @@ def test_agent_run_payload_falls_back_to_shared_estimator_without_tokenizer(monk
 
 
 def test_known_drivers():
-    assert KNOWN_DRIVERS == {"api", "sdk", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"}
+    assert KNOWN_DRIVERS == {"api", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"}
 
 
-def test_get_driver_api_and_sdk_alias():
+def test_get_driver_api():
     assert isinstance(get_driver("api"), ApiDriver)
-    assert isinstance(get_driver("sdk"), ApiDriver)
     assert isinstance(get_driver("claude-cli"), ClaudeCliDriver)
     assert isinstance(get_driver("codex-cli"), CodexCliDriver)
 
@@ -872,8 +877,7 @@ def test_stdio_env_still_works_for_cli_drivers(monkeypatch):
     monkeypatch.setenv("EVAL_PLANE_API_KEY", "k")
     monkeypatch.setenv("EVAL_PLANE_WORKSPACE_SLUG", "ws")
     monkeypatch.delenv("EVAL_PLANE_BASE_URL", raising=False)
-    env = stdio_server_env(surface="v2")
-    assert env["PLANE_MCP_SURFACE"] == "v2"
+    env = stdio_server_env()
     assert env["PLANE_API_KEY"] == "k"
     assert "ANTHROPIC_API_KEY" not in env
 

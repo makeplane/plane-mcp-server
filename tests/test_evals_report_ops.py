@@ -27,7 +27,7 @@ from evals.report import (
     wilson_interval,
 )
 from evals.results import RESULT_SCHEMA_VERSION, CallRecord, TaskResult, Usage
-from evals.run import (
+from evals.runner import (
     is_meta_or_non_task_row,
     load_resume_skip_keys,
     make_run_meta_row,
@@ -94,7 +94,7 @@ def test_load_rows_skips_meta_and_missing_task_id(tmp_path: Path):
             {
                 "row_type": "meta",
                 "run_id": "abc",
-                "surface": "v2",
+                "label": "candidate",
                 "battery": "deadbeef0001",
                 "model": "sonnet",
                 "driver": "claude-cli",
@@ -102,8 +102,8 @@ def test_load_rows_skips_meta_and_missing_task_id(tmp_path: Path):
                 "ts": "t",
             }
         ),
-        json.dumps({"surface": "v2", "rep": 0, "success": True}),  # no task_id
-        json.dumps({"task_id": "R1", "rep": 0, "surface": "v2", "success": True, "num_calls": 2}),
+        json.dumps({"label": "candidate", "rep": 0, "success": True}),  # no task_id
+        json.dumps({"task_id": "R1", "rep": 0, "label": "candidate", "success": True, "num_calls": 2}),
     ]
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     rows = load_rows(p)
@@ -115,6 +115,8 @@ def test_task_result_schema_round_trip_owns_usage_shape():
     result = TaskResult(
         row_type="result",
         task_id="R1",
+        label="local",
+        server="local",
         calls=[
             CallRecord(
                 tool="find_work_items",
@@ -131,6 +133,8 @@ def test_task_result_schema_round_trip_owns_usage_shape():
     row = result.to_row()
     assert row["schema_version"] == RESULT_SCHEMA_VERSION
     assert row["row_type"] == "result"
+    assert row["label"] == "local"
+    assert row["server"] == "local"
     assert row["usage_per_iteration"] == [{"in": 10, "out": 2, "cache_read": 3, "cache_write": 4}]
     loaded = TaskResult.from_row(row)
     assert loaded.row_type == "result"
@@ -167,9 +171,9 @@ def test_real_historical_rows_parse_and_report_with_backward_defaults():
 
 def test_dedupe_rows_latest_pure():
     rows = [
-        {"task_id": "R1", "rep": 0, "surface": "full", "num_calls": 1},
-        {"task_id": "R1", "rep": 0, "surface": "full", "num_calls": 5},
-        {"task_id": "R2", "rep": 0, "surface": "full", "num_calls": 3},
+        {"task_id": "R1", "rep": 0, "label": "local", "num_calls": 1},
+        {"task_id": "R1", "rep": 0, "label": "local", "num_calls": 5},
+        {"task_id": "R2", "rep": 0, "label": "local", "num_calls": 3},
     ]
     out = dedupe_rows_latest(rows)
     assert len(out) == 2
@@ -213,7 +217,7 @@ def test_multi_rep_synthetic_file_reports_wilson_unstable_and_noise_floor(tmp_pa
         {
             "task_id": task_id,
             "rep": rep,
-            "surface": "full",
+            "label": "local",
             "success": success,
             "num_calls": rep + 1,
             "calls": [],
@@ -249,7 +253,7 @@ def test_multi_rep_synthetic_file_reports_wilson_unstable_and_noise_floor(tmp_pa
 
 
 def test_single_rep_summary_rendering_is_unchanged(capsys):
-    rows = [{"task_id": "R1", "rep": 0, "surface": "full", "success": True, "num_calls": 2, "calls": []}]
+    rows = [{"task_id": "R1", "rep": 0, "label": "local", "success": True, "num_calls": 2, "calls": []}]
 
     report_mod.print_table(summarize(rows), "Summary: sample.jsonl")
 
@@ -375,21 +379,21 @@ def _synth_row(
     num_calls: int = 2,
     alt: int | None = 0,
     oos: int | None = 0,
-    classification: str = "exact",
+    server: str = "local",
     skipped: str | None = None,
     error: str | None = None,
     error_class: str | None = None,
-    surface: str = "v2",
+    label: str = "local",
 ) -> dict[str, Any]:
     return {
         "task_id": tid,
         "rep": rep,
-        "surface": surface,
+        "label": label,
         "success": success,
         "num_calls": num_calls,
         "alternate_calls": alt,
         "out_of_set_calls": oos,
-        "classification": classification,
+        "server": server,
         "skipped": skipped,
         "error": error,
         "error_class": error_class,
@@ -405,34 +409,34 @@ def test_format_surface_cell_variants():
     assert format_surface_cell(_synth_row("R1", success=True, num_calls=3, alt=0, oos=0)) == "✅ 3c"
     assert format_surface_cell(_synth_row("R1", success=False, num_calls=4, alt=1, oos=1)) == "❌ 4c/2mp"
     # external: no mispick suffix
-    assert format_surface_cell(_synth_row("R1", classification="external", alt=None, oos=None, num_calls=5)) == "✅ 5c"
+    assert format_surface_cell(_synth_row("R1", server="external", alt=None, oos=None, num_calls=5)) == "✅ 5c"
 
 
 def test_multi_surface_table_snapshot_with_external():
-    legacy = [
-        _synth_row("R1", surface="full", num_calls=4, alt=1, oos=0),
-        _synth_row("R2", surface="full", success=False, num_calls=2),
+    local = [
+        _synth_row("R1", label="local", num_calls=4, alt=1, oos=0),
+        _synth_row("R2", label="local", success=False, num_calls=2),
     ]
-    v2 = [
-        _synth_row("R1", surface="v2", num_calls=2, alt=0, oos=0),
-        _synth_row("R2", surface="v2", skipped="unsupported", num_calls=0),
+    candidate = [
+        _synth_row("R1", label="candidate", num_calls=2, alt=0, oos=0),
+        _synth_row("R2", label="candidate", skipped="unsupported", num_calls=0),
     ]
     external = [
-        _synth_row("R1", surface="akhil", classification="external", alt=None, oos=None, num_calls=3),
-        _synth_row("R2", surface="akhil", classification="external", alt=None, oos=None, num_calls=1, success=False),
-        _synth_row("R3", surface="akhil", classification="external", error="timeout", error_class="infra_cli"),
+        _synth_row("R1", label="akhil", server="external", alt=None, oos=None, num_calls=3),
+        _synth_row("R2", label="akhil", server="external", alt=None, oos=None, num_calls=1, success=False),
+        _synth_row("R3", label="akhil", server="external", error="timeout", error_class="infra_cli"),
     ]
-    table = build_multi_surface_table([("full", legacy), ("v2", v2), ("akhil", external)])
-    assert table["columns"] == ["full", "v2", "akhil"]
+    table = build_multi_surface_table([("local", local), ("candidate", candidate), ("akhil", external)])
+    assert table["columns"] == ["local", "candidate", "akhil"]
     assert "R1" in table["task_ids"] and "R3" in table["task_ids"]
-    assert table["cells"]["R1"]["full"] == "✅ 4c/1mp"
-    assert table["cells"]["R1"]["v2"] == "✅ 2c"
+    assert table["cells"]["R1"]["local"] == "✅ 4c/1mp"
+    assert table["cells"]["R1"]["candidate"] == "✅ 2c"
     assert table["cells"]["R1"]["akhil"] == "✅ 3c"
-    assert table["cells"]["R2"]["v2"] == "skip"
+    assert table["cells"]["R2"]["candidate"] == "skip"
     assert table["cells"]["R3"]["akhil"] == "ERR"
 
     text = render_multi_surface_table(table, markdown=False)
-    assert "full" in text and "v2" in text and "akhil" in text
+    assert "local" in text and "candidate" in text and "akhil" in text
     assert "✅ 3c" in text
     assert "skip" in text
     assert "ERR" in text
@@ -446,44 +450,44 @@ def test_multi_surface_table_snapshot_with_external():
 
     # Footer: external mispicks n/a
     assert table["footer"]["akhil"]["mispicks"] is None
-    assert table["footer"]["full"]["mispicks"] == 1
+    assert table["footer"]["local"]["mispicks"] == 1
     assert table["footer"]["akhil"]["infra_errors"] == 1
 
 
 def test_multi_surface_table_aggregates_reps_and_flags_unstable():
     rows = [
-        _synth_row("R1", rep=0, success=True, num_calls=2, surface="full"),
-        _synth_row("R1", rep=1, success=True, num_calls=3, surface="full"),
-        _synth_row("R1", rep=2, success=True, num_calls=2, surface="full"),
-        _synth_row("R2", rep=0, success=True, num_calls=1, surface="full"),
-        _synth_row("R2", rep=1, success=False, num_calls=4, surface="full"),
-        _synth_row("R2", rep=2, success=True, num_calls=2, surface="full"),
+        _synth_row("R1", rep=0, success=True, num_calls=2, label="local"),
+        _synth_row("R1", rep=1, success=True, num_calls=3, label="local"),
+        _synth_row("R1", rep=2, success=True, num_calls=2, label="local"),
+        _synth_row("R2", rep=0, success=True, num_calls=1, label="local"),
+        _synth_row("R2", rep=1, success=False, num_calls=4, label="local"),
+        _synth_row("R2", rep=2, success=True, num_calls=2, label="local"),
     ]
 
-    table = build_multi_surface_table([("full", rows)])
+    table = build_multi_surface_table([("local", rows)])
 
     assert table["multi_rep"] is True
-    assert table["cells"]["R1"]["full"] == "✅ 3/3 [0.44,1.00] 2-3c"
-    assert table["cells"]["R2"]["full"] == "⚠ UNSTABLE 2/3 [0.21,0.94] 1-4c"
-    assert table["footer"]["full"]["success"] == 5
-    assert table["footer"]["full"]["n"] == 6
-    assert table["footer"]["full"]["unstable_tasks"] == 1
+    assert table["cells"]["R1"]["local"] == "✅ 3/3 [0.44,1.00] 2-3c"
+    assert table["cells"]["R2"]["local"] == "⚠ UNSTABLE 2/3 [0.21,0.94] 1-4c"
+    assert table["footer"]["local"]["success"] == 5
+    assert table["footer"]["local"]["n"] == 6
+    assert table["footer"]["local"]["unstable_tasks"] == 1
     rendered = render_multi_surface_table(table)
     assert "measured noise floor: 1 task flipped at least once" in rendered
     assert "minimum meaningful difference: 2 tasks" in rendered
 
 
 def test_single_rep_multi_surface_rendering_is_unchanged():
-    rows = [_synth_row("R1", surface="full", success=True, num_calls=2)]
+    rows = [_synth_row("R1", label="local", success=True, num_calls=2)]
 
-    rendered = render_multi_surface_table(build_multi_surface_table([("full", rows)]))
+    rendered = render_multi_surface_table(build_multi_surface_table([("local", rows)]))
 
     assert rendered == (
-        "task  what                               full          \n"
+        "task  what                               local         \n"
         "-------------------------------------------------------\n"
         "R1    In project P, what is the curren…  ✅ 2c\n"
         "-------------------------------------------------------\n"
-        "full         success 1/1 (100%)  total calls 2  mispicks 0  infra 0\n"
+        "local        success 1/1 (100%)  total calls 2  mispicks 0  infra 0\n"
     )
 
 
@@ -491,17 +495,17 @@ def test_report_main_table_cli(tmp_path: Path, capsys):
     f1 = tmp_path / "a.jsonl"
     f2 = tmp_path / "b.jsonl"
     f1.write_text(
-        json.dumps(_synth_row("R1", surface="full", num_calls=2)) + "\n",
+        json.dumps(_synth_row("R1", label="local", num_calls=2)) + "\n",
         encoding="utf-8",
     )
     f2.write_text(
-        json.dumps(_synth_row("R1", surface="v2", num_calls=1)) + "\n",
+        json.dumps(_synth_row("R1", label="candidate", num_calls=1)) + "\n",
         encoding="utf-8",
     )
     rc = report_mod.main(["--table", str(f1), str(f2)])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "full" in out and "v2" in out
+    assert "local" in out and "candidate" in out
     assert "R1" in out
 
 
@@ -509,11 +513,11 @@ def test_report_main_table_warns_when_battery_fingerprints_differ(tmp_path: Path
     f1 = tmp_path / "old.jsonl"
     f2 = tmp_path / "new.jsonl"
     f1.write_text(
-        json.dumps({**_synth_row("R1", surface="full"), "battery": "6425dcc64404"}) + "\n",
+        json.dumps({**_synth_row("R1", label="local"), "battery": "6425dcc64404"}) + "\n",
         encoding="utf-8",
     )
     f2.write_text(
-        json.dumps({**_synth_row("R1", surface="v2"), "battery": "newfinger001"}) + "\n",
+        json.dumps({**_synth_row("R1", label="candidate"), "battery": "newfinger001"}) + "\n",
         encoding="utf-8",
     )
 
@@ -527,7 +531,7 @@ def test_report_main_table_warns_when_battery_fingerprints_differ(tmp_path: Path
 
 def test_report_main_markdown_flag(tmp_path: Path, capsys):
     f1 = tmp_path / "a.jsonl"
-    f1.write_text(json.dumps(_synth_row("R1", surface="v2", num_calls=1)) + "\n", encoding="utf-8")
+    f1.write_text(json.dumps(_synth_row("R1", label="candidate", num_calls=1)) + "\n", encoding="utf-8")
     rc = report_mod.main(["--table", "--markdown", str(f1)])
     assert rc == 0
     out = capsys.readouterr().out
@@ -539,10 +543,10 @@ def test_report_main_markdown_flag(tmp_path: Path, capsys):
 def test_report_main_no_dedupe_flag(tmp_path: Path, capsys):
     p = tmp_path / "d.jsonl"
     rows = [
-        _synth_row("R1", surface="full", num_calls=1, success=True),
-        {**_synth_row("R1", surface="full", num_calls=9, success=False)},
+        _synth_row("R1", label="local", num_calls=1, success=True),
+        {**_synth_row("R1", label="local", num_calls=9, success=False)},
     ]
-    # Both rows same (task_id, rep, surface) — latest-wins would keep one.
+    # Both rows have the same (task_id, rep, label), so latest-wins keeps one.
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     rc = report_mod.main(["--no-dedupe", str(p)])
     assert rc == 0
@@ -554,7 +558,7 @@ def test_report_main_no_dedupe_flag(tmp_path: Path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# Meta line (run.py)
+# Meta line
 # ---------------------------------------------------------------------------
 
 
@@ -562,7 +566,8 @@ def test_make_run_meta_row_and_write_once(tmp_path: Path):
     path = tmp_path / "out.jsonl"
     meta = make_run_meta_row(
         run_id="rid",
-        surface="v2",
+        label="candidate",
+        server="local",
         battery="abcd1234ef00",
         model="sonnet",
         driver="claude-cli",
@@ -575,7 +580,7 @@ def test_make_run_meta_row_and_write_once(tmp_path: Path):
     assert maybe_write_run_meta(path, meta) is True
     # Append a data row — a truncating rewrite on the second call would destroy it.
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"task_id": "R1", "rep": 0, "surface": "v2", "success": True}) + "\n")
+        fh.write(json.dumps({"task_id": "R1", "rep": 0, "label": "candidate", "success": True}) + "\n")
     assert maybe_write_run_meta(path, meta) is False  # file non-empty
     lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
@@ -591,7 +596,7 @@ def test_resume_skips_meta_and_mismatch_checks_it(tmp_path: Path):
                 json.dumps(
                     {
                         "row_type": "meta",
-                        "surface": "v2",
+                        "label": "candidate",
                         "battery": "bbbbbbbbbbbb",
                         "model": "sonnet",
                         "driver": "claude-cli",
@@ -601,7 +606,7 @@ def test_resume_skips_meta_and_mismatch_checks_it(tmp_path: Path):
                     {
                         "task_id": "R1",
                         "rep": 0,
-                        "surface": "v2",
+                        "label": "candidate",
                         "error": None,
                         "error_class": None,
                         "success": True,
@@ -613,13 +618,13 @@ def test_resume_skips_meta_and_mismatch_checks_it(tmp_path: Path):
         encoding="utf-8",
     )
     skip, n_skip, n_retry = load_resume_skip_keys(
-        p, surface="v2", battery="bbbbbbbbbbbb", model="sonnet", driver="claude-cli"
+        p, label="candidate", battery="bbbbbbbbbbbb", model="sonnet", driver="claude-cli"
     )
-    assert skip == {("R1", 0)}
+    assert skip == {("R1", 0, "candidate")}
     assert n_skip == 1 and n_retry == 0
 
     with pytest.raises(SystemExit, match="battery"):
-        load_resume_skip_keys(p, surface="v2", battery="aaaaaaaaaaaa", model="sonnet", driver="claude-cli")
+        load_resume_skip_keys(p, label="candidate", battery="aaaaaaaaaaaa", model="sonnet", driver="claude-cli")
 
 
 # ---------------------------------------------------------------------------

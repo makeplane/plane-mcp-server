@@ -63,7 +63,7 @@ class AgentRun:
 
 
 class AgentDriver(Protocol):
-    """Pluggable agent backend for evals.run."""
+    """Pluggable agent backend for the evaluation harness."""
 
     name: str
 

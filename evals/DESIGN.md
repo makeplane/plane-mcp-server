@@ -54,15 +54,15 @@ one run is representative.
 
 Client-local tools such as shell or tool-search helpers are retained separately as
 `client_tool_calls`; they do not count as Plane calls. For an external server launched with
-`--server-cmd`, call counts still apply, but the runner marks classification as `external`
+`--server-cmd`, call counts still apply, but the runner marks the row server as `external`
 and clears the row-level alternate/out-of-set counters because the catalog has no
 authoritative sets for foreign tool names.
 
 ### Mispicks
 
 Every Plane call on a catalogued surface is classified by tool name as `optimal`,
-`alternate`, or `out_of_set`. The task owns disjoint optimal and alternate sets, including
-surface-specific overlays where present. The headline mispick rate is:
+`alternate`, or `out_of_set`. The task owns disjoint optimal and alternate sets. The
+headline mispick rate is:
 
 ```text
 (alternate calls + out-of-set calls) / all Plane calls
@@ -126,8 +126,7 @@ All five driver implementations satisfy `AgentDriver.run_task(...) -> AgentRun`:
 - `AntigravityCliDriver`
 - `OpencodeCliDriver`
 
-`sdk` is a legacy CLI alias for `ApiDriver`, not a sixth implementation. The runner has one
-path for all drivers: it supplies a prompt and MCP environment, receives a normalized
+The runner has one path for all drivers: it supplies a prompt and MCP environment, receives a normalized
 `AgentRun`, maps it to the common row shape, and invokes the task verifier.
 
 The API implementation has one further seam. `ApiDriver` owns provider-independent policy:
@@ -180,11 +179,10 @@ seed -> drive -> verify -> teardown -> append row
 The row is assembled as the task progresses; teardown runs in `finally` before that row is
 appended. Workspace-scoped fixture objects are tracked separately from the project. A fresh
 stdio server is launched for each driven task. The server environment is built from `PATH`,
-`HOME`, the three Plane connection values, the selected built-in surface label when
-applicable, and explicit `--server-env` additions; unrelated parent environment variables
+`HOME`, the three Plane connection values, and explicit `--server-env` additions; unrelated parent environment variables
 are not inherited.
 
-The first line of a new result file is a meta row containing the run identity, surface,
+The first line of a new result file is a meta row containing the run identity, label, server,
 battery, requested model/tier, resolved model, driver, provider, and Git SHA. Resume checks those identities,
 skips completed task/repetition keys, and reruns rows that contain recorded errors. Result
 rows preserve the common fields consumed by `evals.report` and existing JSONL readers.
@@ -194,13 +192,13 @@ rows preserve the common fields consumed by `evals.report` and existing JSONL re
 ```text
 evals/
   cli.py                 argparse, command dispatch, and model-tier resolution
+  __main__.py            command entry point for python -m evals
   runner/
     __init__.py          public execution API
     live.py              live lifecycle and row assembly
     resume.py            resume skip and mismatch checks
     meta.py              run metadata and repository provenance
     canary.py            empty-agent verifier canary
-  run.py                 compatibility entry point for python -m evals.run
   tasks/
     __init__.py          ordered catalog assembly and public task API
     common.py            prompt binding, matchers, and shared API lookups
@@ -230,5 +228,5 @@ evals/
 ```
 
 The stable import and command surfaces are intentional: `from evals.tasks import ...`,
-`from evals.drivers import ...`, and `python -m evals.run` remain the public boundaries even
+`from evals.drivers import ...`, and `python -m evals` remain the public boundaries even
 though their implementations are split across packages and focused modules.

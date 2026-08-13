@@ -128,71 +128,6 @@ if tuple(task["id"] for task in TASKS) != EXPECTED_TASK_IDS:
 TASKS_BY_ID: dict[str, dict[str, Any]] = {task["id"]: task for task in TASKS}
 
 
-def resolve_surface_tool_sets(
-    task: dict[str, Any],
-    surface: str,
-) -> dict[str, Any]:
-    """Resolve optimal/alternate tool sets for a surface.
-
-    Returns a dict with:
-      - skip (str | None): if set, the runner should SKIP the task on this surface
-      - optimal_tools / alternate_tools: classification sets
-      - optimal_calls: optional override
-      - classification: ``exact`` when an overlay or full/legacy sets apply;
-        ``approximate`` when falling back to flat legacy-named sets on a non-full
-        surface that has no overlay
-    """
-    surface = (surface or "full").strip().lower()
-    overlays = task.get("surface_tools") or {}
-
-    if surface in ("full", "legacy", ""):
-        return {
-            "skip": None,
-            "optimal_tools": set(task["optimal_tools"]),
-            "alternate_tools": set(task["alternate_tools"]),
-            "optimal_calls": task.get("optimal_calls"),
-            "classification": "exact",
-        }
-
-    ov = overlays.get(surface)
-    # v2-schema is a superset of v2 for *supported* tools, but schema adds none of
-    # the long-tail APIs (worklog summary, activities, release tags, customer
-    # property values). Inherit the full v2 overlay — including expected_skip /
-    # unsupported — when no schema-specific entry exists.
-    if ov is None and surface == "v2-schema":
-        ov = overlays.get("v2")
-
-    if ov is None:
-        return {
-            "skip": None,
-            "optimal_tools": set(task["optimal_tools"]),
-            "alternate_tools": set(task["alternate_tools"]),
-            "optimal_calls": task.get("optimal_calls"),
-            "classification": "approximate",
-        }
-
-    if ov.get("unsupported") or ov.get("expected_skip"):
-        return {
-            "skip": ov.get("reason") or f"task {task.get('id')} unsupported on surface {surface}",
-            "optimal_tools": set(),
-            "alternate_tools": set(),
-            "optimal_calls": None,
-            "classification": "exact",
-        }
-
-    optimal = set(ov["optimal_tools"])
-    alternate = set(ov["alternate_tools"])
-    if not optimal.isdisjoint(alternate):
-        raise ValueError(f"{task.get('id')}/{surface}: optimal/alternate overlap")
-    return {
-        "skip": None,
-        "optimal_tools": optimal,
-        "alternate_tools": alternate,
-        "optimal_calls": ov.get("optimal_calls", task.get("optimal_calls")),
-        "classification": "exact",
-    }
-
-
 def get_tasks(ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Return tasks filtered by id list (None = all)."""
     if ids is None:
@@ -208,35 +143,11 @@ def task_author(task: dict[str, Any]) -> str:
     return str(task.get("author") or "claude")
 
 
-def _serialize_surface_tools(surface_tools: dict[str, Any] | None) -> dict[str, Any]:
-    """Stable JSON-friendly form of a task's surface_tools overlay."""
-    if not surface_tools:
-        return {}
-    out: dict[str, Any] = {}
-    for surface in sorted(surface_tools):
-        ov = surface_tools[surface] or {}
-        if not isinstance(ov, dict):
-            out[surface] = ov
-            continue
-        entry: dict[str, Any] = {}
-        for key in sorted(ov):
-            val = ov[key]
-            if isinstance(val, set | frozenset):
-                entry[key] = sorted(val)
-            elif isinstance(val, list | tuple):
-                entry[key] = list(val)
-            else:
-                entry[key] = val
-        out[surface] = entry
-    return out
-
-
 def battery_fingerprint(tasks: list[dict[str, Any]] | None = None) -> str:
     """Stable short hash of the task battery used for a run.
 
     SHA-256 (first 12 hex chars) over a canonical serialization of every task
-    sorted by id: id, prompt, sorted optimal/alternate tools, optimal_calls,
-    and the surface_tools overlay (sets sorted, keys sorted).
+    sorted by id: id, prompt, sorted optimal/alternate tools, and optimal_calls.
 
     Ceilings (intentionally *not* covered by the hash):
     - Verifier functions and ``needs`` fixtures do not alter the fingerprint —
@@ -254,7 +165,6 @@ def battery_fingerprint(tasks: list[dict[str, Any]] | None = None) -> str:
                 "optimal_tools": sorted(t.get("optimal_tools") or []),
                 "alternate_tools": sorted(t.get("alternate_tools") or []),
                 "optimal_calls": t.get("optimal_calls"),
-                "surface_tools": _serialize_surface_tools(t.get("surface_tools")),
             }
         )
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -282,7 +192,6 @@ __all__ = [
     "reports_contract_value",
     "reports_contract_values",
     "reports_exact_int",
-    "resolve_surface_tool_sets",
     "state_group",
     "state_name",
     "task_author",

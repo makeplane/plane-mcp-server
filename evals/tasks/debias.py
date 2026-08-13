@@ -113,13 +113,6 @@ I1_TASK: dict[str, Any] = {
         "search_work_items",
         "retrieve_work_item_by_identifier",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"update_work_item"},
-            "alternate_tools": {"get_work_item", "find_work_items", "search_projects"},
-        },
-    },
     "needs": {"items"},
     "verify": verify_i1,
 }
@@ -158,20 +151,6 @@ I2_TASK: dict[str, Any] = {
         "list_work_items",
         "search_work_items",
         "list_states",
-    },
-    "surface_tools": {
-        "v2": {
-            # get_work_item requires UUIDs (forwards work_item_id directly).
-            # PROJ-N on v2 is resolved via find_work_items (list/filter).
-            "optimal_calls": 1,
-            "optimal_tools": {"find_work_items"},
-            "alternate_tools": {
-                "get_work_item",
-                "list_states",
-                "search_projects",
-                "get_workspace_context",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_i2,
@@ -214,13 +193,6 @@ I3_TASK: dict[str, Any] = {
         "list_work_items",
         "retrieve_cycle",
     },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"assign_to_cycle"},
-            "alternate_tools": {"list_cycles", "find_work_items", "get_work_item"},
-        },
-    },
     "needs": {"items", "cycles"},
     "verify": verify_i3,
 }
@@ -260,14 +232,6 @@ I4_TASK: dict[str, Any] = {
         "retrieve_work_item",
         "list_work_items",
     },
-    "surface_tools": {
-        "v2": {
-            # Default v2 update_work_item accepts labels; no manage_work_item_label.
-            "optimal_calls": 1,
-            "optimal_tools": {"update_work_item"},
-            "alternate_tools": {"get_work_item", "list_labels", "find_work_items"},
-        },
-    },
     "needs": {"items", "labels"},
     "verify": verify_i4,
 }
@@ -299,13 +263,6 @@ I5_TASK: dict[str, Any] = {
         "retrieve_work_item",
         "list_work_items",
         "search_work_items",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 1,
-            "optimal_tools": {"update_work_item"},
-            "alternate_tools": {"get_work_item", "find_work_items"},
-        },
     },
     "needs": {"items"},
     "verify": verify_i5,
@@ -374,12 +331,6 @@ L1_TASK: dict[str, Any] = {
         "retrieve_work_item",
         "list_projects",
     },
-    "surface_tools": {
-        "v2": {
-            "expected_skip": True,
-            "reason": ("L1 needs get_project_worklog_summary (legacy project tool) — not on the default v2 surface"),
-        },
-    },
     "needs": {"items"},
     "verify": verify_l1,
 }
@@ -424,15 +375,6 @@ L2_TASK: dict[str, Any] = {
         "list_work_item_comments",
         "retrieve_work_item_activity",
     },
-    "surface_tools": {
-        "v2": {
-            "expected_skip": True,
-            "reason": (
-                "L2 needs list_work_item_activities — not on the default v2 surface "
-                "(v2 has comments include= but not the activities feed)"
-            ),
-        },
-    },
     "needs": {"items", "activity_feed"},
     "verify": verify_l2,
 }
@@ -473,12 +415,6 @@ L3_TASK: dict[str, Any] = {
         "retrieve_release_tag",
         "list_releases",
         "update_release_tag",
-    },
-    "surface_tools": {
-        "v2": {
-            "expected_skip": True,
-            "reason": "L3 needs create_release_tag — not on the default v2 surface",
-        },
     },
     "needs": set(),  # workspace-level tag; no project fixture required
     "verify": verify_l3,
@@ -566,14 +502,6 @@ L4_TASK: dict[str, Any] = {
         "retrieve_customer",
         "update_customer_property",
     },
-    "surface_tools": {
-        "v2": {
-            "expected_skip": True,
-            "reason": (
-                "L4 needs create_customer_property / set_customer_property_values — not on the default v2 surface"
-            ),
-        },
-    },
     "needs": {"customer"},
     "verify": verify_l4,
 }
@@ -613,18 +541,6 @@ L5_TASK: dict[str, Any] = {
         "search_work_items",
         "retrieve_work_item",
         "get_work_item_attachment_download_url",
-    },
-    "surface_tools": {
-        "v2": {
-            # Achievable on default v2 via include=attachments on get_work_item.
-            "optimal_calls": 2,
-            "optimal_tools": {"find_work_items", "get_work_item"},
-            "alternate_tools": {
-                "search_projects",
-                "get_workspace_context",
-                "list_states",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_l5,

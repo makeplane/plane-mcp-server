@@ -87,13 +87,13 @@ from evals.results import CallRecord, TaskResult
 # Registry
 # ---------------------------------------------------------------------------
 
-KNOWN_DRIVERS = frozenset({"api", "sdk", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"})
+KNOWN_DRIVERS = frozenset({"api", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"})
 
 
 def get_driver(name: str, **kwargs: Any) -> AgentDriver:
-    """Return a driver instance; ``sdk`` is a legacy alias for ``api``."""
+    """Return a driver instance."""
     key = (name or "api").strip().lower()
-    if key in ("api", "sdk"):
+    if key == "api":
         return ApiDriver(**kwargs)
     if key == "claude-cli":
         return ClaudeCliDriver(**kwargs)

@@ -12,31 +12,31 @@ from unittest.mock import MagicMock
 import pytest
 from plane.errors.errors import HttpError
 
+from evals import cli as run_mod
 from evals import report as report_mod
-from evals import run as run_mod
 from evals import seed as seed_mod
 from evals.drivers import AgentRun, ClaudeCliDriver, parse_claude_json_result
 from evals.report import is_infra_error_row, load_rows, summarize
 from evals.results import RESULT_SCHEMA_VERSION, TaskResult
-from evals.run import (
+from evals.runner import canary as runner_canary
+from evals.runner import (
     is_infra_cli_stop_reason,
     load_resume_skip_keys,
     run_canary,
     run_live,
     should_skip_resume_row,
 )
-from evals.runner import canary as runner_canary
 from evals.runner import live as runner_live
 from evals.seed import create_project_with_identifier_retry, is_identifier_collision
-from evals.tasks import battery_fingerprint, task_author
+from evals.tasks import TaskSkipped, battery_fingerprint, task_author
 
 # Pinned hash of the fixed synthetic catalog in test_battery_fingerprint_stable_and_sensitive.
 # Recompute only if the serialization format of battery_fingerprint changes deliberately.
-PINNED_SYNTHETIC_BATTERY = "81be78bde8c7"
+PINNED_SYNTHETIC_BATTERY = "eea5abf36382"
 
 
 def _data_rows(path: Path) -> list[dict]:
-    """Parse JSONL skipping meta / non-task lines (run.py writes a meta header)."""
+    """Parse JSONL skipping meta / non-task lines."""
     out: list[dict] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -55,6 +55,17 @@ def _eval_creds(monkeypatch):
     monkeypatch.delenv("EVAL_PLANE_BASE_URL", raising=False)
     monkeypatch.delenv("REDIS_HOST", raising=False)
     monkeypatch.delenv("REDIS_PORT", raising=False)
+
+
+def test_stdio_server_env_does_not_leak_ambient_secrets(monkeypatch):
+    monkeypatch.setenv("SOME_SECRET", "x")
+
+    environment = runner_live.stdio_server_env()
+
+    assert "SOME_SECRET" not in environment
+    assert environment["PLANE_API_KEY"] == "test-key"
+    assert environment["PLANE_WORKSPACE_SLUG"] == "test-ws"
+    assert environment["PLANE_BASE_URL"] == "https://api.plane.so"
 
 
 # ---------------------------------------------------------------------------
@@ -87,13 +98,13 @@ def test_should_skip_resume_row_non_null_error_retries():
 def test_load_resume_skip_keys_summary(tmp_path: Path):
     p = tmp_path / "out.jsonl"
     rows = [
-        {"task_id": "R1", "rep": 0, "surface": "v2", "error": None, "error_class": None},
-        {"task_id": "R1", "rep": 1, "surface": "v2", "error": "x", "error_class": "infra_seed"},
-        {"task_id": "W1", "rep": 0, "surface": "v2", "error": None, "success": False},
+        {"task_id": "R1", "rep": 0, "label": "local", "error": None, "error_class": None},
+        {"task_id": "R1", "rep": 1, "label": "local", "error": "x", "error_class": "infra_seed"},
+        {"task_id": "W1", "rep": 0, "label": "local", "error": None, "success": False},
     ]
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    skip, n_skip, n_retry = load_resume_skip_keys(p, surface="v2")
-    assert skip == {("R1", 0), ("W1", 0)}
+    skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
+    assert skip == {("R1", 0, "local"), ("W1", 0, "local")}
     assert n_skip == 2
     assert n_retry == 1
 
@@ -102,21 +113,21 @@ def test_load_resume_skip_keys_n_retry_ignores_later_success(tmp_path: Path):
     """Historical error row whose later row succeeded must not inflate n_retry."""
     p = tmp_path / "out.jsonl"
     rows = [
-        {"task_id": "R1", "rep": 0, "surface": "v2", "error": "boom", "error_class": "infra_cli"},
-        {"task_id": "R1", "rep": 0, "surface": "v2", "error": None, "error_class": None, "success": True},
+        {"task_id": "R1", "rep": 0, "label": "local", "error": "boom", "error_class": "infra_cli"},
+        {"task_id": "R1", "rep": 0, "label": "local", "error": None, "error_class": None, "success": True},
     ]
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    skip, n_skip, n_retry = load_resume_skip_keys(p, surface="v2")
-    assert skip == {("R1", 0)}
+    skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
+    assert skip == {("R1", 0, "local")}
     assert n_skip == 1
     assert n_retry == 0
 
 
-def test_load_resume_skip_keys_surface_mismatch(tmp_path: Path):
+def test_load_resume_skip_keys_label_mismatch(tmp_path: Path):
     p = tmp_path / "out.jsonl"
-    p.write_text(json.dumps({"task_id": "R1", "rep": 0, "surface": "full", "error": None}) + "\n")
-    with pytest.raises(SystemExit, match="surface"):
-        load_resume_skip_keys(p, surface="v2")
+    p.write_text(json.dumps({"task_id": "R1", "rep": 0, "label": "other", "error": None}) + "\n")
+    with pytest.raises(SystemExit, match="label"):
+        load_resume_skip_keys(p, label="local")
 
 
 def test_load_resume_skip_keys_battery_model_driver_mismatch(tmp_path: Path):
@@ -126,7 +137,7 @@ def test_load_resume_skip_keys_battery_model_driver_mismatch(tmp_path: Path):
             {
                 "task_id": "R1",
                 "rep": 0,
-                "surface": "v2",
+                "label": "local",
                 "battery": "aaaaaaaaaaaa",
                 "model": "sonnet",
                 "driver": "claude-cli",
@@ -137,16 +148,16 @@ def test_load_resume_skip_keys_battery_model_driver_mismatch(tmp_path: Path):
         encoding="utf-8",
     )
     with pytest.raises(SystemExit, match="battery"):
-        load_resume_skip_keys(p, surface="v2", battery="bbbbbbbbbbbb")
+        load_resume_skip_keys(p, label="local", battery="bbbbbbbbbbbb")
     with pytest.raises(SystemExit, match="model"):
-        load_resume_skip_keys(p, surface="v2", battery="aaaaaaaaaaaa", model="haiku")
+        load_resume_skip_keys(p, label="local", battery="aaaaaaaaaaaa", model="haiku")
     with pytest.raises(SystemExit, match="driver"):
-        load_resume_skip_keys(p, surface="v2", battery="aaaaaaaaaaaa", model="sonnet", driver="sdk")
+        load_resume_skip_keys(p, label="local", battery="aaaaaaaaaaaa", model="sonnet", driver="unknown")
     # Missing keys on older rows: pass (back-compat)
     p2 = tmp_path / "old.jsonl"
-    p2.write_text(json.dumps({"task_id": "R1", "rep": 0, "surface": "v2", "error": None}) + "\n")
-    skip, _, _ = load_resume_skip_keys(p2, surface="v2", battery="anything", model="sonnet", driver="claude-cli")
-    assert ("R1", 0) in skip
+    p2.write_text(json.dumps({"task_id": "R1", "rep": 0, "label": "local", "error": None}) + "\n")
+    skip, _, _ = load_resume_skip_keys(p2, label="local", battery="anything", model="sonnet", driver="claude-cli")
+    assert ("R1", 0, "local") in skip
 
 
 def test_resume_identity_uses_resolved_model_not_tier_label(tmp_path: Path):
@@ -156,7 +167,7 @@ def test_resume_identity_uses_resolved_model_not_tier_label(tmp_path: Path):
             {
                 "task_id": "R1",
                 "rep": 0,
-                "surface": "v2",
+                "label": "local",
                 "model": "provider-reported-id",
                 "requested_model": "standard",
                 "requested_tier": "standard",
@@ -168,29 +179,29 @@ def test_resume_identity_uses_resolved_model_not_tier_label(tmp_path: Path):
         encoding="utf-8",
     )
 
-    skip, _, _ = load_resume_skip_keys(p, surface="v2", model="old-standard-id")
-    assert skip == {("R1", 0)}
+    skip, _, _ = load_resume_skip_keys(p, label="local", model="old-standard-id")
+    assert skip == {("R1", 0, "local")}
     with pytest.raises(SystemExit, match="model"):
-        load_resume_skip_keys(p, surface="v2", model="new-standard-id")
+        load_resume_skip_keys(p, label="local", model="new-standard-id")
 
 
 def test_load_resume_skip_keys_truncated_json(tmp_path: Path, capsys):
     p = tmp_path / "out.jsonl"
     p.write_text(
-        json.dumps({"task_id": "R1", "rep": 0, "surface": "v2", "error": None})
+        json.dumps({"task_id": "R1", "rep": 0, "label": "local", "error": None})
         + "\n"
-        + '{"task_id": "W1", "rep": 0, "surface": "v2", "error":\n',  # truncated
+        + '{"task_id": "W1", "rep": 0, "label": "local", "error":\n',  # truncated
         encoding="utf-8",
     )
-    skip, n_skip, n_retry = load_resume_skip_keys(p, surface="v2")
-    assert skip == {("R1", 0)}
+    skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
+    assert skip == {("R1", 0, "local")}
     assert n_skip == 1
     err = capsys.readouterr().err
     assert "invalid JSON" in err
 
 
 def test_load_resume_skip_keys_missing_file(tmp_path: Path):
-    skip, n_skip, n_retry = load_resume_skip_keys(tmp_path / "missing.jsonl", surface="v2")
+    skip, n_skip, n_retry = load_resume_skip_keys(tmp_path / "missing.jsonl", label="local")
     assert skip == set() and n_skip == 0 and n_retry == 0
 
 
@@ -240,9 +251,10 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
             [task],
             model_alias="standard",
             reps=1,
-            surface="full",
+            label="local",
             out_path=out,
             driver_name="claude-cli",
+            resolved_model_id="sonnet",
         )
     )
     assert rc == 0
@@ -300,7 +312,7 @@ def test_run_live_driver_exception_is_infra_cli(tmp_path: Path, monkeypatch):
             [task],
             model_alias="sonnet",
             reps=1,
-            surface="full",
+            label="local",
             out_path=out,
             driver_name="claude-cli",
         )
@@ -357,7 +369,7 @@ def test_run_live_timeout_agent_is_infra_cli(tmp_path: Path, monkeypatch):
             [task],
             model_alias="sonnet",
             reps=1,
-            surface="full",
+            label="local",
             out_path=out,
             driver_name="claude-cli",
         )
@@ -421,7 +433,7 @@ def test_run_live_error_during_execution_is_infra_cli(tmp_path: Path, monkeypatc
             [task],
             model_alias="sonnet",
             reps=1,
-            surface="full",
+            label="local",
             out_path=out,
             driver_name="claude-cli",
         )
@@ -478,7 +490,7 @@ def test_run_live_error_max_turns_is_task_path(tmp_path: Path, monkeypatch):
             [task],
             model_alias="sonnet",
             reps=1,
-            surface="full",
+            label="local",
             out_path=out,
             driver_name="claude-cli",
         )
@@ -662,12 +674,6 @@ def test_battery_fingerprint_stable_and_sensitive():
         "optimal_tools": {"b", "a"},
         "alternate_tools": {"c"},
         "optimal_calls": 2,
-        "surface_tools": {
-            "v2": {
-                "optimal_tools": {"find_work_items"},
-                "alternate_tools": set(),
-            }
-        },
     }
     t2 = {
         "id": "B",
@@ -675,7 +681,6 @@ def test_battery_fingerprint_stable_and_sensitive():
         "optimal_tools": {"x"},
         "alternate_tools": set(),
         "optimal_calls": 1,
-        "surface_tools": {},
     }
     # Order of list must not matter (sorted by id).
     h1 = battery_fingerprint([t2, t1])
@@ -779,8 +784,7 @@ def test_print_table_shows_infra_errors(capsys):
     assert "    2" in out  # i_err column value
 
 
-def test_is_infra_error_row_covers_sdk():
-    assert is_infra_error_row({"error_class": "infra_sdk"}) is True
+def test_is_infra_error_row_covers_infrastructure_prefix():
     assert is_infra_error_row({"error_class": "infra_cli"}) is True
     assert is_infra_error_row({"error_class": "task"}) is False
 
@@ -788,8 +792,8 @@ def test_is_infra_error_row_covers_sdk():
 def test_load_rows_dedupe_latest_wins(tmp_path: Path):
     p = tmp_path / "dup.jsonl"
     rows = [
-        {"task_id": "R1", "rep": 0, "surface": "v2", "success": True, "num_calls": 1},
-        {"task_id": "R1", "rep": 0, "surface": "v2", "success": False, "num_calls": 9},
+        {"task_id": "R1", "rep": 0, "label": "local", "success": True, "num_calls": 1},
+        {"task_id": "R1", "rep": 0, "label": "local", "success": False, "num_calls": 9},
     ]
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     loaded = load_rows(p)  # default dedupe=latest
@@ -801,8 +805,8 @@ def test_load_rows_dedupe_latest_wins(tmp_path: Path):
 def test_load_rows_no_dedupe_warns_on_duplicate_keys(tmp_path: Path, capsys):
     p = tmp_path / "dup.jsonl"
     rows = [
-        {"task_id": "R1", "rep": 0, "surface": "v2", "success": True},
-        {"task_id": "R1", "rep": 0, "surface": "v2", "success": False},
+        {"task_id": "R1", "rep": 0, "label": "local", "success": True},
+        {"task_id": "R1", "rep": 0, "label": "local", "success": False},
     ]
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     loaded = load_rows(p, dedupe="none")
@@ -851,7 +855,7 @@ def test_canary_detects_broken_verifier(monkeypatch):
             "verify": always_ok,
         },
     ]
-    rc = asyncio.run(run_canary(tasks, surface="full"))
+    rc = asyncio.run(run_canary(tasks, label="local"))
     assert rc == 1
 
 
@@ -878,25 +882,19 @@ def test_canary_passes_when_all_verifiers_reject(monkeypatch):
             "verify": reject,
         },
     ]
-    rc = asyncio.run(run_canary(tasks, surface="full"))
+    rc = asyncio.run(run_canary(tasks, label="local"))
     assert rc == 0
 
 
 def test_canary_exits_1_when_all_tasks_skipped(monkeypatch):
     fake_plane = MagicMock()
     monkeypatch.setattr(runner_canary, "make_plane_client", lambda: (fake_plane, "test-ws"))
-    monkeypatch.setattr(runner_canary, "seed", lambda *a, **k: None)
-    monkeypatch.setattr(runner_canary, "teardown", lambda *a, **k: None)
     monkeypatch.setattr(
         runner_canary,
-        "resolve_surface_tool_sets",
-        lambda task, surface: {
-            "skip": "unsupported on surface",
-            "optimal_tools": set(),
-            "alternate_tools": set(),
-            "classification": "exact",
-        },
+        "seed",
+        lambda *a, **k: (_ for _ in ()).throw(TaskSkipped("fixture unavailable")),
     )
+    monkeypatch.setattr(runner_canary, "teardown", lambda *a, **k: None)
     tasks = [
         {
             "id": "SKIPME",
@@ -908,7 +906,7 @@ def test_canary_exits_1_when_all_tasks_skipped(monkeypatch):
             "verify": lambda *a, **k: (False, "unused"),
         },
     ]
-    rc = asyncio.run(run_canary(tasks, surface="v2"))
+    rc = asyncio.run(run_canary(tasks, label="local"))
     assert rc == 1
 
 
@@ -958,7 +956,7 @@ def test_run_live_multi_rep_uses_fresh_seed_and_teardown_per_rep(tmp_path: Path,
             [task],
             model_alias="sonnet",
             reps=3,
-            surface="full",
+            label="local",
             out_path=out,
             driver_name="claude-cli",
         )
@@ -975,14 +973,14 @@ def test_run_live_multi_rep_uses_fresh_seed_and_teardown_per_rep(tmp_path: Path,
 
 def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypatch):
     out = tmp_path / "resume.jsonl"
-    # Pre-write: completed R1/0 + infra R2/0 (same surface/battery/model/driver as this run).
+    # Pre-write: completed R1/0 + infra R2/0 (same label/battery/model/driver as this run).
     # Battery is computed from the task list below — seed the file after we know it,
     # or write rows without battery (back-compat) and only check skip/retry behavior.
     prior = [
         {
             "task_id": "R1",
             "rep": 0,
-            "surface": "full",
+            "label": "local",
             "driver": "claude-cli",
             "model": "sonnet",
             "error": None,
@@ -992,7 +990,7 @@ def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypat
         {
             "task_id": "R2",
             "rep": 0,
-            "surface": "full",
+            "label": "local",
             "driver": "claude-cli",
             "model": "sonnet",
             "error": "HttpError: 409",
@@ -1058,7 +1056,7 @@ def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypat
             tasks,
             model_alias="sonnet",
             reps=1,
-            surface="full",
+            label="local",
             out_path=out,
             driver_name="claude-cli",
             resume=True,
@@ -1075,3 +1073,56 @@ def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypat
     assert new_r2["success"] is True
     assert new_r2["error_class"] is None
     assert new_r2["final_text"] == "done"
+
+
+def test_task_skipped_from_seed_records_a_skip_row(tmp_path: Path, monkeypatch):
+    """A fixture that cannot be seeded records a skip — no agent, no crash.
+
+    Genuine skips (an absent activity worker, a plan-gated feature) reach the
+    row through TaskSkipped, so the driver must never run and the row must not
+    count as a failure.
+    """
+    out = tmp_path / "out.jsonl"
+    driven: list[str] = []
+    torn: list[Any] = []
+
+    def skip_seed(*_args: Any, **_kwargs: Any) -> None:
+        raise TaskSkipped("env:no-activity-worker")
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "ws"))
+    monkeypatch.setattr(runner_live, "seed", skip_seed)
+    monkeypatch.setattr(runner_live, "teardown", lambda *a, **k: torn.append(1))
+    monkeypatch.setattr(
+        runner_live,
+        "get_driver",
+        lambda *a, **k: driven.append("ran") or MagicMock(),
+    )
+
+    tasks = [
+        {
+            "id": "L2",
+            "prompt": "x {project}",
+            "optimal_tools": {"a"},
+            "alternate_tools": set(),
+            "optimal_calls": 1,
+            "needs": {"activity_feed"},
+            "verify": None,  # never reached
+        },
+    ]
+    rc = asyncio.run(run_live(tasks, model_alias="standard", reps=1, label="local", out_path=out))
+
+    assert rc == 0
+    assert driven == ["ran"]  # driver is constructed once per run, never invoked
+    row = _data_rows(out)[0]
+    assert row["task_id"] == "L2"
+    assert row["skipped"] == "env:no-activity-worker"
+    assert row["error"] is None
+    assert row["error_class"] is None
+    assert row["label"] == "local"
+    assert torn == [1]  # teardown still runs
+
+    # `skipped` is the discriminator, not `success` — a skip must leave the
+    # success denominator empty rather than counting as a failed task.
+    summary = summarize(load_rows(out))
+    assert "L2" not in summary
+    assert summary["_meta"]["aggregate_n"] == 0

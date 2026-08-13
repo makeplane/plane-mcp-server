@@ -1,8 +1,4 @@
-"""Command-line wiring and model resolution for the eval harness.
-
-The stable process entry point remains ``python -m evals.run``; that module
-delegates here.
-"""
+"""Command-line wiring and model resolution for the eval harness."""
 
 from __future__ import annotations
 
@@ -22,7 +18,7 @@ from evals.drivers.api import (
     backend_model_aliases,
     resolve_backend_model,
 )
-from evals.runner import KNOWN_SURFACES, run_canary, run_live
+from evals.runner import run_canary, run_live
 from evals.seed import seed_plan
 from evals.tasks import TASKS, format_task_prompt, get_tasks
 
@@ -66,7 +62,7 @@ def resolve_model_for_driver(driver_name: str, model: str, *, provider: str | No
     vendor aliases and qualified provider/model IDs, is passed through exactly.
     """
     key = (driver_name or "api").strip().lower()
-    if key in ("api", "sdk"):
+    if key == "api":
         return resolve_backend_model(provider or "anthropic", model)
     if model not in MODEL_TIERS:
         return model
@@ -105,23 +101,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument("--reps", type=int, default=1, help="Repetitions per task")
     p.add_argument(
-        "--surface",
+        "--label",
         type=str,
-        default="full",
-        help=(
-            "Tool surface: 'full' (legacy 177 tools), 'v2', or 'v2-schema'. "
-            "With --server-cmd it is a free-form label for the external surface."
-        ),
+        default="local",
+        help="Column label for this run in reports (default: local).",
     )
     p.add_argument(
         "--server-cmd",
         type=str,
         default=None,
         help=(
-            "External MCP stdio server launch command (shlex-split), e.g. "
-            "'/path/venv/bin/python -m plane_mcp stdio --v2'. Enables external mode: "
-            "all tasks run (no surface skips) and mispick classification is disabled "
-            "(the foreign tool names have no overlay sets)."
+            "External MCP stdio server launch command (shlex-split). Enables external "
+            "mode, where foreign tool names make mispick classification unavailable."
         ),
     )
     p.add_argument(
@@ -137,8 +128,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="api",
         choices=sorted(KNOWN_DRIVERS),
         help=(
-            "Agent backend: api | claude-cli | codex-cli | antigravity-cli | opencode-cli "
-            "('sdk' is an alias for 'api'). Not required for --canary."
+            "Agent backend: api | claude-cli | codex-cli | antigravity-cli | opencode-cli. Not required for --canary."
         ),
     )
     p.add_argument(
@@ -146,7 +136,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="anthropic",
         choices=sorted(KNOWN_API_PROVIDERS),
-        help="Model API provider for --driver api/sdk (default: anthropic).",
+        help="Model API provider for --driver api (default: anthropic).",
     )
     p.add_argument(
         "--record-result-payloads",
@@ -163,8 +153,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         metavar="OUT.jsonl",
         help=(
-            "Resume into an existing JSONL (also the --out target). Skip (task_id, rep) "
-            "pairs that already completed; re-run rows with infra_ error_class or non-null error."
+            "Resume into an existing JSONL (also the --out target). Skip "
+            "(task_id, rep, label) keys that already completed; re-run rows with infra_ "
+            "error_class or non-null error."
         ),
     )
     p.add_argument(
@@ -237,20 +228,13 @@ def main(argv: list[str] | None = None) -> int:
         print("error: --reps must be at least 1", file=sys.stderr)
         return 2
 
-    surface = (args.surface or "full").strip().lower()
+    label = (args.label or "local").strip() or "local"
     server_cmd: list[str] | None = None
     if args.server_cmd:
         server_cmd = shlex.split(args.server_cmd)
         if not server_cmd:
             print("error: --server-cmd is empty", file=sys.stderr)
             return 2
-    elif surface not in KNOWN_SURFACES:
-        print(
-            f"error: unknown --surface {surface!r}; expected one of {sorted(KNOWN_SURFACES)} "
-            "(or pass --server-cmd for an external surface)",
-            file=sys.stderr,
-        )
-        return 2
 
     server_env: dict[str, str] = {}
     for pair in args.server_env:
@@ -262,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Canary: live env only — no driver/model required.
     if args.canary:
-        return asyncio.run(run_canary(tasks, surface=surface))
+        return asyncio.run(run_canary(tasks, label=label))
 
     driver_name = (getattr(args, "driver", None) or "api").strip().lower()
     if driver_name not in KNOWN_DRIVERS:
@@ -283,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
         model_id = resolve_model_for_driver(
             driver_name,
             args.model,
-            provider=args.provider if driver_name in ("api", "sdk") else None,
+            provider=args.provider if driver_name == "api" else None,
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -293,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             tasks,
             model_alias=args.model,
             reps=args.reps,
-            surface=surface,
+            label=label,
             out_path=out,
             driver_name=driver_name,
             provider=args.provider,

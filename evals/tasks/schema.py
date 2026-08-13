@@ -106,33 +106,6 @@ S1_TASK: dict[str, Any] = {
         "import_work_item_types_to_project",
         "update_project_features",
     },
-    "surface_tools": {
-        "v2": {
-            "unsupported": True,
-            "reason": (
-                "S1 needs work-item-type/property schema tools "
-                "(resolve_work_item_type, create_work_item_property) which are "
-                "not on the default v2 surface — use --surface v2-schema"
-            ),
-        },
-        "v2-schema": {
-            "optimal_calls": 2,
-            "optimal_tools": {
-                "resolve_work_item_type",
-                "create_work_item_property",
-            },
-            "alternate_tools": {
-                "list_work_item_types",
-                "list_work_item_properties",
-                "add_property_option",
-                "search_projects",
-                "get_workspace_context",
-                "get_features",
-                "configure_features",
-                "update_work_item_type",
-            },
-        },
-    },
     "needs": {"bug_type"},
     "verify": verify_s1,
 }
@@ -202,30 +175,6 @@ S2_TASK: dict[str, Any] = {
         "list_work_items",
         "search_work_items",
         "update_project_estimate",
-    },
-    "surface_tools": {
-        "v2": {
-            "unsupported": True,
-            "reason": (
-                "S2 needs configure_estimate (schema tier) to create the Fibonacci "
-                "scale — default v2 has no estimate schema tools. "
-                "(v2 update_work_item does accept estimate_point.) Use v2-schema."
-            ),
-        },
-        "v2-schema": {
-            # configure_estimate creates scale+points+link in one call;
-            # update_work_item(estimate_point="5") resolves the value server-side.
-            "optimal_calls": 2,
-            "optimal_tools": {"configure_estimate", "update_work_item"},
-            "alternate_tools": {
-                "search_projects",
-                "get_features",
-                "find_work_items",
-                "get_work_item",
-                "get_workspace_context",
-                "bulk_update_work_items",
-            },
-        },
     },
     "needs": {"items"},
     "verify": verify_s2,
@@ -311,29 +260,6 @@ S3_TASK: dict[str, Any] = {
         "manage_work_item_type_properties",
         "update_project_features",
     },
-    "surface_tools": {
-        "v2": {
-            "unsupported": True,
-            "reason": (
-                "S3 needs resolve_work_item_type + create_work_item_property (schema tier) — use --surface v2-schema"
-            ),
-        },
-        "v2-schema": {
-            "optimal_calls": 2,
-            "optimal_tools": {
-                "resolve_work_item_type",
-                "create_work_item_property",
-            },
-            "alternate_tools": {
-                "list_work_item_types",
-                "list_work_item_properties",
-                "update_work_item_type",
-                "search_projects",
-                "get_features",
-                "configure_features",
-            },
-        },
-    },
     "needs": set(),
     "verify": verify_s3,
 }
@@ -403,18 +329,6 @@ S4_TASK: dict[str, Any] = {
         "list_work_items",
         "list_projects",
         "create_intake_work_item",
-    },
-    "surface_tools": {
-        "v2": {
-            "optimal_calls": 3,
-            "optimal_tools": {"list_intake", "triage_intake"},
-            "alternate_tools": {
-                "find_work_items",
-                "get_work_item",
-                "search_projects",
-                "get_workspace_context",
-            },
-        },
     },
     "needs": {"intake"},
     "verify": verify_s4,
@@ -506,27 +420,6 @@ S5_TASK: dict[str, Any] = {
         "list_projects",
         "retrieve_project",
         "get_features",
-    },
-    "surface_tools": {
-        "v2": {
-            "unsupported": True,
-            "reason": (
-                "S5 needs configure_features (schema tier) for project cycles/worklogs "
-                "and workspace customers — use --surface v2-schema"
-            ),
-        },
-        "v2-schema": {
-            # 2 calls: configure_features(project, cycles+worklogs) +
-            # configure_features(customers=True) without project.
-            "optimal_calls": 2,
-            "optimal_tools": {"configure_features"},
-            "alternate_tools": {
-                "get_features",
-                "search_projects",
-                "get_workspace_context",
-                "update_work_item",
-            },
-        },
     },
     # Seed leaves project cycles+worklogs and workspace customers off.
     "needs": {"leave_cycles_worklogs_off"},

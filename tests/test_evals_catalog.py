@@ -8,11 +8,11 @@ import pytest
 
 from evals import seed as seed_mod
 from evals import tasks as tasks_mod
-from evals.run import cmd_dry_run, cmd_list, parse_args
+from evals.cli import cmd_dry_run, cmd_list, parse_args
 from evals.seed import seed_plan
-from evals.tasks import TASKS, TASKS_BY_ID, get_tasks, resolve_surface_tool_sets
+from evals.tasks import TASKS, TASKS_BY_ID, get_tasks
 
-# DESIGN.md catalog ids (stable) + extras added for uncovered v2 families.
+# DESIGN.md catalog ids (stable) + extras added for uncovered tool families.
 DESIGN_IDS = {
     "R1",
     "R2",
@@ -123,96 +123,14 @@ def test_task_schema_invariants():
         assert t["optimal_tools"].isdisjoint(t["alternate_tools"]), t["id"]
         assert callable(t["verify"])
         assert isinstance(t.get("needs"), set)
-        # Overlays: optimal/alternate disjoint when present (skip capability-gap marks)
-        for surface, ov in (t.get("surface_tools") or {}).items():
-            if ov.get("unsupported") or ov.get("expected_skip"):
-                continue
-            opt = set(ov["optimal_tools"])
-            alt = set(ov["alternate_tools"])
-            assert opt.isdisjoint(alt), f"{t['id']}/{surface} overlap"
 
 
-def test_debias_tasks_author_and_v2_skips():
+def test_debias_tasks_author():
     from evals.tasks import task_author
 
     for tid in ID_IN_HAND_IDS | LONG_TAIL_IDS:
         t = TASKS_BY_ID[tid]
         assert task_author(t) == "post-hoc-debias"
-    # L1–L4 are capability gaps on default v2 (+ inherited by v2-schema).
-    for tid in ("L1", "L2", "L3", "L4"):
-        for surface in ("v2", "v2-schema"):
-            skip = resolve_surface_tool_sets(TASKS_BY_ID[tid], surface)["skip"]
-            assert skip, f"{tid} should expected_skip on {surface}"
-        assert resolve_surface_tool_sets(TASKS_BY_ID[tid], "full")["skip"] is None
-    # L5 is achievable on v2 via get_work_item(include=attachments).
-    assert resolve_surface_tool_sets(TASKS_BY_ID["L5"], "v2")["skip"] is None
-    l5 = resolve_surface_tool_sets(TASKS_BY_ID["L5"], "v2")
-    assert l5["optimal_tools"] == {"find_work_items", "get_work_item"}
-    assert l5["optimal_calls"] == 2
-    # I-class is runnable on v2 (raw call efficiency, not a capability gap)
-    for tid in ID_IN_HAND_IDS:
-        assert resolve_surface_tool_sets(TASKS_BY_ID[tid], "v2")["skip"] is None
-    # I2: PROJ-N is find_work_items, not get_work_item (UUID-only).
-    i2 = resolve_surface_tool_sets(TASKS_BY_ID["I2"], "v2")
-    assert i2["optimal_tools"] == {"find_work_items"}
-    assert "get_work_item" not in i2["optimal_tools"]
-
-
-def test_v2_schema_inherits_expected_skip():
-    """v2-schema must inherit L1 expected_skip (schema adds none of those APIs)."""
-    l1_v2 = resolve_surface_tool_sets(TASKS_BY_ID["L1"], "v2")
-    l1_schema = resolve_surface_tool_sets(TASKS_BY_ID["L1"], "v2-schema")
-    assert l1_v2["skip"]
-    assert l1_schema["skip"] == l1_v2["skip"]
-    # S1 remains schema-supported (explicit v2-schema overlay).
-    assert resolve_surface_tool_sets(TASKS_BY_ID["S1"], "v2")["skip"]
-    assert resolve_surface_tool_sets(TASKS_BY_ID["S1"], "v2-schema")["skip"] is None
-
-
-def test_every_task_resolves_on_full_v2_v2schema():
-    for t in TASKS:
-        for surface in ("full", "v2", "v2-schema"):
-            out = resolve_surface_tool_sets(t, surface)
-            assert "classification" in out
-            assert out["classification"] in {"exact", "approximate"}
-            # skip is either None or a non-empty reason string
-            if out["skip"] is not None:
-                assert isinstance(out["skip"], str) and out["skip"]
-
-
-def test_s1_w4_s2_s3_surface_skips():
-    assert resolve_surface_tool_sets(TASKS_BY_ID["S1"], "v2")["skip"]
-    assert resolve_surface_tool_sets(TASKS_BY_ID["S1"], "v2-schema")["skip"] is None
-    assert resolve_surface_tool_sets(TASKS_BY_ID["W4"], "v2")["skip"]
-    assert resolve_surface_tool_sets(TASKS_BY_ID["W4"], "v2-schema")["skip"] is None
-    assert resolve_surface_tool_sets(TASKS_BY_ID["S2"], "v2")["skip"]
-    # S2 became supported on v2-schema once update_work_item gained estimate_point.
-    s2 = resolve_surface_tool_sets(TASKS_BY_ID["S2"], "v2-schema")
-    assert s2["skip"] is None
-    assert s2["optimal_tools"] == {"configure_estimate", "update_work_item"}
-    assert s2["optimal_calls"] == 2
-    assert resolve_surface_tool_sets(TASKS_BY_ID["S3"], "v2")["skip"]
-    assert resolve_surface_tool_sets(TASKS_BY_ID["S3"], "v2-schema")["skip"] is None
-    assert resolve_surface_tool_sets(TASKS_BY_ID["S5"], "v2")["skip"]
-    s5 = resolve_surface_tool_sets(TASKS_BY_ID["S5"], "v2-schema")
-    assert s5["skip"] is None
-    assert s5["optimal_tools"] == {"configure_features"}
-    assert s5["optimal_calls"] == 2
-    full_s5 = resolve_surface_tool_sets(TASKS_BY_ID["S5"], "full")
-    assert full_s5["optimal_tools"] == {"update_project", "update_workspace_features"}
-    assert full_s5["optimal_calls"] == 2
-
-
-def test_v2_schema_inherits_v2_overlay_when_absent():
-    """v2-schema with no own overlay uses the v2 sets (superset surface)."""
-    r1 = resolve_surface_tool_sets(TASKS_BY_ID["R1"], "v2-schema")
-    assert r1["skip"] is None
-    assert r1["classification"] == "exact"
-    assert r1["optimal_tools"] == {"find_work_items"}
-    # S1 has an explicit v2-schema overlay (not the unsupported v2 one).
-    s1 = resolve_surface_tool_sets(TASKS_BY_ID["S1"], "v2-schema")
-    assert s1["skip"] is None
-    assert "create_work_item_property" in s1["optimal_tools"]
 
 
 def test_w6_seeds_an_open_cycle():
@@ -223,25 +141,6 @@ def test_w6_seeds_an_open_cycle():
     """
     assert "cycles_open_past" in TASKS_BY_ID["W6"]["needs"]
     assert "cycles" in TASKS_BY_ID["W6"]["needs"]
-
-
-def test_v2_overlays_use_v2_tool_names():
-    """Spot-check headline v2 paths."""
-    assert resolve_surface_tool_sets(TASKS_BY_ID["R1"], "v2")["optimal_tools"] == {"find_work_items"}
-    w6 = resolve_surface_tool_sets(TASKS_BY_ID["W6"], "v2")
-    assert "close_cycle" in w6["optimal_tools"]
-    s4 = resolve_surface_tool_sets(TASKS_BY_ID["S4"], "v2")
-    assert "triage_intake" in s4["optimal_tools"] and "list_intake" in s4["optimal_tools"]
-    w9 = resolve_surface_tool_sets(TASKS_BY_ID["W9"], "v2")
-    assert "bulk_update_work_items" in w9["optimal_tools"]
-    w10 = resolve_surface_tool_sets(TASKS_BY_ID["W10"], "v2")
-    assert "create_page" in w10["optimal_tools"]
-    r7 = resolve_surface_tool_sets(TASKS_BY_ID["R7"], "v2")
-    assert "list_available_transitions" in r7["optimal_tools"]
-    c2 = resolve_surface_tool_sets(TASKS_BY_ID["C2"], "v2")
-    assert "get_release" in c2["optimal_tools"]
-    c1 = resolve_surface_tool_sets(TASKS_BY_ID["C1"], "v2")
-    assert "create_customer" in c1["optimal_tools"]
 
 
 def test_seed_plan_covers_all_groups():
@@ -311,8 +210,10 @@ def test_cmd_dry_run_all_tasks(capsys):
 
 
 def test_parse_args_list():
-    a = parse_args(["--list"])
+    a = parse_args(["--list", "--label", "candidate-build"])
     assert a.list is True
+    assert a.label == "candidate-build"
+    assert parse_args(["--list"]).label == "local"
 
 
 def test_tasks_module_has_no_hardcoded_uuids():

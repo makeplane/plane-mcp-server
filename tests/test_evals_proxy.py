@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from evals.cli import main as eval_main
+from evals.cli import resolve_model_for_driver
 from evals.drivers import (
     KNOWN_DRIVERS,
     AntigravityCliDriver,
@@ -41,8 +43,6 @@ from evals.proxy import (
     write_all_fd,
 )
 from evals.proxy import main as proxy_main
-from evals.run import main as eval_main
-from evals.run import resolve_model_for_driver
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -1103,7 +1103,7 @@ def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
             "use_proxy": True,
             "record_result_payloads": True,
             "python_bin": sys.executable,
-            "server_command": ["/ext/bin/foreign-mcp", "stdio", "--v2"],
+            "server_command": ["/ext/bin/foreign-mcp", "stdio", "--mode", "candidate"],
         }
         if Driver is CodexCliDriver:
             kwargs["allow_live"] = True
@@ -1142,7 +1142,6 @@ def test_model_tiers_resolve_per_driver_and_provider():
     assert resolve_model_for_driver("api", "fast", provider="anthropic") == "claude-haiku-4-5"
     assert resolve_model_for_driver("api", "standard", provider="openai") == "gpt-5.6-sol"
     assert resolve_model_for_driver("api", "fast", provider="openai") == "gpt-5.6-luna"
-    assert resolve_model_for_driver("sdk", "standard", provider="openai") == "gpt-5.6-sol"
     assert resolve_model_for_driver("claude-cli", "standard") == "sonnet"
     assert resolve_model_for_driver("claude-cli", "fast") == "haiku"
     assert resolve_model_for_driver("codex-cli", "standard") == "gpt-5.6-sol"
@@ -1879,7 +1878,7 @@ def test_run_live_passes_server_cmd_to_non_claude(monkeypatch, tmp_path: Path):
             [task],
             model_alias="sonnet",
             reps=1,
-            surface="full",
+            label="local",
             out_path=tmp_path / "o.jsonl",
             driver_name="opencode-cli",
             server_cmd=["/bin/foreign", "stdio"],

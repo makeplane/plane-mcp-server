@@ -1,8 +1,7 @@
 """Measure MCP tool listing size (tool count + cl100k tokens).
 
 Usage:
-  python -m evals.listing --surface v2
-  python -m evals.listing --surface full
+  python -m evals.listing --label local
   python -m evals.listing --server-cmd '/path/bin/python -m plane_mcp stdio' --server-env KEY=VAL
 
 Reports: tool count, wire listing tokens (incl. outputSchema), model-facing tokens
@@ -24,9 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evals.run import stdio_server_env
+from evals.runner.live import stdio_server_env
 
-KNOWN_SURFACES = frozenset({"full", "v2", "v2-schema"})
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -112,11 +110,11 @@ def count_tool_tokens(
     return rows, total_wire, total_model
 
 
-def _listing_stdio_env(*, surface: str = "full", extra: dict[str, str] | None = None) -> dict[str, str]:
-    """Build MCP stdio env from EVAL_* credentials via the shared run.py helper."""
+def _listing_stdio_env(*, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Build MCP stdio env from EVAL_* credentials via the shared runner helper."""
     if not os.environ.get("EVAL_PLANE_API_KEY") or not os.environ.get("EVAL_PLANE_WORKSPACE_SLUG"):
         raise RuntimeError("EVAL_PLANE_API_KEY and EVAL_PLANE_WORKSPACE_SLUG are required for listing measurement")
-    return stdio_server_env(surface=surface, extra=extra)
+    return stdio_server_env(extra=extra)
 
 
 async def list_tools_from_stdio(
@@ -146,19 +144,16 @@ async def list_tools_from_stdio(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Measure MCP tool listing tokens (cl100k)")
     p.add_argument(
-        "--surface",
+        "--label",
         type=str,
-        default=None,
-        help=(
-            "Tool surface: full | v2 | v2-schema. Default full when not using --server-cmd; "
-            "with --server-cmd, default label is 'external' (or pass a free-form label)."
-        ),
+        default="local",
+        help="Label printed with the listing measurement (default: local).",
     )
     p.add_argument(
         "--server-cmd",
         type=str,
         default=None,
-        help="External MCP stdio launch command (shlex-split); free-form surface label",
+        help="External MCP stdio launch command (shlex-split)",
     )
     p.add_argument(
         "--server-env",
@@ -187,27 +182,18 @@ def main(argv: list[str] | None = None) -> int:
             print("error: --server-cmd is empty", file=sys.stderr)
             return 2
         command, cmd_args = parts[0], parts[1:]
-        # Never label external runs as "full" — default is "external".
-        surface_label = (args.surface or "external").strip() or "external"
+        label = (args.label or "local").strip() or "local"
         try:
-            # surface="full" leaves PLANE_MCP_SURFACE unset; extra may set foreign vars.
-            env = _listing_stdio_env(surface="full", extra=extra or None)
+            env = _listing_stdio_env(extra=extra or None)
         except RuntimeError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
     else:
-        surface = (args.surface or "full").strip().lower()
-        if surface not in KNOWN_SURFACES:
-            print(
-                f"error: unknown --surface {surface!r}; expected one of {sorted(KNOWN_SURFACES)}",
-                file=sys.stderr,
-            )
-            return 2
         command = sys.executable
         cmd_args = ["-m", "plane_mcp", "stdio"]
-        surface_label = surface
+        label = (args.label or "local").strip() or "local"
         try:
-            env = _listing_stdio_env(surface=surface, extra=extra or None)
+            env = _listing_stdio_env(extra=extra or None)
         except RuntimeError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -229,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
 
     with_out = sum(1 for r in rows if r.has_output_schema)
     print(
-        f"surface={surface_label} tools={len(rows)} "
+        f"label={label} tools={len(rows)} "
         f"listing_tokens_cl100k={total_wire} "
         f"model_facing(no_outputSchema)={total_model} "
         f"tools_with_outputSchema={with_out}"
