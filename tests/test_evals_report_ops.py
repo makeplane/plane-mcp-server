@@ -113,6 +113,7 @@ def test_load_rows_skips_meta_and_missing_task_id(tmp_path: Path):
 
 def test_task_result_schema_round_trip_owns_usage_shape():
     result = TaskResult(
+        row_type="result",
         task_id="R1",
         calls=[
             CallRecord(
@@ -129,8 +130,10 @@ def test_task_result_schema_round_trip_owns_usage_shape():
 
     row = result.to_row()
     assert row["schema_version"] == RESULT_SCHEMA_VERSION
+    assert row["row_type"] == "result"
     assert row["usage_per_iteration"] == [{"in": 10, "out": 2, "cache_read": 3, "cache_write": 4}]
     loaded = TaskResult.from_row(row)
+    assert loaded.row_type == "result"
     assert loaded.calls[0].tool == "find_work_items"
     assert loaded.usage_per_iteration == [Usage(10, 2, 3, 4)]
 

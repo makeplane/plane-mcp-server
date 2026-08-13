@@ -50,6 +50,7 @@ class TaskResult:
     """
 
     schema_version: int = RESULT_SCHEMA_VERSION
+    row_type: str | None = None
     run_id: str = ""
     ts: str = ""
     git_sha: str = ""
@@ -231,6 +232,8 @@ class TaskResult:
             "usage": usage_row(self.usage) if isinstance(self.usage, Usage) else self.usage,
             "usage_total": self.usage_total,
         }
+        if self.row_type is not None:
+            row["row_type"] = self.row_type
         if self.result_tokens_skipped_reason is not None:
             row["result_tokens_skipped_reason"] = self.result_tokens_skipped_reason
         return row
@@ -300,6 +303,7 @@ class TaskResult:
         out_of_set_default = sum(1 for call in calls if call.classification == "out_of_set")
         return cls(
             schema_version=int(row.get("schema_version") or 0),
+            row_type=(str(row["row_type"]) if row.get("row_type") is not None else None),
             run_id=str(row.get("run_id") or ""),
             ts=str(row.get("ts") or ""),
             git_sha=str(row.get("git_sha") or ""),
