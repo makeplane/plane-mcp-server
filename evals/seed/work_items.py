@@ -148,7 +148,7 @@ def require_activities(plane: PlaneClient, workspace_slug: str, context: dict[st
     Raises :class:`evals.tasks.TaskSkipped` with reason ``env:no-activity-worker``
     so the harness records a skip, not a task failure.
     """
-    from evals.tasks import TaskSkipped
+    from evals.tasks.skip import TaskSkipped
 
     project_id = context.get("project_id")
     work_item_id = (context.get("items") or {}).get(CHECKOUT_TIMEOUT_TITLE)

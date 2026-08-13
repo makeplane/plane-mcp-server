@@ -14,7 +14,8 @@ from typing import Any
 import pytest
 
 from evals.seed import R1_TITLE, W2_TITLE, W8_TITLE
-from evals.tasks import (
+from evals.tasks.cross import verify_c2
+from evals.tasks.debias import (
     I1_TITLE,
     I3_TITLE,
     I4_TITLE,
@@ -24,7 +25,6 @@ from evals.tasks import (
     L4_PROP_DISPLAY,
     L4_PROP_VALUE,
     L5_TITLE,
-    verify_c2,
     verify_i1,
     verify_i2,
     verify_i3,
@@ -35,11 +35,9 @@ from evals.tasks import (
     verify_l3,
     verify_l4,
     verify_l5,
-    verify_r1,
-    verify_w2,
-    verify_w4,
-    verify_w8,
 )
+from evals.tasks.read import verify_r1
+from evals.tasks.write import verify_w2, verify_w4, verify_w8
 
 
 class _Page:
@@ -632,7 +630,7 @@ def test_l5_wrong_contract_count_fails():
 
 def test_reports_contract_int_unit():
     """Direct unit cases for the contract helper."""
-    from evals.tasks import reports_contract_int
+    from evals.tasks.answers import reports_contract_int
 
     assert reports_contract_int("count: 3", 3) is True
     assert reports_contract_int("count: 2", 3) is False
@@ -647,7 +645,7 @@ def test_reports_contract_int_unit():
 
 
 def test_exact_line_contract_helpers_unit():
-    from evals.tasks import contract_values, reports_contract_value, reports_contract_values
+    from evals.tasks.answers import contract_values, reports_contract_value, reports_contract_values
 
     text = "prose mentions state Done\nSTATE: In Progress\nitem: B\nitem: A"
     assert contract_values(text, "state") == ["In Progress"]
@@ -739,7 +737,7 @@ class _R2Plane:
 def test_existing_r2_wrong_count_in_text_fails():
     async def _go():
         # verify_r2 counts open urgent via SDK; text must match that count.
-        from evals.tasks import verify_r2 as _vr2
+        from evals.tasks.read import verify_r2 as _vr2
 
         class Plane:
             def __init__(self):
@@ -889,7 +887,8 @@ def test_existing_c2_exact_release_and_shipped_contract_passes():
 
 
 def test_prompt_bind_strict_empty_raises():
-    from evals.tasks import TASKS_BY_ID, PromptBindError, format_task_prompt
+    from evals.tasks.catalog import TASKS_BY_ID
+    from evals.tasks.prompts import PromptBindError, format_task_prompt
 
     t = TASKS_BY_ID["I1"]
     with pytest.raises(PromptBindError):
@@ -897,7 +896,7 @@ def test_prompt_bind_strict_empty_raises():
 
 
 def test_prompt_bind_strict_exception_raises():
-    from evals.tasks import PromptBindError, format_task_prompt
+    from evals.tasks.prompts import PromptBindError, format_task_prompt
 
     def boom(_ctx):
         raise RuntimeError("seed broken")
@@ -912,7 +911,8 @@ def test_prompt_bind_strict_exception_raises():
 
 
 def test_prompt_bind_dry_run_markers():
-    from evals.tasks import TASKS_BY_ID, format_task_prompt
+    from evals.tasks.catalog import TASKS_BY_ID
+    from evals.tasks.prompts import format_task_prompt
 
     t = TASKS_BY_ID["I1"]
     text = format_task_prompt(t, {"project_name": "EVAL x"}, strict=False)
@@ -921,7 +921,8 @@ def test_prompt_bind_dry_run_markers():
 
 
 def test_prompt_bind_strict_success():
-    from evals.tasks import TASKS_BY_ID, format_task_prompt
+    from evals.tasks.catalog import TASKS_BY_ID
+    from evals.tasks.prompts import format_task_prompt
 
     t = TASKS_BY_ID["I1"]
     text = format_task_prompt(
@@ -1057,7 +1058,7 @@ def test_l2_activity_gate_raises_when_empty():
     from types import SimpleNamespace
 
     from evals.seed import R5_TITLE, _gate_activity_worker
-    from evals.tasks import TaskSkipped
+    from evals.tasks.skip import TaskSkipped
 
     class Plane:
         work_items = SimpleNamespace(activities=SimpleNamespace(list=lambda **kw: SimpleNamespace(results=[])))

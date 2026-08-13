@@ -7,7 +7,8 @@ import uuid
 from typing import Any
 
 from evals.seed import make_plane_client, seed, teardown
-from evals.tasks import TaskSkipped, battery_fingerprint
+from evals.tasks.catalog import battery_fingerprint
+from evals.tasks.skip import TaskSkipped
 
 
 async def run_canary(

@@ -15,13 +15,9 @@ from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api import MODEL_TIERS
 from evals.results import TaskResult, agent_run_to_task_result
 from evals.seed import make_plane_client, seed, teardown
-from evals.tasks import (
-    PromptBindError,
-    TaskSkipped,
-    battery_fingerprint,
-    format_task_prompt,
-    task_author,
-)
+from evals.tasks.catalog import battery_fingerprint, task_author
+from evals.tasks.prompts import PromptBindError, format_task_prompt
+from evals.tasks.skip import TaskSkipped
 
 from .meta import make_run_meta_row, maybe_write_run_meta, read_git_revision
 from .resume import load_resume_skip_keys

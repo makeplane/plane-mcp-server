@@ -200,8 +200,12 @@ evals/
     meta.py              run metadata and repository provenance
     canary.py            empty-agent verifier canary
   tasks/
-    __init__.py          ordered catalog assembly and public task API
-    common.py            prompt binding, matchers, and shared API lookups
+    __init__.py          public task API re-exports
+    catalog.py           ordered catalog assembly and fingerprinting
+    prompts.py           task prompt binding
+    answers.py           answer-contract matching
+    lookups.py           Plane reads used to establish verifier truth
+    skip.py              task skip signal
     read.py              R1-R7 tasks and verifiers
     write.py             W1-W10 tasks and verifiers
     schema.py            S1-S5 tasks and verifiers

@@ -10,7 +10,7 @@ from evals import seed as seed_mod
 from evals import tasks as tasks_mod
 from evals.cli import cmd_dry_run, cmd_list, parse_args
 from evals.seed import seed_plan
-from evals.tasks import TASKS, TASKS_BY_ID, get_tasks
+from evals.tasks.catalog import TASKS, TASKS_BY_ID, get_tasks
 
 # DESIGN.md catalog ids (stable) + extras added for uncovered tool families.
 DESIGN_IDS = {
@@ -126,7 +126,7 @@ def test_task_schema_invariants():
 
 
 def test_debias_tasks_author():
-    from evals.tasks import task_author
+    from evals.tasks.catalog import task_author
 
     for tid in ID_IN_HAND_IDS | LONG_TAIL_IDS:
         t = TASKS_BY_ID[tid]

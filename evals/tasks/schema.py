@@ -8,7 +8,8 @@ from plane.errors.errors import HttpError
 from plane.models.enums import PropertyType
 
 from evals.seed import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE, W8_TITLE
-from evals.tasks.common import TaskSkipped, as_id, find_item_by_name, is_not_found
+from evals.tasks.lookups import as_id, find_item_by_name, is_not_found
+from evals.tasks.skip import TaskSkipped
 
 
 async def verify_s1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:

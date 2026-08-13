@@ -28,7 +28,8 @@ from evals.runner import (
 )
 from evals.runner import live as runner_live
 from evals.seed import create_project_with_identifier_retry, is_identifier_collision
-from evals.tasks import TaskSkipped, battery_fingerprint, task_author
+from evals.tasks.catalog import battery_fingerprint, task_author
+from evals.tasks.skip import TaskSkipped
 
 # Pinned hash of the fixed synthetic catalog in test_battery_fingerprint_stable_and_sensitive.
 # Recompute only if the serialization format of battery_fingerprint changes deliberately.
@@ -696,7 +697,7 @@ def test_battery_fingerprint_stable_and_sensitive():
 
 
 def test_battery_fingerprint_catalog_is_nonempty():
-    from evals.tasks import TASKS
+    from evals.tasks.catalog import TASKS
 
     fp = battery_fingerprint()
     assert len(fp) == 12
@@ -705,7 +706,7 @@ def test_battery_fingerprint_catalog_is_nonempty():
 
 def test_battery_fingerprint_changes_with_new_debias_tasks():
     """Adding I/L content must change the catalog fingerprint (content hash)."""
-    from evals.tasks import TASKS, TASKS_BY_ID
+    from evals.tasks.catalog import TASKS, TASKS_BY_ID
 
     full = battery_fingerprint()
     without_debias = [t for t in TASKS if not str(t.get("id", "")).startswith(("I", "L"))]

@@ -171,8 +171,9 @@ verifiers:
 - `cross.py`: C1-C2
 - `debias.py`: I1-I5 and L1-L5
 
-Shared prompt, matcher, and API lookup machinery lives in `common.py`. `tasks/__init__.py`
-assembles the class lists in the pinned catalog order and re-exports the public task API.
+Prompt binding, answer matching, Plane lookups, and the skip signal live in `prompts.py`,
+`answers.py`, `lookups.py`, and `skip.py`. `catalog.py` assembles the class lists in the
+pinned catalog order, while `tasks/__init__.py` re-exports the public task API.
 A task is a dict:
 
 ```python
@@ -197,7 +198,7 @@ variants (e.g. `cycles_open_past`) don't leak between tasks.
 
 Verifiers are `async def verify_x(plane, ctx, run) -> (ok: bool, note: str)`. Keep a new task
 and its verifier in the same class module, add it to that module's exported task list, and
-preserve the assembly order in `tasks/__init__.py`.
+preserve the assembly order in `tasks/catalog.py`.
 
 Mutation verifiers must read the resulting state through the Plane API. Read verifiers must
 derive the expected facts from the API or seed context and match an explicit answer contract

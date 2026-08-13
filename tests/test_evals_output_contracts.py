@@ -7,7 +7,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from evals.seed import CYCLE_CURRENT, R1_TITLE, R5_COMMENT_PHRASES
-from evals.tasks import verify_c2, verify_r2, verify_r4, verify_r5, verify_r6, verify_r7
+from evals.tasks.cross import verify_c2
+from evals.tasks.read import verify_r2, verify_r4, verify_r5, verify_r6, verify_r7
 
 
 class _Page:

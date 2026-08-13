@@ -5,16 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from evals.seed import CYCLE_CURRENT, R1_TITLE, R5_COMMENT_PHRASES, R5_TITLE
-from evals.tasks.common import (
+from evals.tasks.answers import (
     contract_values,
-    count_open_urgent,
-    find_item_by_name,
     get_final_text,
     reports_contract_int,
     reports_contract_value,
     reports_contract_values,
-    state_name,
 )
+from evals.tasks.lookups import count_open_urgent, find_item_by_name, state_name
 
 
 async def verify_r1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:

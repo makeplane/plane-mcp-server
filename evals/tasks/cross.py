@@ -12,15 +12,13 @@ from evals.seed import (
     RELEASE_CHANGELOG_TEXT,
     RELEASE_NAME,
 )
-from evals.tasks.common import (
-    as_id,
+from evals.tasks.answers import (
     contract_values,
-    find_item_by_name,
     get_final_text,
-    ids,
     reports_contract_value,
     reports_contract_values,
 )
+from evals.tasks.lookups import as_id, find_item_by_name, ids
 
 
 async def verify_c1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:

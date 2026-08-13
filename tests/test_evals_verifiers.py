@@ -26,18 +26,10 @@ from evals.seed import (
     W7_URL,
     W8_TITLE,
 )
-from evals.tasks import (
-    verify_c1,
-    verify_r3,
-    verify_s3,
-    verify_s5,
-    verify_w3,
-    verify_w4,
-    verify_w5,
-    verify_w6,
-    verify_w7,
-    verify_w8,
-)
+from evals.tasks.cross import verify_c1
+from evals.tasks.read import verify_r3
+from evals.tasks.schema import verify_s3, verify_s5
+from evals.tasks.write import verify_w3, verify_w4, verify_w5, verify_w6, verify_w7, verify_w8
 
 # ---------------------------------------------------------------------------
 # Tiny helpers

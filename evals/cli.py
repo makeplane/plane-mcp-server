@@ -20,7 +20,8 @@ from evals.drivers.api import (
 )
 from evals.runner import run_canary, run_live
 from evals.seed import seed_plan
-from evals.tasks import TASKS, format_task_prompt, get_tasks
+from evals.tasks.catalog import TASKS, get_tasks
+from evals.tasks.prompts import format_task_prompt
 
 API_MODEL_TIERS: dict[str, dict[str, str]] = {
     provider: aliases for provider in KNOWN_API_PROVIDERS if (aliases := backend_model_aliases(provider))

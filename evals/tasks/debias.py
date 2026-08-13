@@ -17,15 +17,14 @@ from evals.seed import (
     W3_TITLE,
     W8_TITLE,
 )
-from evals.tasks.common import (
+from evals.tasks.answers import (
     contract_values,
     get_final_text,
-    ids,
     reports_contract_int,
     reports_contract_value,
     reports_contract_values,
-    state_name,
 )
+from evals.tasks.lookups import ids, state_name
 
 I1_TITLE = R1_TITLE
 

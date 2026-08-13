@@ -19,14 +19,14 @@ from evals.seed import (
     W7_URL,
     W8_TITLE,
 )
-from evals.tasks.common import (
+from evals.tasks.answers import word_boundary
+from evals.tasks.lookups import (
     find_item_by_name,
     find_items_by_name,
     ids,
     is_not_found,
     state_group,
     state_name,
-    word_boundary,
 )
 
 
