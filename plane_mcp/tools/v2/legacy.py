@@ -1,12 +1,18 @@
 """Keep every pre-consolidation tool name callable without advertising it.
 
-`list_tools` is untouched, so the catalogue stays at 28. `get_tool` resolves a
-legacy name to its resource tool with the action pre-bound and hidden, so a
-caller with `create_label` hardcoded in a script or prompt keeps working.
+Before consolidation this server exposed one tool per API operation. Those names
+still resolve: `list_tools` is untouched, so the catalogue stays at 28, and
+`get_tool` maps a retired name to its resource tool with the action pre-bound and
+hidden. A script or saved prompt calling `create_label` keeps working, and costs
+nothing in the listing because it is never advertised.
 
-Removed together with the v1 surface in the next major release. Each resolution
-is logged, because "nobody still calls these" should be an observation rather
-than an assumption when that removal is scheduled.
+A retired name also keeps the parameter *spelling* it shipped with. This surface
+renamed `work_item_*` parameters to `workitem_*`, and a caller reaching a tool by
+its old name has no reason to have followed that: resolving the name but
+rejecting `work_item_id` would be a rename dressed up as compatibility.
+
+Each resolution is logged, so when removing these is scheduled, "nobody still
+calls them" is an observation rather than an assumption.
 """
 
 from __future__ import annotations
@@ -19,14 +25,10 @@ from fastmcp.utilities.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _legacy_parameter_names(parent: Tool) -> dict[str, ArgTransform]:
-    """Rename `workitem_*` parameters back to the `work_item_*` v1 spelling."""
+def _retired_parameter_names(parent: Tool) -> dict[str, ArgTransform]:
+    """Rename `workitem_*` parameters back to the `work_item_*` spelling they shipped with."""
     properties = (parent.parameters or {}).get("properties", {})
-    return {
-        name: ArgTransform(name=name.replace("workitem", "work_item"))
-        for name in properties
-        if "workitem" in name
-    }
+    return {name: ArgTransform(name=name.replace("workitem", "work_item")) for name in properties if "workitem" in name}
 
 
 class LegacyNames(Transform):
@@ -39,8 +41,8 @@ class LegacyNames(Transform):
             return await call_next(name, version=version)
 
         tool_name, action = target
-        # Grep-able on purpose: the set of names appearing here over a release is
-        # the list of callers that a v1 removal would break.
+        # Grep-able on purpose: the names appearing here over a release are the
+        # callers that removing these aliases would break.
         logger.info("Plane MCP: retired tool name %r resolved to %r %r", name, tool_name, action)
         parent = await call_next(tool_name, version=version)
         if parent is None:
@@ -50,6 +52,6 @@ class LegacyNames(Transform):
             name=name,
             transform_args={
                 "action": ArgTransform(hide=True, default=action),
-                **_legacy_parameter_names(parent),
+                **_retired_parameter_names(parent),
             },
         )

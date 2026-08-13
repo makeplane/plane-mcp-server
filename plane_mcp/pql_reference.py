@@ -346,27 +346,15 @@ cf["<bool-prop-uuid>"] = true
 
 
 # ---------------------------------------------------------------------------
-# Surface-aware rendering
+# Tool references
 # ---------------------------------------------------------------------------
-# The reference tells the model how to turn a name into a UUID, which means it
-# has to name the tool that does the lookup -- and those names differ between
-# the flat surface and the consolidated one. Rendering per surface keeps the
-# instructions callable instead of pointing at tools that are not advertised.
+# The reference tells a model how to turn a name into a UUID, so it has to name
+# the tool that does the lookup. Those names are substituted rather than written
+# inline, and `test_references.py` follows every one of them -- a reference to a
+# tool that no longer exists sends the model nowhere.
 # ---------------------------------------------------------------------------
 
-V1_RESOLVERS = {
-    "projects": "`list_projects`",
-    "members": "`get_workspace_members`",
-    "states": "`list_states`",
-    "labels": "`list_labels`",
-    "types": "`list_work_item_types`",
-    "cycles": "`list_cycles`",
-    "modules": "`list_modules`",
-    "milestones": "`list_milestones`",
-    "properties": "`list_work_item_properties`",
-}
-
-V2_RESOLVERS = {
+RESOLVERS = {
     "projects": "`project list`",
     "members": "`member list_workspace`",
     "states": "`state list`",
@@ -385,8 +373,5 @@ def render(template: str, resolvers: dict[str, str]) -> str:
     return template
 
 
-PQL_FIELD_HINT = render(_FIELD_HINT_TEMPLATE, V2_RESOLVERS)
-PQL_FULL_REFERENCE = render(_FULL_REFERENCE_TEMPLATE, V2_RESOLVERS)
-
-PQL_FIELD_HINT_V1 = render(_FIELD_HINT_TEMPLATE, V1_RESOLVERS)
-PQL_FULL_REFERENCE_V1 = render(_FULL_REFERENCE_TEMPLATE, V1_RESOLVERS)
+PQL_FIELD_HINT = render(_FIELD_HINT_TEMPLATE, RESOLVERS)
+PQL_FULL_REFERENCE = render(_FULL_REFERENCE_TEMPLATE, RESOLVERS)

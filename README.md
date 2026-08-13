@@ -123,32 +123,18 @@ workitem(action="count", pql='assignees__id = "<member id>"', group_by="state_id
 
 Call `get_pql_reference` for the full syntax, operators and worked examples.
 
-### Tool surface version
+### Upgrading from the per-operation tools
 
-`PLANE_MCP_TOOLS_VERSION` selects which catalogue the server advertises.
+Earlier releases exposed one tool per API operation. **Existing integrations keep
+working**: 169 of those 177 names still resolve to the consolidated tool, so a
+saved prompt or script calling `create_work_item` or `list_cycles` needs no
+change. They are no longer advertised, and they keep the parameter names they
+shipped with (`work_item_id`, not `workitem_id`).
 
-| Value | Surface | Status |
-|---|---|---|
-| unset or `v2` | 28 consolidated tools | Default |
-| `v1` | 177 flat tools, one per operation | Deprecated |
-
-```bash
-export PLANE_MCP_TOOLS_VERSION=v1   # opt in to the flat surface
-```
-
-`v1` is kept for one major release to ease migration and logs a warning on
-start-up. It is documented in
-**[`plane_mcp/tools/v1/README.md`](plane_mcp/tools/v1/README.md)**.
-
-Most integrations need no change to move between them. Of the 177 flat tool
-names, 169 are still accepted on the default surface — no longer advertised, but
-calling `create_work_item` or `list_cycles` resolves to the consolidated tool.
-`get_pql_reference` keeps its name on both. The remaining seven chose between two
-operations with a parameter (`manage_project_archive(archive=False)`), which an
-alias cannot reproduce; calling one names its replacement.
-
-This setting versions **this server's tool surface** and is unrelated to Plane's
-API versions.
+Seven names chose between two operations with a parameter
+(`manage_project_archive(archive=False)`), which one tool-and-action pair cannot
+reproduce; calling one tells you its replacement. `get_pql_reference` is
+unchanged.
 
 ## Configuration
 
@@ -170,6 +156,7 @@ Self-hosting the server itself:
 | `PLANE_INTERNAL_BASE_URL` | Internal URL for server-to-server calls, preferred over `PLANE_BASE_URL` |
 | `REDIS_HOST` / `REDIS_PORT` | OAuth token storage; falls back to in-memory |
 | `PLANE_OAUTH_PROVIDER_*` | OAuth client credentials and base URL |
+| `MCP_PATH_PREFIX` | Path prefix for the HTTP routes, when mounted behind a proxy — `/plane` serves `/plane/http/mcp` |
 
 ### OAuth redirect URIs
 
@@ -220,7 +207,7 @@ ruff format plane_mcp/ tests/       # line length 120
 ruff check plane_mcp/ tests/        # rules E, F, I, UP, B
 ```
 
-The default surface has a full offline suite — every action of every resource is
+The suite runs fully offline — every action of every resource is
 executed against a stand-in that binds each call against the genuine `plane-sdk`
 signature. See [`plane_mcp/tools/v2/README.md`](plane_mcp/tools/v2/README.md#tests).
 
@@ -242,14 +229,14 @@ They write real data to that workspace.
 | `plane_mcp/server.py` | one factory per transport |
 | `plane_mcp/client.py` | resolves credentials into a `plane-sdk` client |
 | `plane_mcp/auth/` | OAuth provider and header auth |
-| `plane_mcp/tools/` | the two tool surfaces, selected by `PLANE_MCP_TOOLS_VERSION` |
-| `plane_mcp/toolkit/` | shared building blocks for tool surfaces |
+| `plane_mcp/tools/` | the tool surface: one module per Plane resource |
+| `plane_mcp/toolkit/` | shared building blocks for the tool surface |
 | `plane_mcp/pql_reference.py` | PQL syntax reference served to models |
 
 ## Contributing
 
 Pull requests welcome. Please run `pytest` and `ruff check` before submitting; new
-tools on the default surface should come with the invariants described in
+tools should come with the invariants described in
 [`plane_mcp/tools/v2/README.md`](plane_mcp/tools/v2/README.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

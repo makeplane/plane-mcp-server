@@ -66,7 +66,7 @@ def _named_parameters(error: str) -> set[str]:
 
 
 def test_a_retired_tool_name_is_logged_when_resolved():
-    """Scheduling the v1 removal needs evidence about who still calls these.
+    """Scheduling the removal of these aliases needs evidence about who still calls them.
 
     A handler is attached to the logger directly rather than using `caplog`:
     FastMCP installs its own Rich handler and stops propagation, so records never

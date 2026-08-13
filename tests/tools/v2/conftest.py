@@ -11,10 +11,10 @@ from fastmcp import FastMCP
 os.environ.setdefault("PLANE_API_KEY", "test")
 os.environ.setdefault("PLANE_WORKSPACE_SLUG", "test")
 
-from plane_mcp.tools.v1 import register_tools as register_v1  # noqa: E402
 from plane_mcp.tools.v2 import register_tools as register_v2  # noqa: E402
 from plane_mcp.tools.v2.registry import RESOURCES, alias_table, unmapped_table  # noqa: E402
 
+from ._retired_names import RETIRED_TOOL_NAMES  # noqa: E402
 from ._spyclient import SpyClient  # noqa: E402
 
 
@@ -36,7 +36,7 @@ def resource_modules():
 
 @pytest.fixture(scope="session")
 def registered():
-    """Every v2 tool as registered, keyed by name."""
+    """Every tool as registered, keyed by name."""
     mcp = FastMCP("conformance")
     register_v2(mcp, legacy_names=False)
     return {tool.name: tool for tool in _run(mcp.list_tools())}
@@ -59,10 +59,9 @@ def unmapped():
 
 
 @pytest.fixture(scope="session")
-def legacy_tool_names():
-    mcp = FastMCP("legacy")
-    register_v1(mcp)
-    return {tool.name for tool in _run(mcp.list_tools())}
+def retired_tool_names():
+    """The names this server exposed before consolidation. A frozen record."""
+    return RETIRED_TOOL_NAMES
 
 
 @pytest.fixture

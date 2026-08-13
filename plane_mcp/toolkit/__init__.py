@@ -6,8 +6,8 @@ module-discovery loop used to tell helpers apart from resources. That made the
 package's most widely used API (`spec`, imported by all 28 resource modules)
 look private, and made the naming of an ordinary helper file load-bearing.
 
-Nothing here knows which catalogue is calling it. `tools/v2/` is scheduled to be
-renamed when v1 is dropped, and helpers should not have to move again when it is.
+Nothing here knows which catalogue is calling it, so a resource package can be
+renamed without these having to move with it.
 
 The four modules split by *when* they act:
 

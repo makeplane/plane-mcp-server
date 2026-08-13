@@ -93,13 +93,13 @@ def test_a_retired_name_accepts_the_retired_parameter_spelling(registered_with_a
     assert not wrong, "a retired tool name changed its parameter names:\n  " + "\n  ".join(wrong)
 
 
-def test_the_legacy_aliases_keep_the_v1_spelling(aliases):
-    """The other direction: a v1 name is history and must not be modernised.
+def test_the_aliases_keep_the_retired_spelling(aliases):
+    """The other direction: a retired name is history and must not be modernised.
 
-    76 of the v1 tools have `work_item` in the name. Renaming a key here would
-    silently drop a caller rather than resolve them.
+    74 of the aliased names contain `work_item`. Renaming a key here would
+    silently drop the caller it exists to serve rather than resolve them.
     """
     assert len(aliases) == 169
-    v1_spelled = [name for name in aliases if "work_item" in name]
-    assert len(v1_spelled) == 74, f"expected 74 aliased v1 work_item names, got {len(v1_spelled)}"
-    assert not [name for name in aliases if "workitem" in name], "a v1 alias key was renamed"
+    retired_spelling = [name for name in aliases if "work_item" in name]
+    assert len(retired_spelling) == 74, f"expected 74 aliased work_item names, got {len(retired_spelling)}"
+    assert not [name for name in aliases if "workitem" in name], "an alias key was renamed"

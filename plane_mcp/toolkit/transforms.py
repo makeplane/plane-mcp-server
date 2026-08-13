@@ -1,7 +1,7 @@
 """Surface-agnostic FastMCP listing transforms.
 
 A transform here must be safe to apply to any catalogue. Anything that encodes a
-specific catalogue's history -- the v1 name aliases, for instance -- belongs with
+specific catalogue's history -- the retired name aliases, for instance -- belongs with
 that catalogue, not here.
 
 `StripOutputSchemas` drops `outputSchema` from the advertised listing: two thirds

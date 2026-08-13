@@ -18,7 +18,7 @@ from plane_mcp.toolkit.spec import action_names
 LISTING_BUDGET_CHARS = 70_000
 MAX_ADVERTISED_TOOLS = 35  # strictest published client cap is 40 -- leave headroom
 NAME_BUDGET = 46  # 64-char provider limit, less room for a client prefix
-UNMAPPED_BUDGET = 7  # legacy tools that cannot be aliased; see the test for the shape
+UNMAPPED_BUDGET = 7  # retired tools that cannot be aliased; see the test for the shape
 
 # "resolve" is deliberately absent: workitem_type.resolve creates the type when
 # it does not exist, so the name reads like a lookup but the action is not one.
@@ -223,26 +223,26 @@ def test_no_alias_collisions(aliases):
     assert len(targets) == len(set(targets))
 
 
-def test_alias_table_covers_every_legacy_tool(aliases, unmapped, legacy_tool_names, registered):
-    """Completion gate: fails until every legacy tool is accounted for.
+def test_alias_table_covers_every_retired_tool(aliases, unmapped, retired_tool_names, registered):
+    """Completion gate: every name this server once exposed is still accounted for.
 
-    A legacy name the new surface still exposes verbatim needs no alias, and one
+    A retired name the surface still exposes verbatim needs no alias, and one
     declared in LEGACY_UNMAPPED is a deliberate, reasoned break.
     """
-    uncovered = sorted(legacy_tool_names - set(aliases) - set(registered) - set(unmapped))
-    assert not uncovered, f"{len(uncovered)} legacy tools are unaccounted for: {uncovered}"
+    uncovered = sorted(retired_tool_names - set(aliases) - set(registered) - set(unmapped))
+    assert not uncovered, f"{len(uncovered)} retired tools are unaccounted for: {uncovered}"
 
 
-def test_unmapped_declarations_name_real_legacy_tools(unmapped, legacy_tool_names):
+def test_unmapped_declarations_name_real_retired_tools(unmapped, retired_tool_names):
     """A typo here would silently excuse a tool that still needs an alias."""
-    unknown = sorted(set(unmapped) - legacy_tool_names)
-    assert not unknown, f"declared unmapped but not a v1 tool: {unknown}"
+    unknown = sorted(set(unmapped) - retired_tool_names)
+    assert not unknown, f"declared unmapped but never a tool on this server: {unknown}"
 
 
 def test_unmapped_stays_small(unmapped):
     """Every entry is a break for someone. Ratchet, not a dumping ground.
 
-    All current entries are one shape: a v1 tool that chose between two
+    All current entries are one shape: a retired tool that chose between two
     operations with a boolean or a Literal parameter. Neither survives a rename,
     because the alias fixes `action` to a single value.
     """

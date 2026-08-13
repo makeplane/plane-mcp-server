@@ -3,10 +3,8 @@
 Drives a running server over streamable HTTP and writes real data: a project,
 work items, an epic and a milestone, then deletes all of it.
 
-Targets a server on the **default tool surface**. Tools are called by their
-pre-consolidation names, which the default surface still resolves, so this also
-covers that compatibility path. One call is surface-specific: `add_ids` takes a
-comma-separated string on the default surface and a list on `v1`.
+Tools are called by their pre-consolidation names, which still resolve, so this
+also covers that compatibility path.
 
 Environment variables:
     PLANE_TEST_API_KEY:        API key for authentication (required)

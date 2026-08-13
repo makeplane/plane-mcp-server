@@ -2,8 +2,8 @@
 
 Descriptions are instructions the model follows literally. A reference to a tool
 that was renamed away sends it to call something that is not there, and the
-failure reads as the model's fault rather than ours. These names moved wholesale
-in the v1 -> v2 consolidation, so the risk is concrete, not theoretical.
+failure reads as the model's fault rather than ours. Every name on this surface
+moved during consolidation, so the risk is concrete, not theoretical.
 
 The convention, enforced here: write a cross-reference in backticks, as
 `` `tool action` `` or `` `tool` ``. Plain prose is never parsed as a reference,
@@ -50,8 +50,8 @@ def test_backticked_references_resolve(registered, resource_modules):
     assert not broken, "descriptions name actions that do not exist:\n  " + "\n  ".join(broken)
 
 
-def test_no_description_references_a_retired_tool_name(registered, legacy_tool_names, resource_modules):
-    """A v1 name in an instruction is a dead pointer once it stops being advertised."""
+def test_no_description_references_a_retired_tool_name(registered, retired_tool_names, resource_modules):
+    """A retired name in an instruction is a dead pointer: it resolves, but is not listed."""
     tools = set(registered)
     own_actions = {mod.NAME: set(action_names(mod.ACTIONS)) for mod in resource_modules}
 
@@ -71,12 +71,12 @@ def test_no_description_references_a_retired_tool_name(registered, legacy_tool_n
     actions = own_actions
     dead = []
     for name, tool in registered.items():
-        # An action name of this very tool is not a stale reference to a v1 tool
-        # that happened to share the name.
+        # An action name of this very tool is not a stale reference to a retired
+        # tool that happened to share the name.
         legal = tools | own_actions.get(name, set())
         for where, text in _texts(tool):
             for token in re.findall(r"\b[a-z][a-z0-9_]{4,}\b", strip_valid_references(text)):
-                if token in legacy_tool_names and token not in legal:
+                if token in retired_tool_names and token not in legal:
                     dead.append(f"{name} :: {where} -> {token!r}")
     assert not dead, "descriptions point at tool names that are no longer advertised:\n  " + "\n  ".join(
         sorted(set(dead))
@@ -109,54 +109,32 @@ def test_the_server_instructions_name_live_tools(registered, resource_modules):
 
     They carry a numbered procedure, so a name that is merely *callable* is not
     enough -- a model told to use a tool it cannot see in its own listing has to
-    guess. A single hardcoded string named the v1 tools on both surfaces, and the
-    aliases hid it by keeping the calls working.
+    guess.
     """
-    from plane_mcp.instructions import V2_TOOLS, instructions_for
+    from plane_mcp.instructions import SERVER_INSTRUCTIONS
 
     actions = {mod.NAME: set(action_names(mod.ACTIONS)) for mod in resource_modules}
     broken = [
-        f"{key} -> {problem}"
-        for key, reference in V2_TOOLS.items()
-        if (problem := _resolves(reference, registered, actions))
+        f"`{span}` -> {problem}"
+        for span in BACKTICKED.findall(SERVER_INSTRUCTIONS)
+        if REFERENCE.match(span.strip()) and (problem := _resolves(span, registered, actions))
     ]
     assert not broken, "the server instructions point at tools that do not exist:\n  " + "\n  ".join(broken)
-
-    rendered = instructions_for("v2")
-    assert "{" not in rendered, "a placeholder was left unsubstituted"
-
-
-def test_the_v1_instructions_name_v1_tools(legacy_tool_names):
-    """The other half of the split, which the v2 check cannot see.
-
-    Both tables hold the same keys, so an edit to one is easy to apply to both by
-    accident -- and nothing else in the suite reads the v1 spellings.
-    """
-    from plane_mcp.instructions import V1_TOOLS, V2_TOOLS, instructions_for
-
-    assert set(V1_TOOLS) == set(V2_TOOLS), "the two tables must fill the same placeholders"
-
-    wrong = [
-        f"{key} -> {reference}" for key, reference in V1_TOOLS.items() if reference.strip("`") not in legacy_tool_names
-    ]
-    assert not wrong, "the v1 instructions name tools the flat surface does not have:\n  " + "\n  ".join(wrong)
-
-    assert "{" not in instructions_for("v1")
 
 
 def test_the_pql_reference_resolvers_name_live_tools(registered, resource_modules):
     """The PQL reference tells a model which tool resolves a name to an id.
 
     It reaches the model as tool *output* rather than as a description, so the
-    checks above never saw it -- and the v2 table went on naming `work_item_type
+    checks above never saw it -- and the table went on naming `work_item_type
     list` after that tool became `workitem_type`. Every pointer is followed here.
     """
-    from plane_mcp.pql_reference import V2_RESOLVERS
+    from plane_mcp.pql_reference import RESOLVERS
 
     actions = {mod.NAME: set(action_names(mod.ACTIONS)) for mod in resource_modules}
     broken = [
         f"{key} -> {problem}"
-        for key, reference in V2_RESOLVERS.items()
+        for key, reference in RESOLVERS.items()
         if (problem := _resolves(reference, registered, actions))
     ]
     assert not broken, "the PQL reference points at tools that do not exist:\n  " + "\n  ".join(broken)

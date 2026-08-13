@@ -1,7 +1,7 @@
-# Tool surface `v2`
+# The tool surface
 
-The default surface: **28 tools**, one per Plane resource, each taking an
-`action` parameter that selects the operation. 183 actions in total.
+**28 tools**, one per Plane resource, each taking an `action` parameter that
+selects the operation. 183 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")
@@ -11,9 +11,6 @@ cycle(action="archive", project_id=..., cycle_id=...)
 
 A compact catalogue — 28 tools, ~57k characters — loads fully in every MCP client
 and leaves the context budget to the conversation.
-
-> "v2" is the version of *this server's tool surface*. It is unrelated to Plane's
-> API versions.
 
 ## The shape of a resource module
 
@@ -85,6 +82,13 @@ through the full set.
 `.model_dump()` on it. A dict passed to the second kind raises `AttributeError`
 at call time.
 
+**Declare the type you mean; encoding is handled upstream.** A client that sends
+`'["uuid"]'` for an array parameter is repaired by `CoerceArguments` middleware
+before validation, driven by the schema alone. So type a list parameter as a list
+and a number as a number — there is no need to widen it to `str` to survive a
+client that stringifies. `coerce_list` remains for parameters genuinely declared
+`str`, such as `add_ids`, where a comma is a separator.
+
 **The surface spells it `workitem`; `plane-sdk` spells it `work_item`.** Tool
 names, action names and parameters use `workitem`. SDK namespaces, keyword
 arguments and model names keep `work_item`, as do Plane's PQL field names
@@ -119,10 +123,16 @@ only, so execution keeps the full schema and results — including
 
 ## Retired tool names
 
-169 names from the flat surface still resolve. They are not advertised — they
-cost nothing in the listing — but a saved prompt or script calling
-`create_work_item` keeps working, and each resolution is logged so the set of
-remaining callers is an observation rather than a guess.
+Before consolidation this server exposed 177 tools, one per API operation. 169 of
+those names still resolve. They are not advertised, so they cost nothing in the
+listing, but a saved prompt or script calling `create_work_item` keeps working —
+including the parameter names it shipped with (`work_item_id`, not `workitem_id`).
+Each resolution is logged, so the set of remaining callers is an observation
+rather than a guess.
+
+`tests/tools/v2/_retired_names.py` is the frozen record of all 177, and the
+conformance suite asserts every one is aliased, declared unmappable, or still
+registered under the same name.
 
 An alias renames a tool; it cannot reshape one. Seven names chose between two
 operations with a parameter (`manage_project_archive(archive=False)`,

@@ -101,12 +101,12 @@ def alias_table() -> dict[str, tuple[str, str]]:
 
 
 def unmapped_table() -> dict[str, str]:
-    """Legacy tool name -> why it has no alias.
+    """Retired tool name -> why it has no alias.
 
-    An alias renames a tool; it cannot reshape one. Where a v1 tool encoded its
-    action in a *parameter* (`manage_project_archive(archive=False)`), no single
-    (tool, action) pair reproduces it, so it is declared here instead of being
-    aliased to whichever half looks closest.
+    An alias renames a tool; it cannot reshape one. Where a retired tool encoded
+    its action in a *parameter* (`manage_project_archive(archive=False)`), no
+    single (tool, action) pair reproduces it, so it is declared here instead of
+    being aliased to whichever half looks closest.
     """
     table: dict[str, str] = {}
     for mod in RESOURCES:
