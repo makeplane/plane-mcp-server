@@ -15,14 +15,18 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-from evals.drivers.api.anthropic import AnthropicBackend
-from evals.drivers.api.backend import ModelBackend, ToolResult, ToolSpec
-from evals.drivers.api.openai import OpenAIBackend
+from evals.drivers.api.backend import (
+    KNOWN_API_PROVIDERS,
+    ModelBackend,
+    StopReason,
+    ToolResult,
+    ToolSpec,
+    create_backend,
+)
 from evals.drivers.base import AgentRun
 from evals.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
 
 DEFAULT_MAX_TOKENS = 8192
-KNOWN_API_PROVIDERS = frozenset({"anthropic", "openai"})
 
 BackendFactory = Callable[[str, int], ModelBackend]
 McpSessionFactory = Callable[[StdioServerParameters], Any]
@@ -95,7 +99,7 @@ def tool_result_from_mcp(call_id: str, raw_result: Any) -> ToolResult:
 
 
 class ApiDriver:
-    """Run an owned tool loop against Anthropic or OpenAI and a stdio MCP server."""
+    """Run an owned model/tool loop through a registered API backend."""
 
     name = "api"
 
@@ -126,10 +130,12 @@ class ApiDriver:
     def _make_backend(self, model: str) -> ModelBackend:
         if self.backend_factory is not None:
             return self.backend_factory(model, self.max_tokens)
-        if self.provider == "anthropic":
-            backend = AnthropicBackend(model, max_tokens=self.max_tokens, client=self.client)
-        else:
-            backend = OpenAIBackend(model, max_tokens=self.max_tokens, client=self.client)
+        backend = create_backend(
+            self.provider,
+            model,
+            max_tokens=self.max_tokens,
+            client=self.client,
+        )
         # Delay credential-dependent client creation until the first non-skipped
         # task, then reuse the provider's connection pool across the battery.
         if self.client is None:
@@ -201,11 +207,16 @@ class ApiDriver:
         calls: list[dict[str, Any]] = []
         pending_results: list[tuple[int, str]] = []
         usage_per_iteration: list[dict[str, int]] = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_cache_read_input_tokens = 0
+        total_cache_creation_input_tokens = 0
         result_pair_mismatch = False
         hit_max_iterations = False
         iterations = 0
         final_text = ""
-        stop_reason: str | None = None
+        stop_reason: StopReason | None = None
+        provider_stop_reason: str | None = None
 
         params = self._server_params(mcp_env, cwd)
         async with self._mcp_session(params) as mcp_client:
@@ -224,8 +235,13 @@ class ApiDriver:
                     iterations += 1
                     final_text = turn.text
                     stop_reason = turn.stop_reason
+                    provider_stop_reason = turn.provider_stop_reason
                     if turn.usage is not None:
-                        usage_per_iteration.append(dict(turn.usage))
+                        usage_per_iteration.append(turn.usage.to_legacy_dict())
+                        total_input_tokens += turn.usage.input_tokens
+                        total_output_tokens += turn.usage.output_tokens
+                        total_cache_read_input_tokens += turn.usage.cache_read_input_tokens
+                        total_cache_creation_input_tokens += turn.usage.cache_creation_input_tokens
 
                     call_indices: dict[str, int] = {}
                     for tool_call in turn.tool_calls:
@@ -247,11 +263,11 @@ class ApiDriver:
 
                     # Record the model's calls, but never execute side effects on
                     # a refusal-terminated response.
-                    if stop_reason == "refusal":
+                    if stop_reason is StopReason.REFUSAL:
                         break
 
                     if not turn.tool_calls:
-                        if stop_reason == "pause_turn" and iterations < max_turns:
+                        if stop_reason is StopReason.PAUSE_TURN and iterations < max_turns:
                             continue
                         break
 
@@ -281,9 +297,12 @@ class ApiDriver:
 
                     backend.add_tool_results(tool_results)
                     if iterations >= max_turns:
-                        hit_max_iterations = stop_reason not in ("end_turn", "max_tokens")
+                        hit_max_iterations = stop_reason not in (
+                            StopReason.END_TURN,
+                            StopReason.MAX_TOKENS,
+                        )
                         break
-                    if stop_reason != "tool_use":
+                    if stop_reason is not StopReason.TOOL_USE:
                         break
             finally:
                 wall_time_s = time.perf_counter() - started_at
@@ -313,10 +332,10 @@ class ApiDriver:
             calls[idx]["result_token_count_method"] = TOKEN_ESTIMATE_METHOD if count_estimated else "backend"
 
         usage_total = {
-            "input_tokens": sum(item.get("in", 0) for item in usage_per_iteration),
-            "output_tokens": sum(item.get("out", 0) for item in usage_per_iteration),
-            "cache_read_input_tokens": sum(item.get("cache_read", 0) for item in usage_per_iteration),
-            "cache_creation_input_tokens": sum(item.get("cache_write", 0) for item in usage_per_iteration),
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+            "cache_read_input_tokens": total_cache_read_input_tokens,
+            "cache_creation_input_tokens": total_cache_creation_input_tokens,
             "source": "iterations",
         }
         return AgentRun(
@@ -325,17 +344,18 @@ class ApiDriver:
             usage=usage_per_iteration[-1] if usage_per_iteration else None,
             usage_total=usage_total,
             usage_scope="iteration",
-            stopped_reason=stop_reason or "end_turn",
+            stopped_reason=(stop_reason or StopReason.UNKNOWN).value,
+            provider_stop_reason=provider_stop_reason,
             call_source="api",
             hit_max_turns=hit_max_iterations,
             wall_time_s=round(wall_time_s, 3),
             usage_per_iteration=usage_per_iteration,
-            cum_input_tokens=sum(item.get("in", 0) for item in usage_per_iteration),
+            cum_input_tokens=total_input_tokens,
             result_pair_mismatch=result_pair_mismatch,
             token_count_failures=token_count_failures,
             result_tokens_estimated=result_tokens_estimated,
-            provider=str(getattr(backend, "provider", self.provider)),
-            model=str(getattr(backend, "actual_model", getattr(backend, "model", model))),
+            provider=str(backend.provider),
+            model=str(backend.actual_model),
             requested_model=model,
         )
 

@@ -8,15 +8,24 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from evals.drivers import agent_run_to_harness_dict
 from evals.drivers.api import (
+    KNOWN_API_PROVIDERS,
     AnthropicBackend,
     ApiDriver,
     OpenAIBackend,
+    StopReason,
     ToolCall,
     ToolResult,
     ToolSpec,
     Turn,
+    UnmappedModelTierError,
+    Usage,
+    register_backend,
+    resolve_backend_model,
+    unregister_backend,
 )
 from evals.token_counting import estimate_result_tokens
 
@@ -99,26 +108,81 @@ def run_driver(driver: ApiDriver, *, max_turns: int = 5):
     )
 
 
+def test_registered_third_party_backend_runs_without_driver_changes():
+    created: list[FakeBackend] = []
+
+    class DummyBackend(FakeBackend):
+        provider = "dummy"
+
+        def __init__(self, model: str, *, max_tokens: int, client: Any | None = None) -> None:
+            super().__init__(
+                [
+                    Turn(
+                        text=f"done in {max_tokens}",
+                        tool_calls=[],
+                        usage=Usage(input_tokens=7, output_tokens=2),
+                        stop_reason=StopReason.END_TURN,
+                        provider_stop_reason="dummy_complete",
+                    )
+                ]
+            )
+            self.model = model
+            self.actual_model = f"{model}-actual"
+            self.client = client
+            created.append(self)
+
+    session = FakeMcpSession()
+
+    @asynccontextmanager
+    async def session_factory(_params):
+        yield session
+
+    register_backend("dummy", DummyBackend)
+    try:
+        assert "dummy" in KNOWN_API_PROVIDERS
+        with pytest.raises(UnmappedModelTierError, match=r"standard.*explicit model ID"):
+            resolve_backend_model("dummy", "standard")
+        assert resolve_backend_model("dummy", "dummy-explicit") == "dummy-explicit"
+        driver = ApiDriver(
+            provider="dummy",
+            client=object(),
+            mcp_session_factory=session_factory,
+            max_tokens=99,
+        )
+        run = driver.run_task("do it", {"SAFE": "1"}, "dummy-model", 1)
+    finally:
+        unregister_backend("dummy")
+
+    assert created[0].started is not None
+    assert run.final_text == "done in 99"
+    assert run.provider == "dummy"
+    assert run.model == "dummy-model-actual"
+    assert run.stopped_reason == "end_turn"
+    assert run.provider_stop_reason == "dummy_complete"
+    assert run.usage_per_iteration == [{"in": 7, "out": 2, "cache_read": 0, "cache_write": 0}]
+
+
 def test_api_driver_multi_turn_tool_loop_and_usage_accumulation():
     backend = FakeBackend(
         [
             Turn(
                 text="",
                 tool_calls=[ToolCall("call-1", "lookup", {"q": "one"})],
-                usage={"in": 10, "out": 2, "cache_read": 3, "cache_write": 1},
-                stop_reason="tool_use",
+                usage=Usage(10, 2, 3, 1),
+                stop_reason=StopReason.TOOL_USE,
             ),
             Turn(
                 text="",
                 tool_calls=[ToolCall("call-2", "lookup", {"q": "two"})],
-                usage={"in": 20, "out": 4, "cache_read": 6, "cache_write": 0},
-                stop_reason="tool_use",
+                usage=Usage(20, 4, 6, 0),
+                stop_reason=StopReason.TOOL_USE,
             ),
             Turn(
                 text="done",
                 tool_calls=[],
-                usage={"in": 30, "out": 6, "cache_read": 9, "cache_write": 0},
-                stop_reason="end_turn",
+                usage=Usage(30, 6, 9, 0),
+                stop_reason=StopReason.END_TURN,
+                provider_stop_reason="fake_done",
             ),
         ]
     )
@@ -154,6 +218,7 @@ def test_api_driver_multi_turn_tool_loop_and_usage_accumulation():
     assert run.token_count_failures == 0
     assert run.provider == "fake"
     assert run.model == "fake-actual"
+    assert run.provider_stop_reason == "fake_done"
 
 
 def test_api_driver_refusal_records_calls_but_executes_nothing():
@@ -162,8 +227,8 @@ def test_api_driver_refusal_records_calls_but_executes_nothing():
             Turn(
                 text="declined",
                 tool_calls=[ToolCall("write-1", "write", {"value": "x"})],
-                usage={"in": 1, "out": 1, "cache_read": 0, "cache_write": 0},
-                stop_reason="refusal",
+                usage=Usage(1, 1),
+                stop_reason=StopReason.REFUSAL,
             )
         ]
     )
@@ -185,9 +250,9 @@ def test_api_driver_pairs_results_by_id_not_ordinal():
                 text="",
                 tool_calls=[ToolCall("a", "lookup", {"q": "a"}), ToolCall("b", "lookup", {"q": "b"})],
                 usage=None,
-                stop_reason="tool_use",
+                stop_reason=StopReason.TOOL_USE,
             ),
-            Turn(text="done", tool_calls=[], usage=None, stop_reason="end_turn"),
+            Turn(text="done", tool_calls=[], usage=None, stop_reason=StopReason.END_TURN),
         ]
     )
     # The fake session deliberately returns tagged results in reverse ID order.
@@ -211,9 +276,14 @@ def test_api_driver_flags_result_id_mismatch():
                 text="",
                 tool_calls=[ToolCall("a", "lookup", {"q": "a"}), ToolCall("b", "lookup", {"q": "b"})],
                 usage=None,
-                stop_reason="tool_use",
+                stop_reason=StopReason.TOOL_USE,
             ),
-            Turn(text="done", tool_calls=[], usage=None, stop_reason="end_turn"),
+            Turn(
+                text="done",
+                tool_calls=[],
+                usage=None,
+                stop_reason=StopReason.END_TURN,
+            ),
         ]
     )
     session = FakeMcpSession(
@@ -236,9 +306,14 @@ def test_api_driver_iteration_cap_only_flags_mid_tool_loop():
                 text="",
                 tool_calls=[ToolCall("a", "lookup", {"q": "a"})],
                 usage=None,
-                stop_reason="tool_use",
+                stop_reason=StopReason.TOOL_USE,
             ),
-            Turn(text="must not be read", tool_calls=[], usage=None, stop_reason="end_turn"),
+            Turn(
+                text="must not be read",
+                tool_calls=[],
+                usage=None,
+                stop_reason=StopReason.END_TURN,
+            ),
         ]
     )
     session = FakeMcpSession([ToolResult(call_id="a", text="result")])
@@ -253,7 +328,7 @@ def test_api_driver_iteration_cap_only_flags_mid_tool_loop():
 
 
 def test_api_driver_clean_end_on_last_iteration_is_not_capped():
-    backend = FakeBackend([Turn(text="done", tool_calls=[], usage=None, stop_reason="end_turn")])
+    backend = FakeBackend([Turn(text="done", tool_calls=[], usage=None, stop_reason=StopReason.END_TURN)])
 
     run = run_driver(make_driver(backend, FakeMcpSession()), max_turns=1)
 
@@ -268,9 +343,9 @@ def test_api_driver_uses_optional_backend_token_counter():
                 text="",
                 tool_calls=[ToolCall("a", "lookup", {"q": "a"})],
                 usage=None,
-                stop_reason="tool_use",
+                stop_reason=StopReason.TOOL_USE,
             ),
-            Turn(text="done", tool_calls=[], usage=None, stop_reason="end_turn"),
+            Turn(text="done", tool_calls=[], usage=None, stop_reason=StopReason.END_TURN),
         ]
     )
     backend.count_tokens = lambda text: len(text) + 10
@@ -288,10 +363,16 @@ def test_api_driver_maps_every_legacy_row_field():
             Turn(
                 text="",
                 tool_calls=[ToolCall("a", "lookup", {"q": "a"})],
-                usage={"in": 4, "out": 1, "cache_read": 0, "cache_write": 0},
-                stop_reason="tool_use",
+                usage=Usage(4, 1),
+                stop_reason=StopReason.TOOL_USE,
             ),
-            Turn(text="done", tool_calls=[], usage=None, stop_reason="end_turn"),
+            Turn(
+                text="done",
+                tool_calls=[],
+                usage=None,
+                stop_reason=StopReason.END_TURN,
+                provider_stop_reason="fake_done",
+            ),
         ]
     )
     run = run_driver(make_driver(backend, FakeMcpSession([ToolResult(call_id="a", text="12345")])))
@@ -316,6 +397,7 @@ def test_api_driver_maps_every_legacy_row_field():
         "cum_input_tokens",
         "wall_time_s",
         "stop_reason",
+        "provider_stop_reason",
         "hit_max_iterations",
         "result_pair_mismatch",
         "token_count_failures",
@@ -336,6 +418,7 @@ def test_api_driver_maps_every_legacy_row_field():
     assert row["provider"] == "fake"
     assert row["model"] == "fake-actual"
     assert row["requested_model"] == "fake-requested"
+    assert row["provider_stop_reason"] == "fake_done"
 
 
 class FakeAnthropicMessages:
@@ -346,6 +429,29 @@ class FakeAnthropicMessages:
     def create(self, **kwargs):
         self.requests.append(copy.deepcopy(kwargs))
         return self.responses.popleft()
+
+
+@pytest.mark.parametrize(
+    ("raw_reason", "expected"),
+    [
+        ("end_turn", StopReason.END_TURN),
+        ("tool_use", StopReason.TOOL_USE),
+        ("max_tokens", StopReason.MAX_TOKENS),
+        ("refusal", StopReason.REFUSAL),
+        ("pause_turn", StopReason.PAUSE_TURN),
+        ("model_context_window_exceeded", StopReason.MODEL_CONTEXT_WINDOW_EXCEEDED),
+        ("future_reason", StopReason.UNKNOWN),
+    ],
+)
+def test_anthropic_backend_normalizes_and_preserves_stop_reason(raw_reason, expected):
+    messages = FakeAnthropicMessages([{"model": "claude", "content": [], "usage": None, "stop_reason": raw_reason}])
+    backend = AnthropicBackend("claude", max_tokens=10, client=SimpleNamespace(messages=messages))
+    backend.start(None, "prompt", [])
+
+    turn = backend.next_turn()
+
+    assert turn.stop_reason is expected
+    assert turn.provider_stop_reason == raw_reason
 
 
 def test_anthropic_backend_translates_tools_turns_and_results():
@@ -390,7 +496,9 @@ def test_anthropic_backend_translates_tools_turns_and_results():
         {"name": "lookup", "description": "Look up", "input_schema": {"type": "object", "required": ["q"]}}
     ]
     assert first.tool_calls == [ToolCall("toolu-1", "lookup", {"q": "x"})]
-    assert first.usage == {"in": 10, "out": 2, "cache_read": 3, "cache_write": 4}
+    assert first.usage == Usage(10, 2, 3, 4)
+    assert first.stop_reason is StopReason.TOOL_USE
+    assert first.provider_stop_reason == "tool_use"
     replay = messages.requests[1]["messages"]
     assert replay[1] == {"role": "assistant", "content": responses[0]["content"]}
     assert replay[2] == {
@@ -416,6 +524,44 @@ class FakeOpenAICompletions:
     def create(self, **kwargs):
         self.requests.append(copy.deepcopy(kwargs))
         return self.responses.popleft()
+
+
+@pytest.mark.parametrize(
+    ("raw_reason", "expected"),
+    [
+        ("stop", StopReason.END_TURN),
+        ("tool_calls", StopReason.TOOL_USE),
+        ("length", StopReason.MAX_TOKENS),
+        ("content_filter", StopReason.REFUSAL),
+        ("future_reason", StopReason.UNKNOWN),
+    ],
+)
+def test_openai_backend_normalizes_and_preserves_stop_reason(raw_reason, expected):
+    completions = FakeOpenAICompletions(
+        [
+            {
+                "model": "gpt",
+                "choices": [
+                    {
+                        "finish_reason": raw_reason,
+                        "message": {"content": "done", "tool_calls": []},
+                    }
+                ],
+                "usage": None,
+            }
+        ]
+    )
+    backend = OpenAIBackend(
+        "gpt",
+        max_tokens=10,
+        client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+    )
+    backend.start(None, "prompt", [])
+
+    turn = backend.next_turn()
+
+    assert turn.stop_reason is expected
+    assert turn.provider_stop_reason == raw_reason
 
 
 def test_openai_backend_translates_tools_calls_and_tool_messages():
@@ -476,8 +622,9 @@ def test_openai_backend_translates_tools_calls_and_tool_messages():
         }
     ]
     assert first.tool_calls == [ToolCall("call-1", "lookup", {"q": "x"})]
-    assert first.stop_reason == "tool_use"
-    assert first.usage == {"in": 12, "out": 3, "cache_read": 5, "cache_write": 0}
+    assert first.stop_reason is StopReason.TOOL_USE
+    assert first.provider_stop_reason == "tool_calls"
+    assert first.usage == Usage(12, 3, 5, 0)
     second_messages = completions.requests[1]["messages"]
     assert second_messages[2] == {
         "role": "assistant",
@@ -492,7 +639,8 @@ def test_openai_backend_translates_tools_calls_and_tool_messages():
     }
     assert second_messages[3] == {"role": "tool", "tool_call_id": "call-1", "content": "value"}
     assert second.text == "done"
-    assert second.stop_reason == "end_turn"
+    assert second.stop_reason is StopReason.END_TURN
+    assert second.provider_stop_reason == "stop"
     assert backend.actual_model == "gpt-actual"
 
 
@@ -530,6 +678,7 @@ def test_openai_backend_normalizes_refusal_for_driver_guard():
 
     turn = backend.next_turn()
 
-    assert turn.stop_reason == "refusal"
+    assert turn.stop_reason is StopReason.REFUSAL
+    assert turn.provider_stop_reason == "content_filter"
     assert turn.text == "declined"
     assert turn.tool_calls == [ToolCall("danger", "write", {})]

@@ -12,10 +12,11 @@ from typing import Any
 
 from evals import runner
 from evals.cli import (
-    API_MODEL_ALIASES,
-    CLI_MODEL_ALIASES,
+    API_MODEL_TIERS,
+    CLI_DRIVER_PROVIDERS,
+    CLI_MODEL_TIERS,
     DEFAULT_OUT_DIR,
-    MODEL_ALIASES,
+    MODEL_TIERS,
     cmd_dry_run,
     cmd_list,
     main,
@@ -53,15 +54,20 @@ async def run_live(
     resume: bool = False,
     record_result_payloads: bool = False,
 ) -> int:
-    """Delegate the legacy API while preserving its model-alias behavior."""
-    model_id = resolve_model_for_driver(driver_name, model_alias, provider=provider)
+    """Delegate the legacy API while resolving provider-neutral model tiers."""
+    driver_key = (driver_name or "api").strip().lower()
+    model_id = resolve_model_for_driver(
+        driver_key,
+        model_alias,
+        provider=provider if driver_key in ("api", "sdk") else None,
+    )
     return await runner.run_live(
         tasks,
         model_alias=model_alias,
         reps=reps,
         surface=surface,
         out_path=out_path,
-        driver_name=driver_name,
+        driver_name=driver_key,
         provider=provider,
         server_cmd=server_cmd,
         server_env=server_env,
@@ -72,13 +78,14 @@ async def run_live(
 
 
 __all__ = [
-    "API_MODEL_ALIASES",
-    "CLI_MODEL_ALIASES",
+    "API_MODEL_TIERS",
+    "CLI_DRIVER_PROVIDERS",
+    "CLI_MODEL_TIERS",
     "DEFAULT_OUT_DIR",
     "KNOWN_SURFACES",
     "MAX_ITERATIONS",
     "MAX_TOKENS",
-    "MODEL_ALIASES",
+    "MODEL_TIERS",
     "classify_call",
     "cmd_dry_run",
     "cmd_list",

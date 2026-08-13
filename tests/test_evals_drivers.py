@@ -861,6 +861,7 @@ def test_parse_args_accepts_driver():
     assert a.driver == "claude-cli"
     b = parse_args(["--dry-run"])
     assert b.driver == "api"
+    assert b.model == "standard"
     assert b.provider == "anthropic"
     assert b.record_result_payloads is False
     c = parse_args(["--driver", "claude-cli", "--record-result-payloads", "--dry-run"])

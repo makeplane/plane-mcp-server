@@ -56,6 +56,9 @@ class AgentRun:
     provider: str | None = None
     model: str | None = None
     requested_model: str | None = None
+    # Raw provider finish/stop value. API drivers keep this beside the
+    # harness-owned normalized ``stopped_reason`` for diagnostics.
+    provider_stop_reason: str | None = None
 
 
 class AgentDriver(Protocol):
@@ -312,6 +315,7 @@ def agent_run_to_harness_dict(
         "cum_input_tokens_reason": cum_reason,
         "wall_time_s": run.wall_time_s,
         "stop_reason": stop_reason,
+        "provider_stop_reason": run.provider_stop_reason,
         "hit_max_iterations": hit_max,
         "result_pair_mismatch": run.result_pair_mismatch,
         "token_count_failures": run.token_count_failures + local_token_count_failures,

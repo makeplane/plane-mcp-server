@@ -39,6 +39,7 @@ from evals.proxy import (
     write_all_fd,
 )
 from evals.proxy import main as proxy_main
+from evals.run import main as eval_main
 from evals.run import resolve_model_for_driver
 from evals.token_counting import estimate_result_tokens
 
@@ -1041,15 +1042,68 @@ def test_use_proxy_false_call_source_not_proxy(tmp_path: Path):
         assert run.call_source != "proxy"
 
 
-def test_resolve_model_for_driver_qualification():
-    assert resolve_model_for_driver("claude-cli", "sonnet") == "sonnet"
-    assert resolve_model_for_driver("opencode-cli", "sonnet").startswith("anthropic/")
-    assert resolve_model_for_driver("antigravity-cli", "haiku").startswith("gemini")
-    # Free-form passthrough
+def test_model_tiers_resolve_per_driver_and_provider():
+    assert resolve_model_for_driver("api", "standard", provider="anthropic") == "claude-sonnet-5"
+    assert resolve_model_for_driver("api", "fast", provider="anthropic") == "claude-haiku-4-5"
+    assert resolve_model_for_driver("api", "standard", provider="openai") == "gpt-5.6-sol"
+    assert resolve_model_for_driver("api", "fast", provider="openai") == "gpt-5.6-luna"
+    assert resolve_model_for_driver("sdk", "standard", provider="openai") == "gpt-5.6-sol"
+    assert resolve_model_for_driver("claude-cli", "standard") == "sonnet"
+    assert resolve_model_for_driver("claude-cli", "fast") == "haiku"
+    assert resolve_model_for_driver("codex-cli", "standard") == "gpt-5.6-sol"
+    assert resolve_model_for_driver("codex-cli", "fast") == "gpt-5.6-luna"
+    assert resolve_model_for_driver("antigravity-cli", "standard") == "gemini-3.6-flash-high"
+    assert resolve_model_for_driver("antigravity-cli", "fast") == "gemini-3.6-flash-low"
+
+
+@pytest.mark.parametrize(
+    ("driver", "model"),
+    [
+        ("api", "claude-opus-5"),
+        ("api", "sonnet"),
+        ("claude-cli", "sonnet"),
+        ("codex-cli", "sonnet"),
+        ("antigravity-cli", "gemini-3.1-pro-high"),
+        ("opencode-cli", "haiku"),
+    ],
+)
+def test_non_tier_model_strings_pass_through_unchanged(driver, model):
+    assert resolve_model_for_driver(driver, model) == model
+
+
+def test_unmapped_opencode_tier_fails_with_explicit_model_guidance():
+    with pytest.raises(ValueError, match=r"opencode models"):
+        resolve_model_for_driver("opencode-cli", "standard")
+
+
+def test_unmapped_tier_cli_error_is_loud_and_prevents_run(tmp_path: Path, capsys):
+    out = tmp_path / "must-not-exist.jsonl"
+
+    rc = eval_main(
+        [
+            "--driver",
+            "opencode-cli",
+            "--model",
+            "standard",
+            "--tasks",
+            "R1",
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert rc == 2
+    assert "explicit provider/model ID" in capsys.readouterr().err
+    assert out.exists() is False
+
+
+def test_tier_mapping_is_scoped_to_cli_provider():
+    with pytest.raises(ValueError, match=r"codex-cli.*anthropic.*explicit model ID"):
+        resolve_model_for_driver("codex-cli", "standard", provider="anthropic")
+
+
+def test_qualified_model_id_passes_through_unchanged():
     assert resolve_model_for_driver("opencode-cli", "openai/gpt-4o") == "openai/gpt-4o"
-    assert resolve_model_for_driver("sdk", "sonnet") == "claude-sonnet-5"
-    assert resolve_model_for_driver("api", "haiku") == "claude-haiku-4-5"
-    assert resolve_model_for_driver("api", "sonnet", provider="openai") == "gpt-5"
 
 
 def test_ensure_proxy_pythonpath_injects_repo():

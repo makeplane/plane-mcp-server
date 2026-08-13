@@ -161,8 +161,8 @@ Several loop rules are deliberately centralized in `ApiDriver`:
   work remains, not merely because a valid final response used the last iteration.
 - `wall_time_s` covers the model/tool loop after `list_tools`; server startup, teardown, and
   post-loop token counting are outside it.
-- The row records both the requested model and the provider-reported model that actually ran
-  when the provider returns one.
+- The row records the requested model token, requested tier (when present), resolved model ID,
+  and the provider-reported model that actually ran when the provider returns one.
 
 ## Task and run lifecycle
 
@@ -185,7 +185,7 @@ applicable, and explicit `--server-env` additions; unrelated parent environment 
 are not inherited.
 
 The first line of a new result file is a meta row containing the run identity, surface,
-battery, requested model, driver, provider, and Git SHA. Resume checks those identities,
+battery, requested model/tier, resolved model, driver, provider, and Git SHA. Resume checks those identities,
 skips completed task/repetition keys, and reruns rows that contain recorded errors. Result
 rows preserve the common fields consumed by `evals.report` and existing JSONL readers.
 
@@ -193,7 +193,7 @@ rows preserve the common fields consumed by `evals.report` and existing JSONL re
 
 ```text
 evals/
-  cli.py                 argparse, command dispatch, and model-alias resolution
+  cli.py                 argparse, command dispatch, and model-tier resolution
   runner.py              live lifecycle, row assembly, resume/meta handling, and canary
   run.py                 compatibility entry point for python -m evals.run
   tasks/

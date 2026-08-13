@@ -147,6 +147,31 @@ def test_load_resume_skip_keys_battery_model_driver_mismatch(tmp_path: Path):
     assert ("R1", 0) in skip
 
 
+def test_resume_identity_uses_resolved_model_not_tier_label(tmp_path: Path):
+    p = tmp_path / "tiered.jsonl"
+    p.write_text(
+        json.dumps(
+            {
+                "task_id": "R1",
+                "rep": 0,
+                "surface": "v2",
+                "model": "provider-reported-id",
+                "requested_model": "standard",
+                "requested_tier": "standard",
+                "resolved_model": "old-standard-id",
+                "error": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    skip, _, _ = load_resume_skip_keys(p, surface="v2", model="old-standard-id")
+    assert skip == {("R1", 0)}
+    with pytest.raises(SystemExit, match="model"):
+        load_resume_skip_keys(p, surface="v2", model="new-standard-id")
+
+
 def test_load_resume_skip_keys_truncated_json(tmp_path: Path, capsys):
     p = tmp_path / "out.jsonl"
     p.write_text(
@@ -206,7 +231,7 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
     rc = asyncio.run(
         run_live(
             [task],
-            model_alias="sonnet",
+            model_alias="standard",
             reps=1,
             surface="full",
             out_path=out,
@@ -222,6 +247,13 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
     assert "HttpError" in (row["error"] or "")
     assert "identifier" in (row["error"] or "").lower()
     assert row["battery"]  # fingerprint written
+    assert row["requested_model"] == "standard"
+    assert row["requested_tier"] == "standard"
+    assert row["resolved_model"] == "sonnet"
+    assert row["model"] == "sonnet"
+    meta = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+    assert meta["requested_tier"] == "standard"
+    assert meta["resolved_model"] == "sonnet"
 
 
 def test_run_live_driver_exception_is_infra_cli(tmp_path: Path, monkeypatch):

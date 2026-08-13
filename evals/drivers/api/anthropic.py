@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from evals.drivers.api.backend import ToolCall, ToolResult, ToolSpec, Turn
+from evals.drivers.api.backend import (
+    StopReason,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+    Turn,
+    Usage,
+    register_backend,
+)
 
 
 def _field(value: Any, name: str, default: Any = None) -> Any:
@@ -13,15 +21,28 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
     return getattr(value, name, default)
 
 
-def _usage_dict(usage: Any) -> dict[str, int] | None:
+def _normalize_usage(usage: Any) -> Usage | None:
     if usage is None:
         return None
-    return {
-        "in": int(_field(usage, "input_tokens", 0) or 0),
-        "out": int(_field(usage, "output_tokens", 0) or 0),
-        "cache_read": int(_field(usage, "cache_read_input_tokens", 0) or 0),
-        "cache_write": int(_field(usage, "cache_creation_input_tokens", 0) or 0),
-    }
+    return Usage(
+        input_tokens=int(_field(usage, "input_tokens", 0) or 0),
+        output_tokens=int(_field(usage, "output_tokens", 0) or 0),
+        cache_read_input_tokens=int(_field(usage, "cache_read_input_tokens", 0) or 0),
+        cache_creation_input_tokens=int(_field(usage, "cache_creation_input_tokens", 0) or 0),
+    )
+
+
+def _normalize_stop_reason(value: Any) -> tuple[StopReason, str | None]:
+    raw = str(value) if value is not None else None
+    reason = {
+        "end_turn": StopReason.END_TURN,
+        "tool_use": StopReason.TOOL_USE,
+        "max_tokens": StopReason.MAX_TOKENS,
+        "refusal": StopReason.REFUSAL,
+        "pause_turn": StopReason.PAUSE_TURN,
+        "model_context_window_exceeded": StopReason.MODEL_CONTEXT_WINDOW_EXCEEDED,
+    }.get(raw, StopReason.UNKNOWN)
+    return reason, raw
 
 
 class AnthropicBackend:
@@ -100,11 +121,13 @@ class AnthropicBackend:
         response_model = _field(message, "model")
         if response_model:
             self.actual_model = str(response_model)
+        stop_reason, provider_stop_reason = _normalize_stop_reason(_field(message, "stop_reason"))
         return Turn(
             text="\n".join(text_parts),
             tool_calls=calls,
-            usage=_usage_dict(_field(message, "usage")),
-            stop_reason=_field(message, "stop_reason"),
+            usage=_normalize_usage(_field(message, "usage")),
+            stop_reason=stop_reason,
+            provider_stop_reason=provider_stop_reason,
         )
 
     def add_tool_results(self, results: list[ToolResult]) -> None:
@@ -122,6 +145,16 @@ class AnthropicBackend:
                 ],
             }
         )
+
+
+register_backend(
+    AnthropicBackend.provider,
+    AnthropicBackend,
+    model_aliases={
+        "standard": "claude-sonnet-5",
+        "fast": "claude-haiku-4-5",
+    },
+)
 
 
 __all__ = ["AnthropicBackend"]

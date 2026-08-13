@@ -15,51 +15,78 @@ from pathlib import Path
 from typing import Any
 
 from evals.drivers import KNOWN_DRIVERS
+from evals.drivers.api import (
+    KNOWN_API_PROVIDERS,
+    MODEL_TIERS,
+    UnmappedModelTierError,
+    backend_model_aliases,
+    resolve_backend_model,
+)
 from evals.runner import KNOWN_SURFACES, run_canary, run_live
 from evals.seed import seed_plan
 from evals.tasks import TASKS, format_task_prompt, get_tasks
 
-MODEL_ALIASES: dict[str, str] = {
-    "sonnet": "claude-sonnet-5",
-    "haiku": "claude-haiku-4-5",
+API_MODEL_TIERS: dict[str, dict[str, str]] = {
+    provider: aliases for provider in KNOWN_API_PROVIDERS if (aliases := backend_model_aliases(provider))
 }
-API_MODEL_ALIASES: dict[str, dict[str, str]] = {
-    "anthropic": MODEL_ALIASES,
-    # Preserve the harness's representative/fast intent when the user switches
-    # providers without also overriding the historical sonnet/haiku aliases.
-    "openai": {"sonnet": "gpt-5", "haiku": "gpt-5-mini"},
+# CLI drivers have an implicit provider selected by their own authentication
+# and configuration. Keep the provider dimension explicit so a tier never
+# crosses vendor boundaries by accident.
+CLI_DRIVER_PROVIDERS: dict[str, str | None] = {
+    "claude-cli": "anthropic",
+    "codex-cli": "openai",
+    "antigravity-cli": "google",
+    # OpenCode is multi-provider and location-configured. Its installed catalog
+    # is the only reliable source, so the harness does not guess a default.
+    "opencode-cli": None,
 }
-# Per-driver resolution of the short harness aliases (sonnet/haiku).
-# Drivers that need provider/model form get qualified defaults; unknown
-# strings (e.g. ``anthropic/claude-…``) pass through unchanged.
-CLI_MODEL_ALIASES: dict[str, dict[str, str]] = {
-    "claude-cli": {"sonnet": "sonnet", "haiku": "haiku"},
-    "codex-cli": {"sonnet": "sonnet", "haiku": "haiku"},
+CLI_MODEL_TIERS: dict[str, dict[str, dict[str, str]]] = {
+    "claude-cli": {
+        "anthropic": {"standard": "sonnet", "fast": "haiku"},
+    },
+    "codex-cli": {
+        "openai": backend_model_aliases("openai"),
+    },
     "antigravity-cli": {
-        "sonnet": "gemini-3.6-flash-high",
-        "haiku": "gemini-3.6-flash-low",
+        "google": {
+            "standard": "gemini-3.6-flash-high",
+            "fast": "gemini-3.6-flash-low",
+        },
     },
-    "opencode-cli": {
-        "sonnet": "anthropic/claude-sonnet-4-20250514",
-        "haiku": "anthropic/claude-haiku-4-5-20251001",
-    },
+    "opencode-cli": {},
 }
 
 DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "results"
 
 
-def resolve_model_for_driver(driver_name: str, model: str, *, provider: str = "anthropic") -> str:
-    """Map a harness model token to the string the given driver expects.
+def resolve_model_for_driver(driver_name: str, model: str, *, provider: str | None = None) -> str:
+    """Resolve a harness tier for a driver/provider, or pass a model ID through.
 
-    Known short aliases (sonnet/haiku) are looked up per-driver. Any other
-    string (including already-qualified ``provider/model``) is passed through.
+    Only ``standard`` and ``fast`` are tier names. Any other string, including
+    vendor aliases and qualified provider/model IDs, is passed through exactly.
     """
     key = (driver_name or "api").strip().lower()
     if key in ("api", "sdk"):
-        table = API_MODEL_ALIASES.get(provider.strip().lower()) or {}
-        return table.get(model, model)
-    table = CLI_MODEL_ALIASES.get(key) or {}
-    return table.get(model, model)
+        return resolve_backend_model(provider or "anthropic", model)
+    if model not in MODEL_TIERS:
+        return model
+    if key not in CLI_DRIVER_PROVIDERS:
+        raise ValueError(f"unknown driver {driver_name!r}; expected one of {sorted(KNOWN_DRIVERS)}")
+    provider_id = provider.strip().lower() if provider else CLI_DRIVER_PROVIDERS[key]
+    if provider_id is None:
+        raise UnmappedModelTierError(
+            f"model tier {model!r} is not mapped for driver {key!r}; OpenCode models depend on "
+            "the providers configured for this project. Pass an explicit provider/model ID with "
+            "--model, using one listed by 'opencode models'"
+        )
+    table = CLI_MODEL_TIERS.get(key, {}).get(provider_id, {})
+    try:
+        return table[model]
+    except KeyError as exc:
+        raise UnmappedModelTierError(
+            f"model tier {model!r} is not mapped for driver {key!r} and provider {provider_id!r}; "
+            "pass an explicit model ID with --model"
+        ) from exc
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -70,10 +97,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--model",
         type=str,
-        default="sonnet",
+        default="standard",
         help=(
-            "Model alias (sonnet/haiku) or a free-form provider/model id. "
-            "Short aliases are remapped per --driver (opencode/antigravity get qualified names)."
+            "Harness tier (standard/fast) or a free-form model ID. "
+            "Tiers resolve per driver and provider; all other strings pass through unchanged."
         ),
     )
     p.add_argument("--reps", type=int, default=1, help="Repetitions per task")
@@ -118,7 +145,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--provider",
         type=str,
         default="anthropic",
-        choices=("anthropic", "openai"),
+        choices=sorted(KNOWN_API_PROVIDERS),
         help="Model API provider for --driver api/sdk (default: anthropic).",
     )
     p.add_argument(
@@ -248,7 +275,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         out = DEFAULT_OUT_DIR / f"{uuid.uuid4().hex}.jsonl"
 
-    model_id = resolve_model_for_driver(driver_name, args.model, provider=args.provider)
+    try:
+        model_id = resolve_model_for_driver(
+            driver_name,
+            args.model,
+            provider=args.provider if driver_name in ("api", "sdk") else None,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     return asyncio.run(
         run_live(
             tasks,
@@ -268,10 +303,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
-    "API_MODEL_ALIASES",
-    "CLI_MODEL_ALIASES",
+    "API_MODEL_TIERS",
+    "CLI_DRIVER_PROVIDERS",
+    "CLI_MODEL_TIERS",
     "DEFAULT_OUT_DIR",
-    "MODEL_ALIASES",
+    "MODEL_TIERS",
     "cmd_dry_run",
     "cmd_list",
     "main",

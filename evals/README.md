@@ -43,7 +43,7 @@ agent's final text.
 
 ```bash
 # Provider-neutral API loop (default provider: Anthropic)
-.venv/bin/python -m evals.run --driver api --provider anthropic --model sonnet \
+.venv/bin/python -m evals.run --driver api --provider anthropic --model standard \
   --surface full --out results/api.jsonl
 
 # Everything, one surface (free-form model IDs pass through to the CLI)
@@ -80,12 +80,36 @@ intentionally do not use this catalog's tool-choice classification.
 
 | Driver | Backend | Notes |
 |---|---|---|
-| `api` | Owned API + MCP loop | Provider-neutral; `--provider anthropic` (default) or `openai` |
+| `api` | Owned API + MCP loop | Provider-neutral; tiers resolve for `--provider anthropic` (default) or `openai` |
 | `sdk` | Alias for `api` | Retained for old commands/result pipelines |
-| `codex-cli` | OpenAI Codex CLI | **Pass a real model id.** The harness forwards `sonnet` / `haiku` unchanged and Codex rejects them, so the short aliases fail on this driver |
-| `claude-cli` | Claude Code CLI | `--model sonnet` / `haiku` |
-| `antigravity-cli` | Antigravity CLI (`agy`) | Runs under a synthetic HOME so its MCP config is ours, not yours |
-| `opencode-cli` | opencode | Temp project config per run |
+| `codex-cli` | OpenAI Codex CLI | `standard` and `fast` resolve to verified GPT-5.6 IDs |
+| `claude-cli` | Claude Code CLI | `standard` resolves to `sonnet`; `fast` resolves to `haiku` |
+| `antigravity-cli` | Antigravity CLI (`agy`) | Verified against `agy models`; runs under a synthetic HOME so its MCP config is ours, not yours |
+| `opencode-cli` | OpenCode | Tiers are intentionally unmapped; pass an explicit ID listed by `opencode models` |
+
+### Model tiers
+
+The harness has exactly two provider-neutral tiers: `standard`, the workhorse used for the
+battery, and `fast`, the lower-cost option. Resolution is scoped to both driver and provider:
+
+| Driver | Provider | `standard` | `fast` |
+|---|---|---|---|
+| `api` / `sdk` | Anthropic | `claude-sonnet-5` | `claude-haiku-4-5` |
+| `api` / `sdk` | OpenAI | `gpt-5.6-sol` | `gpt-5.6-luna` |
+| `claude-cli` | Anthropic | `sonnet` | `haiku` |
+| `codex-cli` | OpenAI | `gpt-5.6-sol` | `gpt-5.6-luna` |
+| `antigravity-cli` | Google | `gemini-3.6-flash-high` | `gemini-3.6-flash-low` |
+| `opencode-cli` | Project-configured | **unmapped** | **unmapped** |
+
+Only `standard` and `fast` are harness vocabulary. Every other `--model` value passes through
+unchanged, including vendor aliases such as `sonnet` / `haiku` and full IDs such as
+`claude-opus-5`, `gpt-5.6-sol`, or `openai/gpt-5.6-sol`. An unmapped tier fails before the run
+and tells you to pass an explicit model ID; the harness never guesses one.
+
+Result and meta rows keep `requested_model`, `requested_tier`, and `resolved_model` separately.
+The compatibility field `model` remains the provider-reported model when available, otherwise
+the resolved ID. This makes old readers continue to work while preserving which tier produced
+the row even after its mapping changes.
 
 Every CLI driver records the actual JSON-RPC traffic through a recording proxy, so tool
 calls are normally counted from the wire rather than from whatever the agent claims it did.

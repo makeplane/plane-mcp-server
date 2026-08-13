@@ -17,6 +17,7 @@ from evals.drivers import (
     agent_run_to_harness_dict,
     get_driver,
 )
+from evals.drivers.api import MODEL_TIERS
 from evals.seed import make_plane_client, seed, teardown
 from evals.tasks import (
     PromptBindError,
@@ -210,10 +211,13 @@ def load_resume_skip_keys(
                 msg = _resume_field_mismatch(row, field=field, expected=expected)
                 if msg:
                     raise SystemExit(msg)
-            # New API rows keep both the requested ID (resume identity) and the
-            # provider-reported model that actually ran. Older rows only have model.
+            # New tier-aware rows identify the resolved model explicitly. Older
+            # API rows use requested_model for the resolved ID, while oldest rows
+            # only have model (which may be provider-reported).
             model_row = dict(row)
-            if model_row.get("requested_model"):
+            if model_row.get("resolved_model"):
+                model_row["model"] = model_row["resolved_model"]
+            elif model_row.get("requested_model"):
                 model_row["model"] = model_row["requested_model"]
             msg = _resume_field_mismatch(model_row, field="model", expected=model)
             if msg:
@@ -245,6 +249,9 @@ def make_run_meta_row(
     driver: str,
     git_sha: str,
     provider: str | None = None,
+    requested_model: str | None = None,
+    requested_tier: str | None = None,
+    resolved_model: str | None = None,
     ts: str | None = None,
 ) -> dict[str, Any]:
     """Build the single first-line meta record for a new output JSONL."""
@@ -254,6 +261,9 @@ def make_run_meta_row(
         "surface": surface,
         "battery": battery,
         "model": model,
+        "requested_model": requested_model if requested_model is not None else model,
+        "requested_tier": requested_tier,
+        "resolved_model": resolved_model if resolved_model is not None else model,
         "driver": driver,
         "provider": provider,
         "git_sha": git_sha,
@@ -318,6 +328,8 @@ def _base_row(
     driver_name: str,
     provider: str | None,
     model_id: str | None,
+    model_request: str | None,
+    requested_tier: str | None,
     task: dict[str, Any],
     rep: int,
     battery: str,
@@ -333,7 +345,9 @@ def _base_row(
         "provider": provider,
         "classification": classification,
         "model": model_id,
-        "requested_model": model_id,
+        "requested_model": model_request,
+        "requested_tier": requested_tier,
+        "resolved_model": model_id,
         "task_id": task["id"],
         "author": task_author(task),
         "rep": rep,
@@ -344,6 +358,7 @@ def _base_row(
         "error_class": None,
         "final_text": "",
         "stop_reason": None,
+        "provider_stop_reason": None,
         "hit_max_iterations": False,
         "result_pair_mismatch": False,
         "token_count_failures": 0,
@@ -396,6 +411,7 @@ async def run_live(
     is_api_driver = driver_name in ("api", "sdk")
     provider_id = provider if is_api_driver else None
     model_id = resolved_model_id if resolved_model_id is not None else model_alias
+    requested_tier = model_alias if model_alias in MODEL_TIERS else None
 
     run_id = uuid.uuid4().hex
     git_sha = _git_sha()
@@ -424,6 +440,9 @@ async def run_live(
         surface=surface,
         battery=battery,
         model=model_id,
+        requested_model=model_alias,
+        requested_tier=requested_tier,
+        resolved_model=model_id,
         driver=driver_name,
         provider=provider_id,
         git_sha=git_sha,
@@ -447,7 +466,8 @@ async def run_live(
     driver = get_driver(driver_name, **driver_kwargs)
 
     print(
-        f"run_id={run_id} battery={battery} driver={driver_name} provider={provider_id} model={model_id} "
+        f"run_id={run_id} battery={battery} driver={driver_name} provider={provider_id} "
+        f"requested_model={model_alias} resolved_model={model_id} "
         f"surface={surface} tasks={[t['id'] for t in tasks]} reps={reps}"
     )
     print(f"writing {out_path}")
@@ -479,6 +499,8 @@ async def run_live(
                         driver_name=driver_name,
                         provider=provider_id,
                         model_id=model_id,
+                        model_request=model_alias,
+                        requested_tier=requested_tier,
                         task=task,
                         rep=rep,
                         battery=battery,
@@ -566,6 +588,11 @@ async def run_live(
 
                                     if agent is not None:
                                         row.update(agent)
+                                        # Driver-level requested_model is the resolved ID.
+                                        # Restore run-level intent and retain both identities.
+                                        row["requested_model"] = model_alias
+                                        row["requested_tier"] = requested_tier
+                                        row["resolved_model"] = model_id
                                         if external:
                                             # Empty overlay sets would classify every call
                                             # out-of-set; null the counters instead.

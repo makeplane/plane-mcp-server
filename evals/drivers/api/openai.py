@@ -5,7 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from evals.drivers.api.backend import ToolCall, ToolResult, ToolSpec, Turn
+from evals.drivers.api.backend import (
+    StopReason,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+    Turn,
+    Usage,
+    register_backend,
+)
 
 
 def _field(value: Any, name: str, default: Any = None) -> Any:
@@ -14,27 +22,29 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
     return getattr(value, name, default)
 
 
-def _usage_dict(usage: Any) -> dict[str, int] | None:
+def _normalize_usage(usage: Any) -> Usage | None:
     if usage is None:
         return None
     prompt_details = _field(usage, "prompt_tokens_details")
-    return {
-        "in": int(_field(usage, "prompt_tokens", 0) or 0),
-        "out": int(_field(usage, "completion_tokens", 0) or 0),
-        "cache_read": int(_field(prompt_details, "cached_tokens", 0) or 0),
-        "cache_write": 0,
-    }
+    return Usage(
+        input_tokens=int(_field(usage, "prompt_tokens", 0) or 0),
+        output_tokens=int(_field(usage, "completion_tokens", 0) or 0),
+        cache_read_input_tokens=int(_field(prompt_details, "cached_tokens", 0) or 0),
+    )
 
 
-def _normalize_stop_reason(finish_reason: str | None, refusal: Any) -> str | None:
+def _normalize_stop_reason(finish_reason: Any, refusal: Any) -> tuple[StopReason, str | None]:
+    raw = str(finish_reason) if finish_reason is not None else None
     if refusal or finish_reason == "content_filter":
-        return "refusal"
-    return {
-        "stop": "end_turn",
-        "length": "max_tokens",
-        "tool_calls": "tool_use",
-        "function_call": "tool_use",
-    }.get(str(finish_reason), finish_reason)
+        return StopReason.REFUSAL, raw
+    reason = {
+        "stop": StopReason.END_TURN,
+        "length": StopReason.MAX_TOKENS,
+        "tool_calls": StopReason.TOOL_USE,
+        # Retain support for the predecessor of ``tool_calls``.
+        "function_call": StopReason.TOOL_USE,
+    }.get(raw, StopReason.UNKNOWN)
+    return reason, raw
 
 
 class OpenAIBackend:
@@ -138,11 +148,13 @@ class OpenAIBackend:
         response_model = _field(completion, "model")
         if response_model:
             self.actual_model = str(response_model)
+        stop_reason, provider_stop_reason = _normalize_stop_reason(_field(choice, "finish_reason"), refusal)
         return Turn(
             text=str(content or refusal or ""),
             tool_calls=calls,
-            usage=_usage_dict(_field(completion, "usage")),
-            stop_reason=_normalize_stop_reason(_field(choice, "finish_reason"), refusal),
+            usage=_normalize_usage(_field(completion, "usage")),
+            stop_reason=stop_reason,
+            provider_stop_reason=provider_stop_reason,
         )
 
     def add_tool_results(self, results: list[ToolResult]) -> None:
@@ -154,6 +166,16 @@ class OpenAIBackend:
             }
             for result in results
         )
+
+
+register_backend(
+    OpenAIBackend.provider,
+    OpenAIBackend,
+    model_aliases={
+        "standard": "gpt-5.6-sol",
+        "fast": "gpt-5.6-luna",
+    },
+)
 
 
 __all__ = ["OpenAIBackend"]
