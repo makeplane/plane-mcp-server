@@ -15,8 +15,8 @@ import inspect
 
 import pytest
 
-from plane_mcp.tools.v2.registry import RESOURCES
-from tests.tools.v2.test_dispatch import CONDITIONAL, NEEDS_FIXTURE, _value
+from plane_mcp.tools.registry import RESOURCES
+from tests.tools.test_dispatch import CONDITIONAL, NEEDS_FIXTURE, _value
 
 NEXT = "CURSOR-NEXT"
 

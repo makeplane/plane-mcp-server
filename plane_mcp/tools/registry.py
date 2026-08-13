@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from types import ModuleType
 
-from plane_mcp.tools.v2 import (
+from plane_mcp.tools import (
     customer,
     customer_property,
     customer_request,

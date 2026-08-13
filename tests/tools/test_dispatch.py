@@ -59,7 +59,7 @@ NO_CALL_EXPECTED: set[tuple[str, str]] = {
 }
 
 # Actions that need populated remote state or an outbound HTTP fetch to get past
-# their own preconditions. Covered by tests/tools/v2/test_attachments.py.
+# their own preconditions. Covered by tests/tools/test_attachments.py.
 NEEDS_FIXTURE: set[tuple[str, str]] = {
     ("workitem_attachment", "read"),
     ("workitem_attachment", "download_url"),
@@ -102,7 +102,7 @@ def _cases(mods):
 
 def pytest_generate_tests(metafunc):
     if {"mod", "action"} <= set(metafunc.fixturenames):
-        from plane_mcp.tools.v2.registry import RESOURCES
+        from plane_mcp.tools.registry import RESOURCES
 
         metafunc.parametrize(("mod", "action"), list(_cases(RESOURCES)))
 

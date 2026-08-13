@@ -1,6 +1,6 @@
 """Shared building blocks for Plane MCP tool surfaces.
 
-These were previously underscore-prefixed modules inside `tools/v2/`, where the
+These were previously underscore-prefixed modules inside `tools/`, where the
 leading underscore was not a privacy marker at all -- it was the filter the
 module-discovery loop used to tell helpers apart from resources. That made the
 package's most widely used API (`spec`, imported by all 28 resource modules)

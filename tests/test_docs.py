@@ -25,8 +25,8 @@ BACKTICKED = re.compile(r"`([a-z_]+)`")
 @pytest.fixture(scope="module")
 def surface():
     """The catalogue and its registered tool names."""
-    from plane_mcp.tools.v2 import register_tools
-    from plane_mcp.tools.v2.registry import RESOURCES
+    from plane_mcp.tools import register_tools
+    from plane_mcp.tools.registry import RESOURCES
 
     mcp = FastMCP("docs")
     register_tools(mcp, legacy_names=False)
@@ -38,7 +38,7 @@ def test_the_surface_readme_lists_every_tool_and_action(surface):
     from plane_mcp.toolkit.spec import action_names
 
     resources, registered = surface
-    text = (ROOT / "plane_mcp/tools/v2/README.md").read_text()
+    text = (ROOT / "plane_mcp/tools/README.md").read_text()
     rows = dict(re.findall(r"^\| `([a-z_]+)` \| (.+?) \|$", text, re.M))
 
     assert not sorted(registered - set(rows)), "a tool is missing from the README table"
@@ -81,7 +81,7 @@ def test_the_documented_env_vars_exist():
 def test_no_document_offers_a_tool_surface_choice():
     """There is one surface. A stale mention of the removed selector would misconfigure a user."""
     stale = []
-    for name in ("README.md", "CLAUDE.md", "plane_mcp/tools/v2/README.md"):
+    for name in ("README.md", "CLAUDE.md", "plane_mcp/tools/README.md"):
         text = (ROOT / name).read_text()
         if "PLANE_MCP_TOOLS_VERSION" in text:
             stale.append(f"{name} still documents PLANE_MCP_TOOLS_VERSION")

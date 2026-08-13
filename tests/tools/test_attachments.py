@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 from fastmcp.utilities.types import Image
 
-from plane_mcp.tools.v2 import workitem_attachment as module
+from plane_mcp.tools import workitem_attachment as module
 
 PROJECT = "project-1"
 WORK_ITEM = "work-item-1"

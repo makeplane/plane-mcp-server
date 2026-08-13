@@ -130,7 +130,7 @@ including the parameter names it shipped with (`work_item_id`, not `workitem_id`
 Each resolution is logged, so the set of remaining callers is an observation
 rather than a guess.
 
-`tests/tools/v2/_retired_names.py` is the frozen record of all 177, and the
+`tests/tools/_retired_names.py` is the frozen record of all 177, and the
 conformance suite asserts every one is aliased, declared unmappable, or still
 registered under the same name.
 
@@ -204,7 +204,7 @@ There are no epic tools. An epic is a work item whose type is named "Epic":
 ## Tests
 
 ```bash
-pytest tests/tools/v2 -q        # no network, no credentials
+pytest tests/tools -q        # no network, no credentials
 ```
 
 Every action of every resource runs against `SpyClient`, a stand-in that binds

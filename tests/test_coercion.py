@@ -148,7 +148,7 @@ ASSIGNEE = "4161e0f8-48a2-49b4-a43a-458465337135"
 
 # The tool and module holding `assignees`.
 WORK_ITEM_TOOL = "workitem"
-WORK_ITEM_MODULE = "plane_mcp.tools.v2.workitem"
+WORK_ITEM_MODULE = "plane_mcp.tools.workitem"
 
 
 class _Recorder:
@@ -222,7 +222,7 @@ def test_a_string_parameter_is_left_to_the_surface():
     error, recorded = _invoke(
         "cycle",
         {"action": "manage_workitems", "project_id": "p", "cycle_id": "c", "add_ids": "a,b"},
-        "plane_mcp.tools.v2.cycle",
+        "plane_mcp.tools.cycle",
     )
 
     assert "validation error" not in error, error
@@ -256,7 +256,7 @@ def test_the_middleware_passes_through_when_coercion_raises(monkeypatch):
         raise ValueError("defect")
 
     monkeypatch.setattr(middleware, "coerce_arguments", boom)
-    error, recorded = _invoke("cycle", {"action": "list", "project_id": "p"}, "plane_mcp.tools.v2.cycle")
+    error, recorded = _invoke("cycle", {"action": "list", "project_id": "p"}, "plane_mcp.tools.cycle")
 
     assert "validation error" not in error, error
     assert recorded, "the tool never ran despite the pass-through"

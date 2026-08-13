@@ -55,8 +55,8 @@ def _calls() -> list[tuple[int, str, dict[str, ast.expr]]]:
 @pytest.fixture(scope="module")
 def schemas() -> dict[str, dict]:
     """Input schema per tool name, including the retired names that resolve."""
-    from plane_mcp.tools.v2 import register_tools
-    from plane_mcp.tools.v2.registry import alias_table
+    from plane_mcp.tools import register_tools
+    from plane_mcp.tools.registry import alias_table
 
     loop = asyncio.new_event_loop()
     mcp = FastMCP("integration-contract")
@@ -93,7 +93,7 @@ def test_every_required_parameter_is_supplied():
     required parameters, checked in the dispatch — so `ACTIONS` is the source of
     truth here, not `required`.
     """
-    from plane_mcp.tools.v2.registry import RESOURCES, alias_table
+    from plane_mcp.tools.registry import RESOURCES, alias_table
 
     aliases = alias_table()
     declared = {(mod.NAME, action.name): action.requires for mod in RESOURCES for action in mod.ACTIONS}

@@ -11,8 +11,8 @@ from fastmcp import FastMCP
 os.environ.setdefault("PLANE_API_KEY", "test")
 os.environ.setdefault("PLANE_WORKSPACE_SLUG", "test")
 
-from plane_mcp.tools.v2 import register_tools as register_v2  # noqa: E402
-from plane_mcp.tools.v2.registry import RESOURCES, alias_table, unmapped_table  # noqa: E402
+from plane_mcp.tools import register_tools as register_v2  # noqa: E402
+from plane_mcp.tools.registry import RESOURCES, alias_table, unmapped_table  # noqa: E402
 
 from ._retired_names import RETIRED_TOOL_NAMES  # noqa: E402
 from ._spyclient import SpyClient  # noqa: E402
@@ -66,7 +66,7 @@ def retired_tool_names():
 
 @pytest.fixture
 def spy(monkeypatch):
-    """Swap the Plane client for a recording stand-in, for the whole v2 package.
+    """Swap the Plane client for a recording stand-in, across every resource module.
 
     Every resource module imports `get_plane_client_context` by value, so each
     module's own reference is patched rather than the definition site.

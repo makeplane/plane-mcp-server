@@ -68,7 +68,7 @@ def envelope(response: Any, fields: str | None = None) -> dict[str, Any]:
             f"{type(response).__name__} has no {', '.join(absent)}, so it cannot be enveloped: "
             "this endpoint does not paginate. Return response.results directly, leave cursor and "
             "per_page out of the action's optional params, and record it in NOT_PAGINATED in "
-            "tests/tools/v2/test_pagination.py."
+            "tests/tools/test_pagination.py."
         )
     return {
         "results": dump_results(response.results, fields),

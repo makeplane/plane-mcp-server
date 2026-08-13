@@ -16,8 +16,8 @@ import inspect
 
 import pytest
 
-from plane_mcp.tools.v2.registry import RESOURCES
-from tests.tools.v2.test_dispatch import CONDITIONAL, NEEDS_FIXTURE, _value
+from plane_mcp.tools.registry import RESOURCES
+from tests.tools.test_dispatch import CONDITIONAL, NEEDS_FIXTURE, _value
 
 
 def _cases():
@@ -77,7 +77,7 @@ def test_a_retired_tool_name_is_logged_when_resolved():
 
     from fastmcp import FastMCP
 
-    from plane_mcp.tools.v2 import register_tools
+    from plane_mcp.tools import register_tools
 
     mcp = FastMCP("legacy-telemetry")
     register_tools(mcp)
@@ -88,7 +88,7 @@ def test_a_retired_tool_name_is_logged_when_resolved():
         def emit(self, record: logging.LogRecord) -> None:
             records.append(record)
 
-    logger = logging.getLogger("fastmcp.plane_mcp.tools.v2.legacy")
+    logger = logging.getLogger("fastmcp.plane_mcp.tools.legacy")
     handler = _Capture(level=logging.INFO)
     logger.addHandler(handler)
     previous = logger.level

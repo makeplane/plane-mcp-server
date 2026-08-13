@@ -18,7 +18,7 @@ import inspect
 
 import pytest
 
-from plane_mcp.tools.v2.workitem_type import _scope_of
+from plane_mcp.tools.workitem_type import _scope_of
 
 PROJECT = "project-1"
 TYPE_ID = "type-1"

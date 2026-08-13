@@ -110,7 +110,7 @@ cycle(action="archive", project_id=..., cycle_id=...)
 Every tool's description lists its actions with their required and optional
 parameters, so the catalogue is self-documenting at call time.
 
-**→ [Full tool and action reference](plane_mcp/tools/v2/README.md)**
+**→ [Full tool and action reference](plane_mcp/tools/README.md)**
 
 ### Querying work items
 
@@ -209,7 +209,7 @@ ruff check plane_mcp/ tests/        # rules E, F, I, UP, B
 
 The suite runs fully offline — every action of every resource is
 executed against a stand-in that binds each call against the genuine `plane-sdk`
-signature. See [`plane_mcp/tools/v2/README.md`](plane_mcp/tools/v2/README.md#tests).
+signature. See [`plane_mcp/tools/README.md`](plane_mcp/tools/README.md#tests).
 
 Live integration tests are skipped unless you point them at a running server:
 
@@ -237,7 +237,7 @@ They write real data to that workspace.
 
 Pull requests welcome. Please run `pytest` and `ruff check` before submitting; new
 tools should come with the invariants described in
-[`plane_mcp/tools/v2/README.md`](plane_mcp/tools/v2/README.md).
+[`plane_mcp/tools/README.md`](plane_mcp/tools/README.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
