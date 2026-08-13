@@ -9,12 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from evals.results import CallRecord, TaskResult, Usage
-from evals.token_counting import (
+from evals.drivers.token_counting import (
     TOKEN_ESTIMATE_METHOD,
     count_result_text_tokens,
     estimate_result_tokens,
 )
+from evals.results import CallRecord, TaskResult, Usage
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

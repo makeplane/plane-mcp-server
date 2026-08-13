@@ -56,7 +56,7 @@ CLI_MODEL_TIERS: dict[str, dict[str, dict[str, str]]] = {
     "opencode-cli": {},
 }
 
-DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "results"
+DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "output"
 
 
 def resolve_model_for_driver(driver_name: str, model: str, *, provider: str | None = None) -> str:

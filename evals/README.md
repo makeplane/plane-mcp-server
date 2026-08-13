@@ -44,20 +44,20 @@ agent's final text.
 ```bash
 # Provider-neutral API loop (default provider: Anthropic)
 .venv/bin/python -m evals.run --driver api --provider anthropic --model standard \
-  --surface full --out results/api.jsonl
+  --surface full --out evals/output/api.jsonl
 
 # Everything, one surface (free-form model IDs pass through to the CLI)
 .venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
-  --surface full --out results/legacy.jsonl
+  --surface full --out evals/output/legacy.jsonl
 
 # A few tasks while iterating
 .venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
-  --surface full --tasks W5,W8 --out results/spot.jsonl
+  --surface full --tasks W5,W8 --out evals/output/spot.jsonl
 
 # Someone else's server (a PR branch, another repo) — "external mode"
 .venv/bin/python -m evals.run --driver codex-cli --model YOUR_CODEX_MODEL_ID \
   --surface their-pr --server-cmd "/path/to/their/.venv/bin/plane-mcp-server stdio" \
-  --server-env PLANE_MCP_TOOLS_VERSION=v2 --out results/their-pr.jsonl
+  --server-env PLANE_MCP_TOOLS_VERSION=v2 --out evals/output/their-pr.jsonl
 ```
 
 Useful flags: `--reps N` (repetitions per task), `--resume out.jsonl` (skip completed or
@@ -133,9 +133,9 @@ habit; use it only when the more sensitive, larger sidecar is justified.
 ### Reading results
 
 ```bash
-.venv/bin/python -m evals.report results/legacy.jsonl                    # one surface
-.venv/bin/python -m evals.report --table results/*.jsonl                 # side by side
-.venv/bin/python -m evals.report --table --markdown results/*.jsonl      # for a PR
+.venv/bin/python -m evals.report evals/output/legacy.jsonl                    # one surface
+.venv/bin/python -m evals.report --table evals/output/*.jsonl                 # side by side
+.venv/bin/python -m evals.report --table --markdown evals/output/*.jsonl      # for a PR
 ```
 
 Rows are deduped latest-wins per `(task_id, rep, surface)`, so a re-run of a single task
@@ -164,8 +164,8 @@ Tasks that touch **workspace-scoped** fixtures (release tags, customer propertie
 if two runs share a workspace. Give each concurrent run its own workspace:
 
 ```bash
-EVAL_PLANE_WORKSPACE_SLUG=ws1 ... --surface full      --out results/legacy.jsonl &
-EVAL_PLANE_WORKSPACE_SLUG=ws2 ... --surface their-pr  --out results/their-pr.jsonl &
+EVAL_PLANE_WORKSPACE_SLUG=ws1 ... --surface full      --out evals/output/legacy.jsonl &
+EVAL_PLANE_WORKSPACE_SLUG=ws2 ... --surface their-pr  --out evals/output/their-pr.jsonl &
 wait
 ```
 

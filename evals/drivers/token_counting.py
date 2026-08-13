@@ -1,4 +1,4 @@
-"""Shared tool-result token sizing for eval drivers and analysis."""
+"""Tool-result token sizing for evaluation drivers."""
 
 from __future__ import annotations
 

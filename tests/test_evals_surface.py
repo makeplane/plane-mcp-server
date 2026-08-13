@@ -114,7 +114,7 @@ def test_classify_uses_resolved_sets():
 
 def test_skip_path_no_network(monkeypatch):
     """Unsupported surface skip must not call seed/teardown/agent."""
-    from evals import runner as run_mod
+    from evals.runner import live as run_mod
 
     seeded = []
     torn = []

@@ -45,6 +45,8 @@ htmlcov/
 .hypothesis/
 
 # Eval harness output + local env bootstrap state
+evals/output/
+# Keep earlier local runs ignored after the default directory rename.
 evals/results/
 evals/.env-pids
 evals/.api_runserver.log

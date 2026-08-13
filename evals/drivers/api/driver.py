@@ -24,8 +24,8 @@ from evals.drivers.api.backend import (
     create_backend,
 )
 from evals.drivers.base import AgentRun
+from evals.drivers.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
 from evals.results import Usage
-from evals.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
 
 DEFAULT_MAX_TOKENS = 8192
 

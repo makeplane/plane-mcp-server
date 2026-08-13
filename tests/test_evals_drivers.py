@@ -32,8 +32,8 @@ from evals.drivers import (
     strip_mcp_prefix,
     write_claude_mcp_config,
 )
+from evals.drivers.token_counting import estimate_result_tokens
 from evals.run import classify_call, parse_args, stdio_server_env
-from evals.token_counting import estimate_result_tokens
 
 # ---------------------------------------------------------------------------
 # Fixtures (constructed — never captured from live CLIs)

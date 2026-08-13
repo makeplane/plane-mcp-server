@@ -194,7 +194,12 @@ rows preserve the common fields consumed by `evals.report` and existing JSONL re
 ```text
 evals/
   cli.py                 argparse, command dispatch, and model-tier resolution
-  runner.py              live lifecycle, row assembly, resume/meta handling, and canary
+  runner/
+    __init__.py          public execution API
+    live.py              live lifecycle and row assembly
+    resume.py            resume skip and mismatch checks
+    meta.py              run metadata and repository provenance
+    canary.py            empty-agent verifier canary
   run.py                 compatibility entry point for python -m evals.run
   tasks/
     __init__.py          ordered catalog assembly and public task API
@@ -207,6 +212,7 @@ evals/
   drivers/
     __init__.py          public exports and driver registry
     base.py              AgentDriver, AgentRun, normalization, and common row mapping
+    token_counting.py    tool-result token sizing
     claude.py            Claude Code CLI driver
     codex.py             Codex CLI driver
     antigravity.py       Antigravity CLI driver
@@ -219,9 +225,8 @@ evals/
       anthropic.py       Anthropic Messages translation
       openai.py          OpenAI Chat Completions translation
   proxy.py               stdlib-only JSON-RPC recording relay
-  seed.py                Plane fixture creation and teardown
-  report.py              summaries, A/B comparison, and multi-surface tables
-  token_counting.py      shared estimate and optional local tokenizer counting
+  seed/                  Plane fixture creation and teardown
+  report/                summaries, A/B comparison, and multi-surface tables
 ```
 
 The stable import and command surfaces are intentional: `from evals.tasks import ...`,

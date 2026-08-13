@@ -27,7 +27,7 @@ from evals.drivers.api import (
     resolve_backend_model,
     unregister_backend,
 )
-from evals.token_counting import estimate_result_tokens
+from evals.drivers.token_counting import estimate_result_tokens
 
 
 class FakeBackend:

@@ -30,6 +30,7 @@ from evals.drivers import (
     write_opencode_mcp_config,
 )
 from evals.drivers.cli import CliDriver, CliLaunch, CliOutput
+from evals.drivers.token_counting import estimate_result_tokens
 from evals.proxy import (
     SHUTDOWN_DEADLINE_S,
     SidecarRecorder,
@@ -42,7 +43,6 @@ from evals.proxy import (
 from evals.proxy import main as proxy_main
 from evals.run import main as eval_main
 from evals.run import resolve_model_for_driver
-from evals.token_counting import estimate_result_tokens
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -1833,7 +1833,7 @@ def test_claude_mcp_env_has_pythonpath_when_proxied(tmp_path: Path):
 
 def test_run_live_passes_server_cmd_to_non_claude(monkeypatch, tmp_path: Path):
     """--server-cmd must not be Claude-only."""
-    from evals import runner as run_mod
+    from evals.runner import live as run_mod
 
     captured: dict = {}
 
