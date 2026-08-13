@@ -638,7 +638,24 @@ def test_minor_r3_count_without_titles_fails():
             run,
         )
         assert ok is False, note
-        assert "missing title" in note.lower() or "missing title(s)" in note
+        assert "item contract" in note.lower()
+
+    return asyncio.run(_go())
+
+
+def test_minor_r3_exact_item_contract_passes_in_any_order():
+    async def _go():
+        titles = ["Webhook secret rotation docs missing", "Onboarding email template stale"]
+        run = {
+            "final_text": ("item: Onboarding email template stale\nitem: Webhook secret rotation docs missing"),
+            "calls": [],
+        }
+        ok, note = await verify_r3(
+            object(),
+            {"r3_due_titles": titles, "r3_due_count": 2},
+            run,
+        )
+        assert ok is True, note
 
     return asyncio.run(_go())
 

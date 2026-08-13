@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from plane.models.query_params import RetrieveQueryParams
@@ -18,7 +17,15 @@ from evals.seed import (
     W3_TITLE,
     W8_TITLE,
 )
-from evals.tasks.common import get_final_text, ids, reports_contract_int, state_name, word_boundary
+from evals.tasks.common import (
+    contract_values,
+    get_final_text,
+    ids,
+    reports_contract_int,
+    reports_contract_value,
+    reports_contract_values,
+    state_name,
+)
 
 I1_TITLE = R1_TITLE
 
@@ -119,7 +126,7 @@ I1_TASK: dict[str, Any] = {
 
 
 async def verify_i2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """I2: final text names the state of the identifier-target item."""
+    """I2: final text reports the identifier-target state via ``state: NAME``."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     wid = (ctx.get("items") or {}).get(I2_TITLE)
@@ -130,9 +137,9 @@ async def verify_i2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     if not name:
         return False, "target state name unresolved"
     final_text = get_final_text(run)
-    if word_boundary(name).search(final_text):
-        return True, f"final text names state {name!r}"
-    return False, f"final text missing state {name!r}"
+    if reports_contract_value(final_text, "state", name):
+        return True, f"final text reports state {name!r} via contract"
+    return False, f"state values={contract_values(final_text, 'state')!r}; want [{name!r}]"
 
 
 I2_TASK: dict[str, Any] = {
@@ -141,7 +148,7 @@ I2_TASK: dict[str, Any] = {
     "tags": {"read", "tier1", "id_in_hand", "debias"},
     "prompt": (
         "In project {project}, what is the current state of work item "
-        "{work_item_identifier}? Answer with the state name only."
+        "{work_item_identifier}? Return exactly one line: 'state: <exact state name>'."
     ),
     "prompt_bind": _bind_item_identifier(I2_TITLE),
     "optimal_calls": 1,
@@ -305,74 +312,8 @@ I5_TASK: dict[str, Any] = {
 }
 
 
-def _l1_duration_reported(final_text: str) -> bool:
-    """Numeric duration only: whole-word 90 or 1.5 (not English 'ninety')."""
-    return bool(word_boundary("90").search(final_text)) or bool(re.search(r"\b1\.5\b", final_text))
-
-
-def _l1_person_names_from_summary(sum_rows: Any) -> list[str]:
-    """Best-effort actor/assignee display strings from project worklog summary rows."""
-    names: list[str] = []
-    for row in sum_rows or []:
-        dump = row.model_dump() if hasattr(row, "model_dump") else {}
-        if not isinstance(dump, dict):
-            dump = {}
-        candidates: list[Any] = []
-        for attr in (
-            "actor",
-            "user",
-            "display_name",
-            "owned_by",
-            "created_by",
-            "assignee",
-            "email",
-            "first_name",
-            "last_name",
-        ):
-            v = getattr(row, attr, None)
-            if v is None and dump:
-                v = dump.get(attr)
-            if v is None:
-                continue
-            if hasattr(v, "display_name") or hasattr(v, "email"):
-                candidates.append(
-                    getattr(v, "display_name", None) or getattr(v, "email", None) or getattr(v, "id", None)
-                )
-            elif isinstance(v, dict):
-                candidates.append(v.get("display_name") or v.get("email") or v.get("id"))
-            else:
-                candidates.append(v)
-        for c in candidates:
-            s = str(c or "").strip()
-            if s and s not in names:
-                names.append(s)
-    return names
-
-
-def _l1_summary_substance(final_text: str, *, title: str, sum_rows: Any) -> bool:
-    """Summary half of L1: item title, person from summary, or words summary/total.
-
-    Deliberately does *not* accept bare 'logged' / 'worklog' — the prompt asks to
-    report the project worklog summary (who/what has time logged).
-    """
-    low = final_text.casefold()
-    if "summary" in low or "total" in low:
-        return True
-    if title and word_boundary(title).search(final_text):
-        return True
-    for person in _l1_person_names_from_summary(sum_rows):
-        if len(person) >= 2 and word_boundary(person).search(final_text):
-            return True
-    return False
-
-
 async def verify_l1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """L1: 90-minute work log on the correct item AND final text reports duration + summary.
-
-    Duration: numeric whole-word ``90`` or ``1.5`` only (not English 'ninety').
-    Summary substance: item title, a person/assignee from the project summary, or
-    the words ``summary`` / ``total``. Bare "90 minutes of work" fails by design.
-    """
+    """L1: 90-minute log exists and exact contract lines report the API summary."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     wid = (ctx.get("items") or {}).get(L1_TITLE)
@@ -385,24 +326,33 @@ async def verify_l1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     if 90 not in durations:
         return False, f"no 90-minute work log on target item {wid}; durations={durations}"
 
-    sum_rows: list[Any] = []
     try:
         summary = plane.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
         raw = summary if isinstance(summary, list) else (getattr(summary, "results", None) or summary or [])
         sum_rows = list(raw or [])
-    except Exception:
-        # Summary fetch is optional for person names; duration + title/summary/total still work.
-        sum_rows = []
+    except Exception as exc:
+        return False, f"project worklog summary failed: {exc}"
+
+    summary_ids: list[str] = []
+    for row in sum_rows:
+        dump = row.model_dump() if hasattr(row, "model_dump") else (row if isinstance(row, dict) else {})
+        value = getattr(row, "issue_id", None) or getattr(row, "work_item_id", None)
+        if value is None and isinstance(dump, dict):
+            value = dump.get("issue_id") or dump.get("work_item_id")
+        item_id = str(value or "").strip()
+        if item_id and item_id not in summary_ids:
+            summary_ids.append(item_id)
+    if str(wid) not in summary_ids:
+        return False, f"target item {wid} missing from project worklog summary ids={summary_ids!r}"
 
     final_text = get_final_text(run)
-    if not _l1_duration_reported(final_text):
-        return False, "final text missing logged duration (numeric 90 or 1.5)"
-    if not _l1_summary_substance(final_text, title=L1_TITLE, sum_rows=sum_rows):
+    if not reports_contract_value(final_text, "logged-minutes", "90"):
+        return False, f"logged-minutes values={contract_values(final_text, 'logged-minutes')!r}; want ['90']"
+    if not reports_contract_values(final_text, "summary-work-item-id", summary_ids):
         return False, (
-            "final text lacks worklog summary substance "
-            "(need item title, person from summary, or words 'summary'/'total')"
+            f"summary-work-item-id values={contract_values(final_text, 'summary-work-item-id')!r}; want {summary_ids!r}"
         )
-    return True, f"90m log on {wid} + final text reports duration and summary substance"
+    return True, f"90m log on {wid} + exact contract for {len(summary_ids)} summary row(s)"
 
 
 L1_TASK: dict[str, Any] = {
@@ -411,7 +361,10 @@ L1_TASK: dict[str, Any] = {
     "tags": {"write", "read", "tier1", "long_tail", "debias"},
     "prompt": (
         f"In project {{project}}, log 1.5 hours (90 minutes) of work on the item titled "
-        f"'{L1_TITLE}', then report the project's worklog summary (who/what has time logged)."
+        f"'{L1_TITLE}', then report the project's worklog summary. End with exactly "
+        "one 'logged-minutes: 90' line and one "
+        "'summary-work-item-id: <exact work item UUID>' line for every row returned "
+        "by the project worklog summary. Include no other lines with those prefixes."
     ),
     "optimal_calls": 3,
     "optimal_tools": {"list_work_items", "create_work_log", "get_project_worklog_summary"},

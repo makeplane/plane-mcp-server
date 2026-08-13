@@ -144,6 +144,12 @@ denominators, as are rows with recorded errors. Result-token columns use `~` for
 `*` for mixed measured/estimated values, and `?` for legacy values whose provenance was not
 recorded.
 
+Every result row carries a `battery` fingerprint derived from the selected catalog's prompts
+and tool metadata. Compare rows only when their fingerprints match: a table that mixes
+fingerprints is comparing different questions, even when task IDs are the same. In particular,
+results from a task whose output contract changed are not directly comparable with its rows in
+older batteries. `evals.report --table` warns when its input rows span fingerprints.
+
 ## Running surfaces in parallel
 
 Tasks that touch **workspace-scoped** fixtures (release tags, customer properties) collide
@@ -208,8 +214,10 @@ preserve the assembly order in `tasks/__init__.py`.
 
 Mutation verifiers must read the resulting state through the Plane API. Read verifiers must
 derive the expected facts from the API or seed context and match an explicit answer contract
-or exact seeded values. For numeric answers, prefer a prompt such as `Answer with a line
-'count: N'` and the shared contract matcher; a loose substring can make `4` match `24`.
+instead of scanning free-form prose. Use exact `field: value` lines and the shared contract
+matchers; for numeric answers, prefer a prompt such as `Answer with a line 'count: N'`. A
+loose substring can make `4` match `24`, and prose matching can accidentally grade an agent's
+writing habits instead of its answer.
 
 **Check the shape the API actually returns.** Dates come back as timestamps
 (`2026-08-12T00:00:00Z`), so comparing one to a bare `2026-08-12` silently never matches —

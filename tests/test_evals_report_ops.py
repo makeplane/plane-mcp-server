@@ -377,6 +377,26 @@ def test_report_main_table_cli(tmp_path: Path, capsys):
     assert "R1" in out
 
 
+def test_report_main_table_warns_when_battery_fingerprints_differ(tmp_path: Path, capsys):
+    f1 = tmp_path / "old.jsonl"
+    f2 = tmp_path / "new.jsonl"
+    f1.write_text(
+        json.dumps({**_synth_row("R1", surface="full"), "battery": "6425dcc64404"}) + "\n",
+        encoding="utf-8",
+    )
+    f2.write_text(
+        json.dumps({**_synth_row("R1", surface="v2"), "battery": "newfinger001"}) + "\n",
+        encoding="utf-8",
+    )
+
+    rc = report_mod.main(["--table", str(f1), str(f2)])
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "spans battery fingerprints" in captured.err
+    assert "different task prompts/questions" in captured.err
+
+
 def test_report_main_markdown_flag(tmp_path: Path, capsys):
     f1 = tmp_path / "a.jsonl"
     f1.write_text(json.dumps(_synth_row("R1", surface="v2", num_calls=1)) + "\n", encoding="utf-8")

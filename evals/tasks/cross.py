@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from evals.seed import (
@@ -11,7 +12,15 @@ from evals.seed import (
     RELEASE_CHANGELOG_TEXT,
     RELEASE_NAME,
 )
-from evals.tasks.common import as_id, find_item_by_name, get_final_text, ids, word_boundary
+from evals.tasks.common import (
+    as_id,
+    contract_values,
+    find_item_by_name,
+    get_final_text,
+    ids,
+    reports_contract_value,
+    reports_contract_values,
+)
 
 
 async def verify_c1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
@@ -130,35 +139,44 @@ C1_TASK: dict[str, Any] = {
 
 
 async def verify_c2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """C2: final text mentions release 1.2.0 and at least one seeded changelog phrase."""
+    """C2: exact contract fields report the release and every changelog item."""
     final_text = get_final_text(run)
     notes: list[str] = []
     ok = True
-    if not word_boundary(RELEASE_NAME).search(final_text):
+    if not reports_contract_value(final_text, "release", RELEASE_NAME):
         ok = False
-        notes.append(f"missing release name {RELEASE_NAME!r}")
+        notes.append(f"release values={contract_values(final_text, 'release')!r}; want [{RELEASE_NAME!r}]")
     else:
-        notes.append(f"names {RELEASE_NAME}")
+        notes.append(f"release={RELEASE_NAME!r}")
+
     changelog = ctx.get("release_changelog_text") or RELEASE_CHANGELOG_TEXT
-    # Match distinctive fragments from the seeded changelog.
-    fragments = ["OAuth login hardening", "webhook retry backoff"]
-    hit = [f for f in fragments if word_boundary(f).search(final_text)]
-    if not hit:
-        # Also accept substring of full changelog without word-boundary if short.
-        if changelog[:40].casefold() not in final_text.casefold():
-            ok = False
-            notes.append("missing changelog content")
-        else:
-            notes.append("changelog substring present")
+    markers = list(re.finditer(r"Changelog entry\s+[^:]+:\s*", changelog, flags=re.IGNORECASE))
+    shipped: list[str] = []
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(changelog)
+        item = changelog[marker.end() : end].strip().rstrip(".").strip()
+        if item:
+            shipped.append(item)
+    if not shipped:
+        return False, f"seeded changelog does not contain parseable entries: {changelog!r}"
+    if not reports_contract_values(final_text, "shipped", shipped):
+        ok = False
+        notes.append(f"shipped values={contract_values(final_text, 'shipped')!r}; want {shipped!r}")
     else:
-        notes.append(f"changelog phrases {hit}")
+        notes.append(f"{len(shipped)} exact shipped items")
     return ok, "; ".join(notes)
 
 
 C2_TASK: dict[str, Any] = {
     "id": "C2",
     "tags": {"read", "tier1"},
-    "prompt": (f"What shipped in release {RELEASE_NAME}? Summarize the changelog."),
+    "prompt": (
+        f"What shipped in release {RELEASE_NAME}? Summarize the changelog in any prose "
+        f"you like, then provide these exact contract lines: 'release: {RELEASE_NAME}' "
+        "and one 'shipped: <verbatim changelog item text>' line per changelog item. "
+        "For each 'shipped:' value, copy only the text after the changelog entry label, "
+        "without its sentence-ending punctuation."
+    ),
     "optimal_calls": 2,
     "optimal_tools": {"list_releases", "get_release_changelog"},
     "alternate_tools": {

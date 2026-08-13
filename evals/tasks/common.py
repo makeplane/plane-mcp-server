@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import string
+from collections import Counter
 from typing import Any
 
 from plane.errors.errors import HttpError
@@ -135,6 +136,37 @@ def reports_contract_int(text: str, truth: int) -> bool:
     return False
 
 
+def contract_values(text: str, field: str) -> list[str]:
+    """Return non-empty values from exact ``field: value`` contract lines.
+
+    The field name is case-insensitive, as with :func:`reports_contract_int`,
+    while the value is preserved for exact comparison. Prose, bullets, inline
+    mentions, and malformed/empty contract lines are ignored.
+    """
+    values: list[str] = []
+    pattern = re.compile(rf"\s*{re.escape(field)}:\s*(.*?)\s*", flags=re.IGNORECASE)
+    for line in (text or "").splitlines():
+        match = pattern.fullmatch(line)
+        if match and match.group(1):
+            values.append(match.group(1))
+    return values
+
+
+def reports_contract_value(text: str, field: str, truth: str) -> bool:
+    """True when exactly one ``field: value`` line equals ``truth`` exactly."""
+    return contract_values(text, field) == [str(truth)]
+
+
+def reports_contract_values(text: str, field: str, truths: list[str] | tuple[str, ...]) -> bool:
+    """True when contract lines equal the expected value multiset.
+
+    Ordering is deliberately ignored: the output contract defines one exact
+    fact per line, not a presentation order. Missing, duplicate, or extra field
+    lines fail.
+    """
+    return Counter(contract_values(text, field)) == Counter(str(value) for value in truths)
+
+
 def as_id(obj: Any) -> str | None:
     if obj is None:
         return None
@@ -260,6 +292,9 @@ __all__ = [
     "reports_exact_int",
     "whole_answer_int",
     "reports_contract_int",
+    "contract_values",
+    "reports_contract_value",
+    "reports_contract_values",
     "as_id",
     "ids",
     "find_items_by_name",

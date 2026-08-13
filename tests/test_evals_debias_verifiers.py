@@ -174,6 +174,20 @@ def test_i2_wrong_state_name_in_text_fails():
     return asyncio.run(_go())
 
 
+def test_i2_exact_state_contract_passes():
+    async def _go():
+        st = SimpleNamespace(id="st-backlog", name="Backlog", group="unstarted")
+        plane = _WIRetrievePlane(
+            by_id={"wi-2": SimpleNamespace(id="wi-2", state=st)},
+            states=[st],
+        )
+        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {W2_TITLE: "wi-2"}}
+        ok, note = await verify_i2(plane, ctx, _run("state: Backlog"))
+        assert ok is True, note
+
+    return asyncio.run(_go())
+
+
 # ---------------------------------------------------------------------------
 # I3 — cycle membership by UUIDs
 # ---------------------------------------------------------------------------
@@ -318,7 +332,7 @@ def test_l1_empty_summary_with_90m_log_fails():
         ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
         ok, note = await verify_l1(plane, ctx, _run(""))
         assert ok is False, note
-        assert "duration" in note.lower() or "summary" in note.lower()
+        assert "logged-minutes" in note.lower()
 
     return asyncio.run(_go())
 
@@ -340,45 +354,39 @@ def test_l1_one_hundred_ninety_minutes_fails():
     return asyncio.run(_go())
 
 
-def test_l1_logged_1_5_hours_with_total_passes():
-    """Reviewer: numeric 1.5 is a valid duration token (with summary substance)."""
+def test_l1_prose_with_correct_facts_but_without_contract_fails():
+    """Correct facts in prose do not satisfy the explicit output contract."""
 
     async def _go():
         plane = _L1Plane([90], summary_ids=["wi-l1"])
         ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
         ok, note = await verify_l1(plane, ctx, _run("Logged 1.5 hours total."))
-        assert ok is True, note
+        assert ok is False, note
 
     return asyncio.run(_go())
 
 
 def test_l1_ninety_minutes_of_work_fails_by_design():
-    """Calibration: '90 minutes of work' FAILS by design.
-
-    The prompt asks to report the project worklog summary (who/what has time
-    logged). An answer naming neither who nor what (no title, no person, no
-    'summary'/'total') has not done that half of the task — even with a correct
-    numeric duration.
-    """
+    """Calibration: prose without contract lines fails by design."""
 
     async def _go():
         plane = _L1Plane([90], summary_ids=["wi-l1"])
         ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
         ok, note = await verify_l1(plane, ctx, _run("90 minutes of work"))
         assert ok is False, note
-        assert "summary" in note.lower()
+        assert "logged-minutes" in note.lower()
 
     return asyncio.run(_go())
 
 
-def test_l1_90m_log_and_summary_text_passes():
+def test_l1_exact_duration_and_summary_contract_passes():
     async def _go():
         plane = _L1Plane([90], summary_ids=["wi-l1"])
         ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
         ok, note = await verify_l1(
             plane,
             ctx,
-            _run("Logged 90 minutes. Worklog summary: 1 item with time logged."),
+            _run("logged-minutes: 90\nsummary-work-item-id: wi-l1"),
         )
         assert ok is True, note
 
@@ -638,6 +646,17 @@ def test_reports_contract_int_unit():
     assert reports_contract_int("count: 9\ncount: 3", 9) is False
 
 
+def test_exact_line_contract_helpers_unit():
+    from evals.tasks import contract_values, reports_contract_value, reports_contract_values
+
+    text = "prose mentions state Done\nSTATE: In Progress\nitem: B\nitem: A"
+    assert contract_values(text, "state") == ["In Progress"]
+    assert reports_contract_value(text, "state", "In Progress") is True
+    assert reports_contract_value("- state: In Progress", "state", "In Progress") is False
+    assert reports_contract_values(text, "item", ["A", "B"]) is True
+    assert reports_contract_values("item: A\nitem: A", "item", ["A"]) is False
+
+
 # ---------------------------------------------------------------------------
 # Sample of 6 existing verifiers (untouched + wrong-value)
 # ---------------------------------------------------------------------------
@@ -687,6 +706,21 @@ def test_existing_r1_wrong_state_in_text_fails():
         }
         ok, note = await verify_r1(plane, ctx, _run("Done"))
         assert ok is False, note
+
+    return asyncio.run(_go())
+
+
+def test_existing_r1_exact_state_contract_passes():
+    async def _go():
+        plane = _R1Plane("In Progress")
+        ctx = {
+            "workspace_slug": "ws",
+            "project_id": "p1",
+            "r1_state_name": "In Progress",
+            "state_names": ["In Progress", "Done", "Backlog"],
+        }
+        ok, note = await verify_r1(plane, ctx, _run("state: In Progress"))
+        assert ok is True, note
 
     return asyncio.run(_go())
 
@@ -829,6 +863,22 @@ def test_existing_c2_wrong_release_name_fails():
             _run("Release 9.9.9 shipped nothing useful."),
         )
         assert ok is False, note
+
+    return asyncio.run(_go())
+
+
+def test_existing_c2_exact_release_and_shipped_contract_passes():
+    async def _go():
+        ok, note = await verify_c2(
+            object(),
+            {
+                "release_changelog_text": (
+                    "Changelog entry one: OAuth login hardening. Changelog entry two: webhook retry backoff."
+                )
+            },
+            _run("release: 1.2.0\nshipped: OAuth login hardening\nshipped: webhook retry backoff"),
+        )
+        assert ok is True, note
 
     return asyncio.run(_go())
 

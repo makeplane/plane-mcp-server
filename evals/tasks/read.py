@@ -6,21 +6,19 @@ from typing import Any
 
 from evals.seed import CYCLE_CURRENT, R1_TITLE, R5_COMMENT_PHRASES, R5_TITLE
 from evals.tasks.common import (
+    contract_values,
     count_open_urgent,
     find_item_by_name,
     get_final_text,
+    reports_contract_int,
+    reports_contract_value,
+    reports_contract_values,
     state_name,
-    word_boundary,
 )
 
 
 async def verify_r1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R1: final text must name the target item's state and no other seeded state.
-
-    Matching rule: word-boundary, case-insensitive regex on the exact state name
-    resolved from the API at verify time (never hardcoded). Additionally fail if
-    any *other* project state name also matches (blocks guessing/list_states echo).
-    """
+    """R1: final text must report the API-resolved state via ``state: NAME``."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     title = R1_TITLE
@@ -36,17 +34,9 @@ async def verify_r1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
         return False, "could not resolve expected state name from API"
 
     final_text = get_final_text(run)
-    if not word_boundary(expected).search(final_text):
-        return False, f"final text missing state name {expected!r}"
-
-    other_states = [n for n in (ctx.get("state_names") or []) if n and n.casefold() != expected.casefold()]
-    collisions = [n for n in other_states if word_boundary(n).search(final_text)]
-    if collisions:
-        return (
-            False,
-            f"final text names other state(s) {collisions!r} besides expected {expected!r}",
-        )
-    return True, f"final text names only state {expected!r}"
+    if not reports_contract_value(final_text, "state", expected):
+        return False, f"final text must contain exactly 'state: {expected}'"
+    return True, f"final text reports state {expected!r} via contract"
 
 
 R1_TASK: dict[str, Any] = {
@@ -54,7 +44,7 @@ R1_TASK: dict[str, Any] = {
     "tags": {"read", "tier1"},
     "prompt": (
         "In project {project}, what is the current state of the work item titled "
-        f"'{R1_TITLE}'? Answer with the state name."
+        f"'{R1_TITLE}'? Return exactly one line: 'state: <exact state name>'."
     ),
     "optimal_calls": 1,
     "optimal_tools": {"list_work_items"},
@@ -86,21 +76,23 @@ R1_TASK: dict[str, Any] = {
 
 
 async def verify_r2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R2: final text must contain the exact urgent-open count (word-boundary)."""
+    """R2: final text reports the urgent-open count via ``count: N``."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     expected = count_open_urgent(plane, workspace_slug, project_id)
     final_text = get_final_text(run)
-    # Word-boundary on the decimal form of the count (blocks "4" matching "24").
-    if not word_boundary(str(expected)).search(final_text):
-        return False, f"final text missing urgent-open count {expected}"
-    return True, f"final text names count {expected}"
+    if not reports_contract_int(final_text, expected):
+        return False, f"final text missing contract count: {expected} (need 'count: {expected}')"
+    return True, f"final text reports urgent-open count {expected} via contract"
 
 
 R2_TASK: dict[str, Any] = {
     "id": "R2",
     "tags": {"read", "tier1"},
-    "prompt": ("In project {project}, how many urgent open work items are there? Answer with the integer count only."),
+    "prompt": (
+        "In project {project}, how many urgent open work items are there? "
+        "Return exactly one line of the form 'count: N', where N is the integer count."
+    ),
     "optimal_calls": 1,
     "optimal_tools": {"count_work_items"},
     "alternate_tools": {
@@ -130,22 +122,22 @@ R2_TASK: dict[str, Any] = {
 
 
 async def verify_r3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R3: final text must include each seeded assigned-to-me / due-this-week title."""
+    """R3: ``item: TITLE`` lines exactly match the seeded due-title set."""
     titles = list(ctx.get("r3_due_titles") or [])
     if not titles:
         return False, "no R3 due titles in seed ctx"
     final_text = get_final_text(run)
-    missing = [t for t in titles if not word_boundary(t).search(final_text)]
-    if missing:
-        return False, f"final text missing title(s) {missing!r}"
-    return True, f"final text names {len(titles)} due-this-week assigned items"
+    if not reports_contract_values(final_text, "item", titles):
+        return False, f"item contract values={contract_values(final_text, 'item')!r}; want {titles!r}"
+    return True, f"final text reports exactly {len(titles)} due-this-week assigned items"
 
 
 R3_TASK: dict[str, Any] = {
     "id": "R3",
     "tags": {"read", "tier1"},
     "prompt": (
-        "In project {project}, list work items assigned to me that are due this week. Answer with their titles."
+        "In project {project}, list work items assigned to me that are due this week. "
+        "Return one line per result as 'item: <exact work item title>' and no other 'item:' lines."
     ),
     "optimal_calls": 2,
     "optimal_tools": {"get_me", "list_work_items"},
@@ -175,26 +167,34 @@ R3_TASK: dict[str, Any] = {
 
 
 async def verify_r4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R4: final text must mention the active cycle name and the overdue item title."""
+    """R4: contract reports the active cycle, all its items, and overdue items."""
     final_text = get_final_text(run)
     notes: list[str] = []
     ok = True
-    if not word_boundary(CYCLE_CURRENT).search(final_text):
+    if not reports_contract_value(final_text, "cycle", CYCLE_CURRENT):
         ok = False
-        notes.append(f"missing active cycle {CYCLE_CURRENT!r}")
+        notes.append(f"cycle values={contract_values(final_text, 'cycle')!r}; want [{CYCLE_CURRENT!r}]")
     else:
-        notes.append(f"names {CYCLE_CURRENT}")
-    overdue = ctx.get("r4_overdue_title")
-    if overdue:
-        if not word_boundary(overdue).search(final_text):
-            # Soft: also accept "overdue" keyword + any active item title.
-            if "overdue" not in final_text.casefold():
-                ok = False
-                notes.append(f"missing overdue title {overdue!r}")
-            else:
-                notes.append("mentions overdue (title not exact)")
-        else:
-            notes.append(f"names overdue {overdue!r}")
+        notes.append(f"cycle={CYCLE_CURRENT!r}")
+
+    active_ids = {str(value) for value in (ctx.get("r4_active_item_ids") or [])}
+    active_titles = [str(title) for title, item_id in (ctx.get("items") or {}).items() if str(item_id) in active_ids]
+    if not active_titles:
+        ok = False
+        notes.append("no active-cycle titles in seed ctx")
+    elif not reports_contract_values(final_text, "item", active_titles):
+        ok = False
+        notes.append(f"item values={contract_values(final_text, 'item')!r}; want {active_titles!r}")
+    else:
+        notes.append(f"{len(active_titles)} active-cycle items")
+
+    overdue = str(ctx.get("r4_overdue_title") or "")
+    expected_overdue = [overdue] if overdue else ["none"]
+    if not reports_contract_values(final_text, "overdue", expected_overdue):
+        ok = False
+        notes.append(f"overdue values={contract_values(final_text, 'overdue')!r}; want {expected_overdue!r}")
+    else:
+        notes.append(f"overdue={expected_overdue!r}")
     return ok, "; ".join(notes)
 
 
@@ -203,7 +203,10 @@ R4_TASK: dict[str, Any] = {
     "tags": {"read", "tier1"},
     "prompt": (
         "In project {project}, what is in the active cycle, and is anything overdue? "
-        f"Name the cycle (expect '{CYCLE_CURRENT}') and any overdue item titles."
+        f"Use these exact contract lines: one 'cycle: {CYCLE_CURRENT}' line, one "
+        "'item: <exact work item title>' line for every item in that cycle, and one "
+        "'overdue: <exact work item title>' line for every overdue item. If none "
+        "are overdue, use 'overdue: none'."
     ),
     "optimal_calls": 2,
     "optimal_tools": {"list_cycles", "list_work_items"},
@@ -233,13 +236,12 @@ R4_TASK: dict[str, Any] = {
 
 
 async def verify_r5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R5: final text must include seeded comment phrases (word-boundary)."""
+    """R5: ``comment: TEXT`` lines exactly match the seeded comments."""
     phrases = list(ctx.get("r5_comment_phrases") or R5_COMMENT_PHRASES)
     final_text = get_final_text(run)
-    missing = [p for p in phrases if not word_boundary(p).search(final_text)]
-    if missing:
-        return False, f"final text missing comment phrase(s) {missing!r}"
-    return True, f"final text names {len(phrases)} discussion phrases"
+    if not reports_contract_values(final_text, "comment", phrases):
+        return False, f"comment values={contract_values(final_text, 'comment')!r}; want {phrases!r}"
+    return True, f"final text reports exactly {len(phrases)} seeded comments"
 
 
 R5_TASK: dict[str, Any] = {
@@ -247,7 +249,9 @@ R5_TASK: dict[str, Any] = {
     "tags": {"read", "tier1"},
     "prompt": (
         f"In project {{project}}, summarize the discussion on the work item titled '{R5_TITLE}'. "
-        "Include the key phrases from its comments."
+        "You may summarize in prose, but end with one contract line per comment: "
+        "'comment: <exact comment text>'. Copy the comment text exactly and include "
+        "no other 'comment:' lines."
     ),
     "optimal_calls": 2,
     "optimal_tools": {"list_work_items", "list_work_item_comments"},
@@ -277,20 +281,14 @@ R5_TASK: dict[str, Any] = {
 
 
 async def verify_r6(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R6: final text must name the project that has more open bugs (resolved at verify)."""
+    """R6: final text reports the winning project via ``project: NAME``."""
     expected = ctx.get("r6_more_bugs_project") or ctx.get("second_project_name")
     if not expected:
         return False, "second project name missing from seed ctx"
     final_text = get_final_text(run)
-    # Match the full project name or the distinctive " B" suffix run8 form.
-    if word_boundary(expected).search(final_text):
-        return True, f"final text names project with more bugs {expected!r}"
-    # Allow matching just the identifier-ish trailing token (e.g. run8 + B).
-    run8 = ctx.get("run8") or ""
-    alt = f"EVAL {run8} B"
-    if word_boundary(alt).search(final_text) or (run8 and run8 in final_text and " B" in final_text):
-        return True, f"final text names second project ({alt})"
-    return False, f"final text missing project with more bugs {expected!r}"
+    if not reports_contract_value(final_text, "project", expected):
+        return False, f"project values={contract_values(final_text, 'project')!r}; want [{expected!r}]"
+    return True, f"final text reports project with more bugs {expected!r}"
 
 
 R6_TASK: dict[str, Any] = {
@@ -299,7 +297,7 @@ R6_TASK: dict[str, Any] = {
     "prompt": (
         "Across the eval projects created for this run (main project {project} and its "
         "sibling 'B' project), which project has more open Bug-typed work items? "
-        "Answer with the project name."
+        "Return exactly one line: 'project: <exact project name>'."
     ),
     "optimal_calls": 3,
     "optimal_tools": {"list_projects", "list_work_items", "resolve_work_item_type"},
@@ -338,22 +336,26 @@ R6_TASK: dict[str, Any] = {
 
 
 async def verify_r7(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R7 (extra): final text names at least one legal next state for the R1 item.
+    """R7 (extra): contract names project states or explicitly says unrestricted.
 
-    Resolves available completed/started/unstarted states at verify time and
-    requires a word-boundary hit on one of them (or explicit 'unrestricted').
+    This preserves the verifier's existing semantic ceiling: the full surface
+    exposes project states, not authoritative workflow transition evaluation.
+    The output match itself is structural and exact.
     """
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     page = plane.states.list(workspace_slug=workspace_slug, project_id=project_id)
     names = [(s.name or "").strip() for s in (page.results or []) if (s.name or "").strip()]
     final_text = get_final_text(run)
-    if "unrestricted" in final_text.casefold() or "any state" in final_text.casefold():
+    reported = contract_values(final_text, "transition")
+    if reported == ["unrestricted"]:
         return True, "agent reported unrestricted transitions"
-    hits = [n for n in names if word_boundary(n).search(final_text)]
-    if not hits:
-        return False, f"final text names none of project states {names}"
-    return True, f"final text names state(s) {hits}"
+    if not reported:
+        return False, "final text has no 'transition: <state>' contract lines"
+    unknown = [value for value in reported if value not in names]
+    if unknown:
+        return False, f"transition values {unknown!r} are not exact project state names; have {names!r}"
+    return True, f"final text reports project state(s) {reported!r} via contract"
 
 
 R7_TASK: dict[str, Any] = {
@@ -361,8 +363,9 @@ R7_TASK: dict[str, Any] = {
     "tags": {"read", "tier1", "extra"},
     "prompt": (
         f"In project {{project}}, what states can the work item '{R1_TITLE}' "
-        "legally transition to under workflow rules? List the state names "
-        "(or say unrestricted if none)."
+        "legally transition to under workflow rules? Return one line per state as "
+        "'transition: <exact state name>'. If transitions are unrestricted, return "
+        "exactly 'transition: unrestricted'."
     ),
     # Extra: exercises list_available_transitions.
     "optimal_calls": 2,

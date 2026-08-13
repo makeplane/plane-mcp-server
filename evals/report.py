@@ -628,6 +628,26 @@ def _surface_label_for_file(path: Path, rows: list[TaskResult]) -> str:
     return path.stem
 
 
+def warn_if_table_mixes_batteries(file_rows: list[tuple[str, list[ResultRow]]]) -> bool:
+    """Warn when table columns contain rows from different task batteries."""
+    by_label: dict[str, set[str]] = {}
+    all_fingerprints: set[str] = set()
+    for label, rows in file_rows:
+        fingerprints = {_task_result(row).battery or "<missing>" for row in rows if not is_meta_row(row)}
+        if fingerprints:
+            by_label[label] = fingerprints
+            all_fingerprints.update(fingerprints)
+    if len(all_fingerprints) <= 1:
+        return False
+    detail = "; ".join(f"{label}={','.join(sorted(values))}" for label, values in by_label.items())
+    print(
+        "warning: table spans battery fingerprints; these rows were graded on "
+        f"different task prompts/questions and are not directly comparable ({detail})",
+        file=sys.stderr,
+    )
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Summarize eval JSONL results")
     p.add_argument(
@@ -680,6 +700,7 @@ def main(argv: list[str] | None = None) -> int:
                 n += 1
             used_labels.add(label)
             labeled.append((label, rows))
+        warn_if_table_mixes_batteries(labeled)
         table = build_multi_surface_table(labeled)
         sys.stdout.write(render_multi_surface_table(table, markdown=args.markdown))
         return 0
