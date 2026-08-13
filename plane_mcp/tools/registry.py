@@ -84,6 +84,11 @@ RESOURCES: tuple[ModuleType, ...] = (
 )
 
 
+def action_arguments() -> dict[str, dict[str, frozenset[str]]]:
+    """Tool name -> action name -> the arguments that action accepts."""
+    return {mod.NAME: {a.name: frozenset(a.requires) | frozenset(a.optional) for a in mod.ACTIONS} for mod in RESOURCES}
+
+
 def alias_table() -> dict[str, tuple[str, str]]:
     """Legacy tool name -> (resource tool name, action). Raises on a collision."""
     table: dict[str, tuple[str, str]] = {}

@@ -112,12 +112,24 @@ def workitem_page(
 
 def pql_failure(tool: str, action: str, pql: str, exc: HttpError) -> dict[str, Any] | None:
     """Turn an invalid-PQL 400 into a correctable answer instead of an exception."""
-    if not (pql and exc.status_code == 400 and isinstance(exc.response, dict) and "pql" in exc.response):
+    if not (pql and exc.status_code == 400 and isinstance(exc.response, dict)):
+        return None
+    detail = _filter_complaint(exc.response)
+    if detail is None:
         return None
     logger.warning("%s %s: invalid PQL %r -> %s", tool, action, pql, exc.response)
     return {
-        "error": exc.response["pql"],
+        "error": detail,
         "failed_pql": pql,
         "pql_reference": PQL_FULL_REFERENCE,
         "hint": f"The PQL above failed. Fix it using the reference and retry {tool} {action}.",
     }
+
+
+def _filter_complaint(body: dict[str, Any]) -> Any | None:
+    """What a 400 said about the filter, or None when it was about something else."""
+    if "pql" in body:
+        return body["pql"]
+    if not any(word in str(body).lower() for word in ("pql", "filter")):
+        return None
+    return body.get("message") or body.get("error") or body.get("detail") or body

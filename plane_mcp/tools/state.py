@@ -33,10 +33,7 @@ ACTIONS = (
     Action("delete", ("project_id", "state_id"), destructive=True),
 )
 
-FOOTER = (
-    f"group is one of: {', '.join(GROUPS)}. color is a hex code such as #EF4444. "
-    "Some workspaces manage states centrally; creating one there returns an error from the API."
-)
+FOOTER = f"group is one of: {', '.join(GROUPS)}. color is a hex code such as #EF4444."
 
 LEGACY = {
     "list_states": "list",

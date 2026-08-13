@@ -56,7 +56,23 @@ from "not supplied" — a visibility of `0`, an intake status of `-2` — use
 
 **Validate enum-valued parameters.** They are `str` in the schema, so check them
 in the dispatch with `one_of()`. An unrecognised value then returns an error
-naming the permitted set, rather than being dropped from the payload.
+naming the permitted set, rather than being dropped from the payload — dropping it
+writes the record without the field and reports success.
+
+**Declare every parameter an action takes, and only those.** The declaration is not
+just documentation: `ValidateActionArguments` checks each call against it, so an
+argument belonging to a different action is refused instead of silently dropped. One
+flat schema per tool cannot catch that — `query` is a real `workitem` parameter, just
+not one `count` has any use for, and a `count` call carrying it validated cleanly and
+then answered a different question. An argument left at its default is ignored, since
+some clients pad a request with every parameter. Retired names are exempt: they arrive
+with no `action` and under their own spelling.
+
+**Guard a plan-gated resource** with `@plan_gated("<feature>")` below `@mcp.tool`, so a
+402 becomes a message naming the feature rather than an error worth retrying. The
+argument is only the fallback label: where the refusal names the feature itself
+("Upgrade your plan to enable Epics"), that wins — one resource can trip several
+gates, and `project` trips five.
 
 **A guard names only what is absent.** Guard order is shared-prefix first: what
 every action needs, then what one action needs. For a guard covering more than
@@ -157,12 +173,22 @@ is three-way and also varies the method name. Keep new ones local until a common
 shape is established by more than one caller.
 
 **When the workspace owns the resource outright**, the project-scoped write is
-refused, and that refusal — not a feature flag — is what says so: the flag is
-cached, and the lockout outlives it being toggled off. `workspace_owns(exc, field)`
-from the toolkit reads both shapes Plane uses, so a newly governed resource passes
-its field name and needs nothing else. `workitem_type resolve` is the worked
-example: create in the project, or on refusal adopt from the workspace catalogue
-and import.
+refused. Two helpers, used together:
+
+- `workspace_owns_resource(client, slug, resource)` reads the workspace flag that
+  governs `resource`, so a caller can take the workspace path instead of provoking a
+  refusal it already knows is coming. There is no single governance flag: work item
+  types carry their own, while everything the governance migration moved (states,
+  labels, workflows, templates, automations) shares `states_owned_by_workspace`. A
+  workspace can own one and not the other, so `GOVERNED_BY` maps each resource to
+  the flag that actually governs it — a newly governed resource adds one row.
+- `workspace_owns(exc, field)` reads the refusal, which is what settles it: the flag
+  is cached and the lockout outlives it being toggled off, so a write can still be
+  refused after the flag reads false. It handles both shapes Plane uses.
+
+`workitem_type resolve` is the worked example: ask who owns types, adopt from the
+workspace catalogue and import if it does, otherwise create in the project — and
+adopt anyway if the project write is refused.
 
 ## Tools
 

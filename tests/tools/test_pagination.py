@@ -86,3 +86,19 @@ def test_an_unpaginated_action_does_not_advertise_a_cursor(mod_name, action_name
         "no cursor fields, so the page it returns is silently truncated"
     )
     assert "per_page" not in action.optional
+
+
+def test_project_list_bounds_its_own_page(registered, spy):
+    """Unbounded, Plane returns every project: 265 of them overflowed a caller's context."""
+    from plane_mcp.tools.project import DEFAULT_PER_PAGE
+
+    registered["project"].fn(action="list")
+
+    sent = spy.recorder.only().kwargs["params"]
+    assert sent.per_page == DEFAULT_PER_PAGE, "an unbounded project list can exhaust the caller"
+
+
+def test_an_explicit_page_size_still_wins(registered, spy):
+    registered["project"].fn(action="list", per_page=5)
+
+    assert spy.recorder.only().kwargs["params"].per_page == 5

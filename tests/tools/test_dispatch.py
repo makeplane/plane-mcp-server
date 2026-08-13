@@ -203,3 +203,110 @@ def test_action_literal_covers_every_declared_action(mod, action, registered):
         return
     assert action.name in enum
     assert tuple(enum) == action_names(mod.ACTIONS)
+
+
+@pytest.mark.parametrize(
+    ("args", "named"),
+    [
+        ({"action": "create", "project_id": "p", "name": "x", "priority": "sooner-than-urgent"}, "priority"),
+        ({"action": "count", "group_by": "state"}, "group_by"),
+        ({"action": "count", "sub_group_by": "nope"}, "sub_group_by"),
+    ],
+)
+def test_an_unrecognised_workitem_value_is_refused_not_dropped(args, named, registered, spy):
+    """Dropping it created the item minus the field and reported success."""
+    result = registered["workitem"].fn(**args)
+
+    assert isinstance(result, str) and result.startswith("Error:"), result
+    assert named in result, result
+    assert not spy.recorder.calls, f"reached the SDK with an invalid {named}"
+
+
+def test_a_valid_priority_still_reaches_the_sdk(registered, spy):
+    registered["workitem"].fn(action="create", project_id="p", name="x", priority="urgent")
+
+    assert spy.recorder.only().kwargs["data"].priority == "urgent"
+
+
+@pytest.mark.parametrize(
+    ("end_date", "edits"),
+    [
+        ("2099-01-01T00:00:00+05:30", True),  # still running -- end it first
+        ("2000-01-01T00:00:00+05:30", False),  # long over
+        (None, True),  # open-ended
+    ],
+)
+def test_archive_only_ends_a_cycle_that_is_still_running(end_date, edits, registered, spy):
+    """A cycle that has already ended cannot be edited, so archiving one must not try.
+
+    `end_date` carries a time, so comparing it to a bare `YYYY-MM-DD` read every
+    same-day cycle as ending in the future and always attempted the edit.
+    """
+    from types import SimpleNamespace
+
+    spy.returns["cycles.retrieve"] = SimpleNamespace(id="c", end_date=end_date)
+    registered["cycle"].fn(action="archive", project_id="p", cycle_id="c")
+
+    assert ("cycles.update" in spy.recorder.methods) is edits, spy.recorder.methods
+    assert "cycles.archive" in spy.recorder.methods
+
+
+def test_archive_does_not_edit_a_cycle_completed_today(registered, spy):
+    """The reported failure: complete then archive could never succeed."""
+    import datetime
+    from types import SimpleNamespace
+
+    today = datetime.date.today().isoformat()
+    spy.returns["cycles.retrieve"] = SimpleNamespace(id="c", end_date=f"{today}T00:00:00+05:30")
+    registered["cycle"].fn(action="archive", project_id="p", cycle_id="c")
+
+    assert "cycles.update" not in spy.recorder.methods, "edited a cycle the API had already closed"
+    assert "cycles.archive" in spy.recorder.methods
+
+
+@pytest.mark.parametrize("field", ["assignee", "label"])
+def test_manage_accepts_several_ids_at_once(field, registered, spy):
+    """Adding three assignees was one call per id, with no tool that took a list."""
+    from types import SimpleNamespace
+
+    spy.returns["work_items.retrieve"] = SimpleNamespace(assignees=["existing"], labels=["existing"])
+    key = "add_user_id" if field == "assignee" else "add_label_id"
+    registered["workitem"].fn(**{"action": f"manage_{field}", "project_id": "p", "workitem_id": "w", key: '["a", "b"]'})
+
+    update = next(c for c in spy.recorder.calls if c.method == "work_items.update")
+    sent = update.kwargs["data"]
+    written = sent.assignees if field == "assignee" else sent.labels
+    assert written == ["existing", "a", "b"], written
+
+
+# Reported by an eval battery: `archive` answered nothing, so the agent verified with a
+# retrieve -- which 404s, because an archived item leaves the regular retrieve path.
+# One guaranteed-failing call per item archived.
+
+
+@pytest.mark.parametrize("archive", [True, False], ids=["archive", "unarchive"])
+def test_archiving_a_work_item_confirms_what_it_did(archive, registered, spy):
+    result = registered["workitem"].fn(action="archive", project_id="p", workitem_id="w", archive=archive)
+
+    assert result == {"workitem_id": "w", "archived": archive}, (
+        "archive answered nothing, so the only way to know it worked is a retrieve that 404s"
+    )
+    verb = "archive" if archive else "unarchive"
+    assert spy.recorder.only().method == f"work_items.{verb}"
+
+
+def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_modules, registered):
+    """Naming a failure mode in a description buys a pre-flight probe on every run.
+
+    Measured: the sentence about time tracking being a per-project feature cost
+    `work_log` twice the calls, because the agent read project features first. Plane's
+    own refusal arrives only when it applies and says what it is, so it is cheaper.
+    """
+    forbidden = ("returns an error", "is not enabled", "not enabled", "must be enabled")
+    offenders = [
+        (mod.NAME, phrase)
+        for mod in resource_modules
+        for phrase in forbidden
+        if phrase in registered[mod.NAME].description.lower()
+    ]
+    assert not offenders, f"descriptions predicting a refusal instead of letting the API report it: {offenders}"

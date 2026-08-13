@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from plane.errors.errors import HttpError
 from pydantic import BaseModel
 
-from plane_mcp.toolkit.paging import ENVELOPE_FIELDS, dump_results, envelope
+from plane_mcp.toolkit.paging import ENVELOPE_FIELDS, dump_results, envelope, pql_failure
 
 
 class Item(BaseModel):
@@ -75,3 +76,70 @@ def test_an_unpaginated_response_is_refused_rather_than_defaulted():
     assert "Unpaginated" in message
     assert "next_cursor" in message
     assert "does not paginate" in message
+
+
+def _refusal(body) -> HttpError:
+    return HttpError("Bad Request", status_code=400, response=body)
+
+
+def _failure(body, pql: str = 'stat = "done"'):
+    return pql_failure("workitem", "list", pql, _refusal(body))
+
+
+def test_a_refusal_keyed_on_pql_carries_the_reference():
+    failure = _failure({"pql": ["Unknown field 'stat'"]})
+    assert failure is not None
+    assert failure["failed_pql"] == 'stat = "done"'
+    assert failure["pql_reference"]
+    assert "workitem list" in failure["hint"]
+
+
+# Both shapes below were read off a live Plane instance, not invented.
+FIELD_REFUSED = {"message": "Filtering on field 'nonexistent_field' is not allowed", "code": "invalid_filter_field"}
+PARSE_FAILED = {"pql": "Invalid PQL query."}
+
+
+def test_the_parse_failure_shape_carries_the_reference():
+    assert _failure(PARSE_FAILED)["error"] == "Invalid PQL query."
+
+
+def test_the_refused_field_shape_carries_the_reference_and_says_which_field():
+    """This one keys on `code`, not `pql`; matching only `pql` dropped the reference here."""
+    failure = _failure(FIELD_REFUSED)
+    assert failure is not None and failure["pql_reference"]
+    assert failure["error"] == FIELD_REFUSED["message"], "buried the message the caller needs"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"error": "Invalid PQL near 'stat'"}, {"detail": "filter could not be parsed"}],
+    ids=["prose-pql", "prose-filter"],
+)
+def test_a_third_wording_would_still_reach_the_caller(body):
+    """Keyed on wording rather than that one code, so a new shape is not a silent regression."""
+    failure = _failure(body)
+    assert failure is not None and failure["pql_reference"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"project_id": ["Invalid uuid"]}, {"detail": "You do not have permission"}, {"name": ["This field is required"]}],
+    ids=["bad-uuid", "permission", "missing-field"],
+)
+def test_a_400_about_something_else_is_left_to_the_caller(body):
+    """Attaching the reference here would blame the filter for a failure it did not cause."""
+    assert _failure(body) is None
+
+
+@pytest.mark.parametrize(
+    ("status", "pql"),
+    [(400, ""), (403, 'stat = "done"'), (500, 'stat = "done"')],
+    ids=["no-pql-sent", "forbidden", "server-error"],
+)
+def test_only_a_400_on_a_request_that_carried_a_filter_qualifies(status, pql):
+    exc = HttpError("refused", status_code=status, response={"pql": ["nope"]})
+    assert pql_failure("workitem", "list", pql, exc) is None
+
+
+def test_a_non_dict_body_does_not_raise():
+    assert pql_failure("workitem", "list", 'stat = "done"', HttpError("x", status_code=400, response="text")) is None

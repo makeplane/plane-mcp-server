@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from plane.models.work_items import WorkItemWorkLog
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, page_params
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, page_params, plan_gated
 
 NAME = "work_log"
 TITLE = "Work logs"
@@ -20,9 +20,7 @@ ACTIONS = (
     Action("delete", ("project_id", "workitem_id", "work_log_id"), destructive=True),
 )
 
-FOOTER = (
-    "duration is in minutes. Time tracking is a per-project feature; the API returns an error when it is not enabled."
-)
+FOOTER = "duration is in minutes."
 
 LEGACY = {
     "list_work_logs": "list",
@@ -38,6 +36,7 @@ def register(mcp: FastMCP) -> None:
         description=build_description("Time logged against a work item.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
+    @plan_gated("Time tracking")
     def work_log(
         action: Literal["list", "create", "update", "delete"],
         project_id: str = "",

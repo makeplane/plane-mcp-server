@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, get_args
 
 from fastmcp import FastMCP
@@ -90,6 +90,16 @@ LEGACY = {
 LEGACY_UNMAPPED = {
     "manage_cycle_archive": "took archive=bool, which spans two actions: use archive or unarchive",
 }
+
+
+def _still_running(end_date: str | None) -> bool:
+    """Whether a cycle has yet to end. Absent means open-ended, so it is still running."""
+    if not end_date:
+        return True
+    try:
+        return datetime.fromisoformat(end_date).date() > date.today()
+    except ValueError:
+        return end_date[:10] > date.today().isoformat()
 
 
 def register(mcp: FastMCP) -> None:
@@ -263,9 +273,8 @@ def register(mcp: FastMCP) -> None:
             )
 
         if action == "archive":
-            # Plane refuses to archive a cycle whose end_date is still ahead, so end it first.
             current = client.cycles.retrieve(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
-            if not current.end_date or current.end_date > today:
+            if _still_running(current.end_date):
                 client.cycles.update(
                     workspace_slug=workspace_slug,
                     project_id=project_id,

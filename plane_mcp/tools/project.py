@@ -18,12 +18,14 @@ from plane.models.projects import (
 from plane.models.query_params import ProjectLiteListQueryParams
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, opt
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, opt, plan_gated
 
 NAME = "project"
 TITLE = "Projects"
 
 TIMEZONES = get_args(TimezoneEnum)
+
+DEFAULT_PER_PAGE = 100
 
 ACTIONS = (
     Action(
@@ -63,6 +65,7 @@ ACTIONS = (
             "close_in",
             "default_state",
             "estimate",
+            "is_time_tracking_enabled",
             "external_source",
             "external_id",
         ),
@@ -76,7 +79,18 @@ ACTIONS = (
     Action(
         "update_features",
         ("project_id",),
-        ("modules", "cycles", "views", "pages", "intakes", "workitem_types", "is_time_tracking_enabled"),
+        (
+            "modules",
+            "cycles",
+            "views",
+            "pages",
+            "intakes",
+            "workitem_types",
+            "epics",
+            "parallel_cycles",
+            "project_updates",
+            "workflows",
+        ),
         note="toggles project features on or off",
     ),
 )
@@ -108,6 +122,7 @@ def register(mcp: FastMCP) -> None:
         description=build_description("Projects in a workspace.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
+    @plan_gated("This project feature")
     def project(
         action: Literal[
             "list",
@@ -145,6 +160,10 @@ def register(mcp: FastMCP) -> None:
         pages: bool | None = None,
         intakes: bool | None = None,
         workitem_types: bool | None = None,
+        epics: bool | None = None,
+        parallel_cycles: bool | None = None,
+        project_updates: bool | None = None,
+        workflows: bool | None = None,
         is_time_tracking_enabled: bool | None = None,
         cursor: str = "",
         per_page: int = 0,
@@ -171,7 +190,7 @@ def register(mcp: FastMCP) -> None:
                 workspace_slug=workspace_slug,
                 params=ProjectLiteListQueryParams(
                     cursor=opt(cursor),
-                    per_page=opt(per_page),
+                    per_page=per_page or DEFAULT_PER_PAGE,
                     order_by=opt(order_by),
                     include_archived=False,
                 ),
@@ -268,5 +287,9 @@ def register(mcp: FastMCP) -> None:
                 pages=pages,
                 intakes=intakes,
                 work_item_types=workitem_types,
+                epics=epics,
+                parallel_cycles=parallel_cycles,
+                project_updates=project_updates,
+                workflows=workflows,
             ),
         )

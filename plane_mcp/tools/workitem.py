@@ -39,6 +39,7 @@ from plane_mcp.toolkit import (
     envelope,
     ids_of,
     missing,
+    one_of,
     opt,
     pql_failure,
 )
@@ -93,7 +94,12 @@ ACTIONS = (
         read=True,
     ),
     Action("search", ("query",), ("expand", "fields", "external_id", "external_source", "order_by"), read=True),
-    Action("count", optional=("pql", "group_by", "sub_group_by"), read=True),
+    Action(
+        "count",
+        optional=("project_id", "pql", "group_by", "sub_group_by"),
+        note="counts the whole workspace unless project_id narrows it",
+        read=True,
+    ),
     Action("create", ("project_id", "name"), WRITE_FIELDS[1:]),
     Action("update", ("project_id", "workitem_id"), WRITE_FIELDS, note="only the fields you pass are changed"),
     Action("delete", ("project_id", "workitem_id"), destructive=True),
@@ -108,13 +114,13 @@ ACTIONS = (
         "manage_assignee",
         ("project_id", "workitem_id"),
         ("add_user_id", "remove_user_id"),
-        note="mutates one entry without replacing the list; removal is applied before the addition",
+        note="each takes one id or several; the list is merged, not replaced, and removals apply first",
     ),
     Action(
         "manage_label",
         ("project_id", "workitem_id"),
         ("add_label_id", "remove_label_id"),
-        note="mutates one entry without replacing the list; removal is applied before the addition",
+        note="each takes one id or several; the list is merged, not replaced, and removals apply first",
     ),
 )
 
@@ -161,6 +167,14 @@ LEGACY = {
     "manage_work_item_assignee": "manage_assignee",
     "manage_work_item_label": "manage_label",
 }
+
+
+def _scoped_pql(pql: str, project_id: str) -> str:
+    """Narrow a PQL filter to one project, since the count endpoint is workspace-wide."""
+    if not project_id:
+        return pql
+    scope = f'project = "{project_id}"'
+    return f"({pql}) AND {scope}" if pql else scope
 
 
 def _description_html(description_html: str, description_stripped: str) -> str | None:
@@ -231,6 +245,13 @@ def register(mcp: FastMCP) -> None:
     ) -> WorkItem | WorkItemDetail | WorkItemSearch | dict[str, Any] | list[Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
+        if error := one_of("priority", priority, PRIORITIES):
+            return error
+        if error := one_of("group_by", group_by, GROUP_BY_VALUES):
+            return error
+        if error := one_of("sub_group_by", sub_group_by, GROUP_BY_VALUES):
+            return error
+
         def retrieve_params() -> RetrieveQueryParams:
             return RetrieveQueryParams(
                 expand=opt(expand),
@@ -248,8 +269,7 @@ def register(mcp: FastMCP) -> None:
                 "type_id": opt(type_id),
                 "point": opt(point),
                 "description_html": _description_html(description_html, description_stripped),
-                # Drop an unknown priority rather than sending it and getting a 400.
-                "priority": priority if priority in PRIORITIES else None,
+                "priority": opt(priority),
                 "start_date": opt(start_date),
                 "target_date": opt(target_date),
                 "sort_order": opt(sort_order),
@@ -293,15 +313,16 @@ def register(mcp: FastMCP) -> None:
             return envelope(response, opt(fields))
 
         if action == "count":
+            scoped = _scoped_pql(pql, project_id)
             try:
                 response = client.work_items.count_workspace(
                     workspace_slug=workspace_slug,
                     params=WorkItemCountQueryParams(
-                        pql=opt(pql), group_by=opt(group_by), sub_group_by=opt(sub_group_by)
+                        pql=opt(scoped), group_by=opt(group_by), sub_group_by=opt(sub_group_by)
                     ),
                 )
             except HttpError as exc:
-                failure = pql_failure("workitem", action, pql, exc)
+                failure = pql_failure("workitem", action, scoped, exc)
                 if failure:
                     return failure
                 raise
@@ -366,9 +387,9 @@ def register(mcp: FastMCP) -> None:
         if action == "archive":
             operation = client.work_items.archive if archive else client.work_items.unarchive
             operation(workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id)
-            return None
+            return {"workitem_id": workitem_id, "archived": archive}
 
-        # manage_assignee / manage_label: read, mutate one entry, write back.
+        # manage_assignee / manage_label: read the current set, mutate it, write it back.
         add, remove, field = (
             (add_user_id, remove_user_id, "assignees")
             if action == "manage_assignee"
@@ -376,14 +397,13 @@ def register(mcp: FastMCP) -> None:
         )
         if not add and not remove:
             return missing(action, f"add_{field[:-1]}_id or remove_{field[:-1]}_id")
+        # Either side takes one id or several, so adding three assignees is one call.
+        adding, removing = coerce_list(add) or [], coerce_list(remove) or []
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
         )
-        ids = ids_of(getattr(current, field))
-        if remove:
-            ids = [value for value in ids if value != remove]
-        if add and add not in ids:
-            ids.append(add)
+        ids = [value for value in ids_of(getattr(current, field)) if value not in removing]
+        ids += [value for value in adding if value not in ids]
         return client.work_items.update(
             workspace_slug=workspace_slug,
             project_id=project_id,

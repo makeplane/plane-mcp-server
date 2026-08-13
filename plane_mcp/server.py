@@ -9,7 +9,7 @@ from mcp.types import Icon
 
 from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
 from plane_mcp.instructions import SERVER_INSTRUCTIONS
-from plane_mcp.middleware import CoerceArguments, PlaneLoggingMiddleware
+from plane_mcp.middleware import CoerceArguments, PlaneLoggingMiddleware, ValidateActionArguments
 from plane_mcp.storage import build_token_store
 from plane_mcp.tools import register_tools
 
@@ -48,6 +48,15 @@ def get_allowed_client_redirect_uris() -> list[str]:
     return allowed
 
 
+def _configured(mcp: FastMCP) -> FastMCP:
+    """The middleware stack and tools every transport shares."""
+    mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
+    mcp.add_middleware(CoerceArguments())
+    mcp.add_middleware(ValidateActionArguments())
+    register_tools(mcp)
+    return mcp
+
+
 def get_oauth_mcp(base_path: str = "/") -> FastMCP:
     """Build the FastMCP instance for the OAuth HTTP / SSE transports."""
     oauth_mcp = FastMCP(
@@ -67,10 +76,7 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
             allowed_client_redirect_uris=get_allowed_client_redirect_uris(),
         ),
     )
-    oauth_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    oauth_mcp.add_middleware(CoerceArguments())
-    register_tools(oauth_mcp)
-    return oauth_mcp
+    return _configured(oauth_mcp)
 
 
 def get_header_mcp():
@@ -81,10 +87,7 @@ def get_header_mcp():
             required_scopes=["read", "write"],
         ),
     )
-    header_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    header_mcp.add_middleware(CoerceArguments())
-    register_tools(header_mcp)
-    return header_mcp
+    return _configured(header_mcp)
 
 
 def get_stdio_mcp():
@@ -92,7 +95,4 @@ def get_stdio_mcp():
         "Plane MCP Server (stdio)",
         instructions=SERVER_INSTRUCTIONS,
     )
-    stdio_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    stdio_mcp.add_middleware(CoerceArguments())
-    register_tools(stdio_mcp)
-    return stdio_mcp
+    return _configured(stdio_mcp)

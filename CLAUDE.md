@@ -45,7 +45,19 @@ ruff check plane_mcp/
 
 ### Server Factories (`server.py`)
 
-Three factory functions (`get_oauth_mcp`, `get_header_mcp`, `get_stdio_mcp`) each create a `FastMCP` instance, register all tools, and configure the appropriate auth provider. OAuth/HTTP modes use Redis for token storage (falls back to in-memory).
+Three factory functions (`get_oauth_mcp`, `get_header_mcp`, `get_stdio_mcp`) each create a `FastMCP` instance and configure the appropriate auth provider, then hand it to `_configured()` for the middleware stack and tools — one place, so a transport cannot be left a middleware behind. OAuth/HTTP modes use Redis for token storage (falls back to in-memory).
+
+### Middleware (`middleware.py`)
+
+Ordered as registered; the earlier one wraps the later:
+
+| Middleware | Does |
+|---|---|
+| `PlaneLoggingMiddleware` | structured logging, plus the tool name |
+| `CoerceArguments` | repairs arguments a client encoded as strings, before validation (`coercion.py`) |
+| `ValidateActionArguments` | refuses arguments the chosen action does not accept, from the `ACTIONS` declaration |
+
+Coercion runs before validation so an argument is judged by the value it repairs to. `ValidateActionArguments` closes a gap a per-tool schema cannot: every action's parameters share one schema, so an argument meant for another action validated cleanly and was then dropped, and the call answered a different question than the one asked. Only arguments carrying a value are judged, and retired names are exempt — they arrive with no `action` and under their own parameter spelling.
 
 ### Client Context (`client.py`)
 
@@ -81,7 +93,10 @@ Shared building blocks for the tool surface, split by *when* they act:
 | `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
 | `runtime.py` | call | `missing`, `needs`, `require`, `one_of`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
 | `paging.py` | response | `envelope`, `dump_results`, `pql_failure`, `workitem_page` |
+| `governance.py` | policy | `workspace_owns_resource`, `GOVERNED_BY`, `workspace_owns`, `migration_in_progress`, `plan_gated` |
 | `transforms.py` | listing | `StripOutputSchemas` |
+
+Governance has two questions, and both matter. `workspace_owns_resource` reads the workspace flag that governs a resource — used *before* a write, to pick the scope. `workspace_owns` reads the refusal — used *after*, because the flag is cached and the lockout outlives it being toggled off. There is no single flag: work item types carry their own (`is_work_item_types_enabled`, public `work_item_types`), while states, labels, workflows, templates and automations share `workspace_governance_status` (public `states_owned_by_workspace`). `GOVERNED_BY` maps resource to flag so a newly governed resource is one row.
 
 Names are re-exported from `plane_mcp/toolkit/__init__.py`, so a resource module needs one import: `from plane_mcp.toolkit import Action, build_description, missing, opt`.
 

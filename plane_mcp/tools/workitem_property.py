@@ -32,6 +32,7 @@ from plane.models.work_item_properties import (
     WorkItemPropertyOption,
     WorkItemPropertyValueDetail,
 )
+from plane.models.work_item_types import WorkspaceWorkItemTypePropertyLink
 from pydantic import ValidationError
 
 from plane_mcp.client import get_plane_client_context
@@ -45,6 +46,8 @@ from plane_mcp.toolkit import (
     one_of,
     opt,
     page_params,
+    plan_gated,
+    workspace_owns,
 )
 
 NAME = "workitem_property"
@@ -105,9 +108,10 @@ ACTIONS = (
     Action("delete", ("workitem_property_id",), ("project_id", "workitem_type_id"), destructive=True),
     Action(
         "manage_type_properties",
-        ("project_id", "workitem_type_id"),
-        ("attach_ids", "detach_ids"),
-        note="detach removes the association only; it does not delete the property",
+        ("workitem_type_id",),
+        ("project_id", "attach_ids", "detach_ids"),
+        note="omit project_id where the workspace owns types; detach removes the association only, "
+        "it does not delete the property",
     ),
     Action("list_options", ("property_id",), ("project_id",), read=True),
     Action("retrieve_option", ("property_id", "option_id"), ("project_id",), read=True),
@@ -139,6 +143,8 @@ FOOTER = (
     'options takes a JSON array of {"name", "color", "is_default"} objects. '
     f"display_format is required by TEXT ({', '.join(TEXT_FORMATS)}) and "
     f"DATETIME ({', '.join(DATE_FORMATS)}) properties. "
+    "A property lives with its type: where the workspace owns types, pass workitem_type_id "
+    "without project_id and it is created in the workspace catalogue and associated for you. "
     "list resolves scope in this order: project_id + workitem_type_id is type-scoped (falling "
     "back to project-flat then workspace when empty), project_id alone is every property in the "
     "project, and neither is every workspace property. To filter by property name in PQL, call "
@@ -244,6 +250,53 @@ def _absent(exc: HttpError) -> bool:
     return exc.status_code == 404
 
 
+def _link_to_type(client, workspace_slug: str, type_id: str, property_ids: list[str]) -> None:
+    """Associate workspace properties with a workspace type."""
+    client.workspace_work_item_types.properties.create(
+        workspace_slug=workspace_slug,
+        type_id=type_id,
+        data=WorkspaceWorkItemTypePropertyLink(properties=property_ids),
+    )
+
+
+def _create_at_workspace(client, workspace_slug: str, type_id: str, data: CreateWorkItemProperty) -> WorkItemProperty:
+    """Create a property in the workspace catalogue and associate it with its type."""
+    if data.is_active is None:
+        data = data.model_copy(update={"is_active": True})
+    created = client.workspace_work_item_properties.create(workspace_slug=workspace_slug, data=data)
+    _link_to_type(client, workspace_slug, type_id, [str(created.id)])
+    return created
+
+
+def _manage_workspace_links(
+    client, workspace_slug: str, type_id: str, attach: list[str] | None, detach: list[str] | None
+) -> list[str] | None:
+    """Attach or detach workspace properties on a workspace type."""
+    if attach:
+        _link_to_type(client, workspace_slug, type_id, attach)
+    links = client.workspace_work_item_types.properties
+    for one in detach or []:
+        links.delete(workspace_slug=workspace_slug, type_id=type_id, property_id=one)
+    return attach
+
+
+def _manage_project_links(
+    client, workspace_slug: str, project_id: str, type_id: str, attach: list[str] | None, detach: list[str] | None
+) -> list[str] | None:
+    """Attach or detach project properties on a project type."""
+    properties = client.work_item_properties
+    attached = None
+    if attach:
+        attached = properties.attach_to_type(
+            workspace_slug=workspace_slug, project_id=project_id, type_id=type_id, property_ids=attach
+        )
+    for one in detach or []:
+        properties.detach_from_type(
+            workspace_slug=workspace_slug, project_id=project_id, type_id=type_id, property_id=one
+        )
+    return attached
+
+
 def _workspace_props_for_type(client, workspace_slug: str, type_id: str) -> list:
     """Workspace properties linked to a type. The link endpoint returns bare ids."""
     try:
@@ -265,6 +318,7 @@ def register(mcp: FastMCP) -> None:
         description=build_description("Custom work item properties and their options.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
+    @plan_gated("Work item properties")
     def workitem_property(
         action: Literal[
             "list",
@@ -297,10 +351,6 @@ def register(mcp: FastMCP) -> None:
         default_value: str = "",
         options: str = "",
         display_format: str = "",
-        # A property value is genuinely polymorphic -- the property's own type
-        # decides. Typing it `str` and re-deriving the type from how the string
-        # looked corrupted real data ("007" -> 7). The anyOf block this renders
-        # costs 92 characters of listing; the guessing cost correctness.
         value: str | bool | int | float | list[str] = "",
         attach_ids: str = "",
         detach_ids: str = "",
@@ -417,31 +467,30 @@ def register(mcp: FastMCP) -> None:
                 external_id=opt(external_id),
                 options=parsed_options,
             )
-            return scope.call("create")(workspace_slug=workspace_slug, **scope.kwargs, data=data)
+            if workitem_type_id and not project_id:
+                return _create_at_workspace(client, workspace_slug, workitem_type_id, data)
+            try:
+                return scope.call("create")(workspace_slug=workspace_slug, **scope.kwargs, data=data)
+            except HttpError as exc:
+                if not (workitem_type_id and workspace_owns(exc)):
+                    raise
+                return _create_at_workspace(client, workspace_slug, workitem_type_id, data)
 
         if action == "manage_type_properties":
             attach = coerce_list(attach_ids)
             detach = coerce_list(detach_ids)
-            if error := needs(action, project_id=project_id, workitem_type_id=workitem_type_id):
+            if error := needs(action, workitem_type_id=workitem_type_id):
                 return error
             if not attach and not detach:
                 return missing(action, "attach_ids or detach_ids")
-            attached = None
-            if attach:
-                attached = properties.attach_to_type(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    type_id=workitem_type_id,
-                    property_ids=attach,
-                )
-            for one in detach or []:
-                properties.detach_from_type(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    type_id=workitem_type_id,
-                    property_id=one,
-                )
-            return attached
+            if not project_id:
+                return _manage_workspace_links(client, workspace_slug, workitem_type_id, attach, detach)
+            try:
+                return _manage_project_links(client, workspace_slug, project_id, workitem_type_id, attach, detach)
+            except HttpError as exc:
+                if not workspace_owns(exc):
+                    raise
+                return _manage_workspace_links(client, workspace_slug, workitem_type_id, attach, detach)
 
         if action in ("retrieve", "update", "delete"):
             if not workitem_property_id:

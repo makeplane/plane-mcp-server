@@ -14,7 +14,7 @@ The four modules split by *when* they act:
     spec        declaration time -- describe a resource's actions
     runtime     call time -- validate parameters, shape SDK payloads
     paging      response time -- Plane's pagination envelope and PQL failures
-    governance  refusal time -- recognise a workspace-owned resource
+    governance  refusal time -- recognise a workspace-owned resource, read its flag
     transforms  listing time -- reshape the advertised catalogue
 
 Names are re-exported here so a resource module needs one import, not four. The
@@ -23,7 +23,14 @@ submodules stay importable for callers that want to be explicit.
 
 from __future__ import annotations
 
-from plane_mcp.toolkit.governance import migration_in_progress, workspace_owns
+from plane_mcp.toolkit.governance import (
+    WORK_ITEM_TYPES,
+    migration_in_progress,
+    plan_gated,
+    plan_required,
+    workspace_owns,
+    workspace_owns_resource,
+)
 from plane_mcp.toolkit.paging import dump_results, envelope, pql_failure, workitem_page
 from plane_mcp.toolkit.runtime import (
     as_params,
@@ -45,6 +52,7 @@ from plane_mcp.toolkit.spec import (
 from plane_mcp.toolkit.transforms import StripOutputSchemas
 
 __all__ = [
+    "WORK_ITEM_TYPES",
     "Action",
     "StripOutputSchemas",
     "action_names",
@@ -61,8 +69,11 @@ __all__ = [
     "one_of",
     "opt",
     "page_params",
+    "plan_gated",
+    "plan_required",
     "pql_failure",
     "require",
     "workspace_owns",
+    "workspace_owns_resource",
     "workitem_page",
 ]

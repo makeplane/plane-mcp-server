@@ -16,6 +16,7 @@ from plane.models.work_item_types import CreateWorkItemType, UpdateWorkItemType,
 
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.toolkit import (
+    WORK_ITEM_TYPES,
     Action,
     build_annotations,
     build_description,
@@ -24,7 +25,9 @@ from plane_mcp.toolkit import (
     needs,
     opt,
     page_params,
+    plan_gated,
     workspace_owns,
+    workspace_owns_resource,
 )
 
 NAME = "workitem_type"
@@ -112,6 +115,10 @@ def _resolve(client, workspace_slug: str, project_id: str, name: str) -> WorkIte
     if in_project is not None:
         return in_project
 
+    # Ask which scope owns types before attempting a write the workspace would refuse.
+    if workspace_owns_resource(client, workspace_slug, WORK_ITEM_TYPES):
+        return _adopt_from_workspace(client, workspace_slug, project_id, name, target)
+
     project_features = client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
     if not project_features.model_dump().get(PROJECT_TYPES_FEATURE):
         try:
@@ -119,7 +126,7 @@ def _resolve(client, workspace_slug: str, project_id: str, name: str) -> WorkIte
                 workspace_slug=workspace_slug, project_id=project_id, data=ProjectFeature(work_item_types=True)
             )
         except HttpError as exc:
-            # The refusal, not a feature read, is what settles who owns the vocabulary.
+            # The flag is cached and the lockout outlives it, so the refusal still decides.
             if not workspace_owns(exc, PROJECT_TYPES_FEATURE):
                 raise
             return _adopt_from_workspace(client, workspace_slug, project_id, name, target)
@@ -135,6 +142,7 @@ def register(mcp: FastMCP) -> None:
         description=build_description("Work item types, at project or workspace scope.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
+    @plan_gated("Work item types")
     def workitem_type(
         action: Literal["list", "retrieve", "resolve", "create", "update", "delete", "import_to_project"],
         project_id: str = "",

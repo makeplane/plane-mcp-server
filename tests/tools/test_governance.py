@@ -91,6 +91,7 @@ def test_the_resolver_matches_the_sdk(project_id):
         for name in scope:
             assert name in takes, f"{verb}() does not take {name!r}"
 
+
 class _Features:
     """A features payload; `extra: allow` on the SDK model means unknown keys survive."""
 
@@ -137,9 +138,48 @@ def test_resolve_creates_in_the_project_when_the_project_owns_types(registered, 
     assert "workspace_work_item_types.create" not in spy.recorder.methods
 
 
-def test_resolve_adopts_from_the_workspace_when_the_project_is_refused(registered, spy):
-    """The reported failure: resolve dead-ended on this 400 instead of adopting."""
+def test_resolve_adopts_from_the_workspace_when_the_workspace_owns_types(registered, spy):
+    """Asking first spares a write the workspace is certain to refuse."""
     spy.returns["work_item_types.list"] = []
+    spy.returns["workspaces.get_features"] = _Features(work_item_types=True)
+    spy.returns["workspace_work_item_types.list"] = []
+    spy.returns["workspace_work_item_types.create"] = _typed("Epic")
+
+    result = registered["workitem_type"].fn(action="resolve", project_id=PROJECT, name="Epic")
+
+    assert result.name == "Epic"
+    assert "work_item_types.import_to_project" in spy.recorder.methods
+    assert "projects.update_features" not in spy.recorder.methods, "provoked a refusal it already knew was coming"
+    assert "projects.get_features" not in spy.recorder.methods
+
+
+def test_resolve_reads_the_flag_that_governs_types_not_the_states_one(registered, spy):
+    """The two flags are independent (`api/views/workspace.py:53,59`).
+
+    A workspace mid-governance-migration for states can still own its types at the
+    project level. Keying types off `states_owned_by_workspace` would send it down
+    the workspace path and strand every project-level resolve.
+    """
+    spy.returns["work_item_types.list"] = []
+    spy.returns["workspaces.get_features"] = _Features(work_item_types=False, states_owned_by_workspace=True)
+    spy.returns["projects.get_features"] = _Features(work_item_types=True)
+    spy.returns["work_item_types.create"] = _typed("Bug")
+
+    result = registered["workitem_type"].fn(action="resolve", project_id=PROJECT, name="Bug")
+
+    assert result.name == "Bug"
+    assert "work_item_types.create" in spy.recorder.methods
+    assert "workspace_work_item_types.create" not in spy.recorder.methods
+
+
+def test_resolve_adopts_from_the_workspace_when_the_project_is_refused(registered, spy):
+    """The reported failure: resolve dead-ended on this 400 instead of adopting.
+
+    The flag reads false here on purpose: it is cached and the lockout outlives it
+    being toggled off, so the refusal has to stay the deciding signal.
+    """
+    spy.returns["work_item_types.list"] = []
+    spy.returns["workspaces.get_features"] = _Features(work_item_types=False)
     spy.returns["projects.get_features"] = _Features(work_item_types=False)
     spy.returns["projects.update_features"] = _refusal()
     spy.returns["workspace_work_item_types.list"] = []
@@ -185,3 +225,135 @@ def test_the_project_feature_key_matches_the_sdk():
     assert PROJECT_TYPES_FEATURE in ProjectFeature.model_fields, (
         f"{PROJECT_TYPES_FEATURE!r} is not a ProjectFeature field: {sorted(ProjectFeature.model_fields)}"
     )
+
+
+def test_every_declared_feature_toggle_is_a_real_sdk_field():
+    """`ProjectFeature` allows extras, so a misspelled toggle would be accepted and dropped."""
+    from plane.models.projects import ProjectFeature
+
+    from plane_mcp.tools.project import ACTIONS
+
+    declared = next(a for a in ACTIONS if a.name == "update_features").optional
+    # The tool spells this one `workitem_types`; the SDK field kept `work_item_types`.
+    fields = set(ProjectFeature.model_fields)
+    unknown = [name for name in declared if name.replace("workitem", "work_item") not in fields]
+    assert not unknown, f"not ProjectFeature fields: {unknown} (have {sorted(fields)})"
+
+
+def test_the_feature_toggles_the_sdk_offers_are_all_reachable():
+    """A flag the SDK supports but the tool never declares cannot be set through this server."""
+    from plane.models.projects import ProjectFeature
+
+    from plane_mcp.tools.project import ACTIONS
+
+    declared = {
+        n.replace("workitem", "work_item") for n in next(a for a in ACTIONS if a.name == "update_features").optional
+    }
+    missing_flags = set(ProjectFeature.model_fields) - declared
+    assert not missing_flags, f"ProjectFeature flags with no way to set them: {sorted(missing_flags)}"
+
+PROPERTY_REFUSAL = HttpError(
+    "Bad Request", status_code=400, response={"error": "This resource is managed at the workspace level"}
+)
+PROPERTY_REFUSAL.response["code"] = "workspace_managed"
+
+
+def _property(name: str = "Root cause"):
+    return SimpleNamespace(id="prop-1", display_name=name, is_active=True)
+
+
+def test_a_property_created_at_workspace_scope_is_attached_to_its_type(registered, spy):
+    """Creating it is half the job; unattached, no work item can ever carry it."""
+    spy.returns["workspace_work_item_properties.create"] = _property()
+
+    registered["workitem_property"].fn(
+        action="create", workitem_type_id="type-1", display_name="Root cause", property_type="TEXT"
+    )
+
+    assert "workspace_work_item_types.properties.create" in spy.recorder.methods, (
+        "created the property but never associated it with the type"
+    )
+
+
+def test_a_refused_project_scoped_create_is_re_aimed_at_the_workspace(registered, spy):
+    """The natural call names the project, as every other action does; it must still work."""
+    spy.returns["work_item_properties.create"] = PROPERTY_REFUSAL
+    spy.returns["workspace_work_item_properties.create"] = _property()
+
+    result = registered["workitem_property"].fn(
+        action="create",
+        project_id=PROJECT,
+        workitem_type_id="type-1",
+        display_name="Root cause",
+        property_type="TEXT",
+    )
+
+    assert getattr(result, "display_name", None) == "Root cause"
+    assert "workspace_work_item_properties.create" in spy.recorder.methods
+    assert "workspace_work_item_types.properties.create" in spy.recorder.methods
+
+
+def test_the_workspace_create_sends_the_active_default(registered, spy):
+    """The workspace endpoint answers is_active false where the field's default is true."""
+    spy.returns["workspace_work_item_properties.create"] = _property()
+
+    registered["workitem_property"].fn(
+        action="create", workitem_type_id="type-1", display_name="Root cause", property_type="TEXT"
+    )
+
+    created = next(c for c in spy.recorder.calls if c.method == "workspace_work_item_properties.create")
+    assert created.kwargs["data"].is_active is True, "property would be created hidden"
+
+
+def test_an_explicit_inactive_property_is_left_alone(registered, spy):
+    """Defaulting must not overrule a caller who asked for inactive."""
+    spy.returns["workspace_work_item_properties.create"] = _property()
+
+    registered["workitem_property"].fn(
+        action="create",
+        workitem_type_id="type-1",
+        display_name="Root cause",
+        property_type="TEXT",
+        is_active=False,
+    )
+
+    created = next(c for c in spy.recorder.calls if c.method == "workspace_work_item_properties.create")
+    assert created.kwargs["data"].is_active is False
+
+
+def test_type_properties_can_be_managed_without_a_project(registered, spy):
+    """project_id was required, and supplying it is exactly what a governed workspace refuses."""
+    registered["workitem_property"].fn(action="manage_type_properties", workitem_type_id="type-1", attach_ids="prop-1")
+
+    assert spy.recorder.only().method == "workspace_work_item_types.properties.create"
+
+
+def test_a_refused_project_scoped_attach_is_re_aimed_at_the_workspace(registered, spy):
+    spy.returns["work_item_properties.attach_to_type"] = PROPERTY_REFUSAL
+
+    registered["workitem_property"].fn(
+        action="manage_type_properties", project_id=PROJECT, workitem_type_id="type-1", attach_ids="prop-1"
+    )
+
+    assert "workspace_work_item_types.properties.create" in spy.recorder.methods
+
+
+def test_detaching_at_workspace_scope_uses_the_link_endpoint(registered, spy):
+    registered["workitem_property"].fn(action="manage_type_properties", workitem_type_id="type-1", detach_ids="prop-1")
+
+    call = spy.recorder.only()
+    assert call.method == "workspace_work_item_types.properties.delete"
+    assert call.kwargs["property_id"] == "prop-1"
+
+
+def test_an_unrelated_failure_on_a_property_write_still_surfaces(registered, spy):
+    spy.returns["work_item_properties.create"] = HttpError("Forbidden", status_code=403, response={})
+
+    with pytest.raises(HttpError):
+        registered["workitem_property"].fn(
+            action="create",
+            project_id=PROJECT,
+            workitem_type_id="type-1",
+            display_name="Root cause",
+            property_type="TEXT",
+        )
