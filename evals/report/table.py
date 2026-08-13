@@ -12,7 +12,7 @@ from evals.tasks import TASKS_BY_ID
 
 from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
 from .statistics import wilson_interval
-from .summary import noise_floor_statement
+from .summary import Summary, noise_floor_statement
 
 
 def format_number(value: float | None, digits: int = 1) -> str:
@@ -32,35 +32,32 @@ def format_result_tokens(value: float | None, mode: str) -> str:
     return f"{result_tokens_marker(mode)}{formatted}"
 
 
-def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
-    meta = summary.get("_meta") or {}
+def print_table(summary: Summary, title: str) -> None:
     print(title)
-    token_mode = str(meta.get("result_tokens_mode") or "unavailable")
+    token_mode = summary.result_tokens_mode
     if token_mode == "estimated":
         print("result-token columns marked ~: entirely estimated from result characters")
     elif token_mode == "mixed":
         print("result-token columns marked *: mixed measured and estimated values (~ marks estimated tasks)")
     elif token_mode == "unlabeled":
         print("result-token columns marked ?: include legacy values with unknown measurement status")
-    if meta.get("infra_errors"):
-        print(f"infra errors: {meta['infra_errors']}")
-    aggregate_count = int(meta.get("aggregate_n") or 0)
+    if summary.infra_errors:
+        print(f"infra errors: {summary.infra_errors}")
+    aggregate_count = summary.aggregate_n
     if aggregate_count:
-        aggregate_passes = int(meta.get("aggregate_k") or 0)
-        lower = float(meta.get("aggregate_wilson_lo") or 0.0)
-        upper = float(meta.get("aggregate_wilson_hi") or 0.0)
+        aggregate_passes = summary.aggregate_k
+        lower = summary.aggregate_wilson_lo
+        upper = summary.aggregate_wilson_hi
         rate = aggregate_passes / aggregate_count if aggregate_count else 0.0
         print(
             f"aggregate success: {aggregate_passes}/{aggregate_count} ({rate:.1%}) Wilson95 [{lower:.2f},{upper:.2f}]"
         )
-    multiple_repetitions = bool(meta.get("multi_rep"))
+    multiple_repetitions = summary.multi_rep
     if multiple_repetitions:
-        print(noise_floor_statement(int(meta.get("unstable_tasks") or 0)))
+        print(noise_floor_statement(summary.unstable_tasks))
     # Multi-rep files keep the repetition-aware layout even when errors leave
     # only one completed result in every task's success-rate denominator.
-    show_variation = multiple_repetitions or any(
-        values.get("n", 0) > 1 for task_id, values in summary.items() if task_id != "_meta"
-    )
+    show_variation = multiple_repetitions or any(task.n > 1 for task in summary.tasks.values())
     token_marker = result_tokens_marker(token_mode)
     median_result_tokens_header = f"med_rtok{token_marker}"
     percentile_result_tokens_header = f"p95_rtok{token_marker}"
@@ -85,39 +82,37 @@ def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
         )
     print(header)
     print("-" * len(header))
-    for task_id, values in summary.items():
-        if task_id == "_meta":
-            continue
-        wilson = f"[{values['wilson_lo']:.2f},{values['wilson_hi']:.2f}]"
-        quartiles = f"{format_number(values['calls_q1'])}-{format_number(values['calls_q3'])}"
-        optimal = values["optimal_calls"] if values["optimal_calls"] is not None else "-"
-        task_token_mode = str(values.get("result_tokens_mode") or "unavailable")
+    for task_id, values in summary.tasks.items():
+        wilson = f"[{values.wilson_lo:.2f},{values.wilson_hi:.2f}]"
+        quartiles = f"{format_number(values.calls_q1)}-{format_number(values.calls_q3)}"
+        optimal = values.optimal_calls if values.optimal_calls is not None else "-"
+        task_token_mode = values.result_tokens_mode
         if show_variation:
-            unstable = ("YES" if values.get("unstable") else "no") if multiple_repetitions else ""
+            unstable = ("YES" if values.unstable else "no") if multiple_repetitions else ""
             unstable_cell = f"{unstable:>8} " if multiple_repetitions else ""
             print(
-                f"{task_id:<6} {values['n']:>3} {values['success']:>8} {wilson:>16} "
+                f"{task_id:<6} {values.n:>3} {values.success:>8} {wilson:>16} "
                 f"{unstable_cell}"
-                f"{format_number(values.get('calls_min')):>9} "
-                f"{format_number(values['med_calls']):>9} "
-                f"{format_number(values.get('calls_max')):>9} "
-                f"{optimal!s:>4} {quartiles:>11} {values['mispick_rate']:>7.1%} "
-                f"{values['errored_calls']:>4} {values['capped']:>6} "
-                f"{values['harness_err']:>5} {values.get('infra_err', 0):>5} "
-                f"{format_result_tokens(values['med_result_tokens'], task_token_mode):>9} "
-                f"{format_result_tokens(values['p95_result_tokens'], task_token_mode):>9} "
-                f"{format_number(values['med_cum_input'], 0):>10}"
+                f"{format_number(values.calls_min):>9} "
+                f"{format_number(values.med_calls):>9} "
+                f"{format_number(values.calls_max):>9} "
+                f"{optimal!s:>4} {quartiles:>11} {values.mispick_rate:>7.1%} "
+                f"{values.errored_calls:>4} {values.capped:>6} "
+                f"{values.harness_err:>5} {values.infra_err:>5} "
+                f"{format_result_tokens(values.med_result_tokens, task_token_mode):>9} "
+                f"{format_result_tokens(values.p95_result_tokens, task_token_mode):>9} "
+                f"{format_number(values.med_cum_input, 0):>10}"
             )
         else:
             print(
-                f"{task_id:<6} {values['n']:>3} {values['success']:>8} {wilson:>16} "
-                f"{format_number(values['med_calls']):>9} {optimal!s:>4} "
-                f"{quartiles:>11} {values['mispick_rate']:>7.1%} "
-                f"{values['errored_calls']:>4} {values['capped']:>6} "
-                f"{values['harness_err']:>5} {values.get('infra_err', 0):>5} "
-                f"{format_result_tokens(values['med_result_tokens'], task_token_mode):>9} "
-                f"{format_result_tokens(values['p95_result_tokens'], task_token_mode):>9} "
-                f"{format_number(values['med_cum_input'], 0):>10}"
+                f"{task_id:<6} {values.n:>3} {values.success:>8} {wilson:>16} "
+                f"{format_number(values.med_calls):>9} {optimal!s:>4} "
+                f"{quartiles:>11} {values.mispick_rate:>7.1%} "
+                f"{values.errored_calls:>4} {values.capped:>6} "
+                f"{values.harness_err:>5} {values.infra_err:>5} "
+                f"{format_result_tokens(values.med_result_tokens, task_token_mode):>9} "
+                f"{format_result_tokens(values.p95_result_tokens, task_token_mode):>9} "
+                f"{format_number(values.med_cum_input, 0):>10}"
             )
 
 

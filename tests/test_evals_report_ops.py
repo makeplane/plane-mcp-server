@@ -161,12 +161,12 @@ def test_real_historical_rows_parse_and_report_with_backward_defaults():
     assert [call.result_tokens for call in battery5.calls] == [315, 64]
 
     summary = summarize(rows)
-    assert summary["L3"]["success"] == "1/1"
-    assert summary["L3"]["med_calls"] == 1
-    assert summary["L3"]["result_tokens_mode"] == "unavailable"
-    assert summary["R2"]["success"] == "1/1"
-    assert summary["R2"]["med_calls"] == 2
-    assert summary["R2"]["result_tokens_mode"] == "estimated"
+    assert summary.tasks["L3"].success == "1/1"
+    assert summary.tasks["L3"].med_calls == 1
+    assert summary.tasks["L3"].result_tokens_mode == "unavailable"
+    assert summary.tasks["R2"].success == "1/1"
+    assert summary.tasks["R2"].med_calls == 2
+    assert summary.tasks["R2"].result_tokens_mode == "estimated"
 
 
 def test_dedupe_rows_latest_pure():
@@ -190,20 +190,19 @@ def test_summarize_aggregate_wilson_and_call_variance():
         {"task_id": "R2", "rep": 0, "success": True, "num_calls": 1, "calls": []},
     ]
     s = summarize(rows)
-    assert s["R1"]["n"] == 3
-    assert s["R1"]["k"] == 2
-    assert s["R1"]["calls_min"] == 2.0
-    assert s["R1"]["calls_max"] == 6.0
-    assert s["R1"]["med_calls"] == 4.0
-    assert s["R1"]["unstable"] is True
-    assert s["R2"]["unstable"] is False
-    meta = s["_meta"]
-    assert meta["aggregate_k"] == 3
-    assert meta["aggregate_n"] == 4
-    assert meta["multi_rep"] is True
-    assert meta["unstable_task_ids"] == ["R1"]
-    assert meta["unstable_tasks"] == 1
-    assert 0.0 <= meta["aggregate_wilson_lo"] <= meta["aggregate_wilson_hi"] <= 1.0
+    assert s.tasks["R1"].n == 3
+    assert s.tasks["R1"].k == 2
+    assert s.tasks["R1"].calls_min == 2.0
+    assert s.tasks["R1"].calls_max == 6.0
+    assert s.tasks["R1"].med_calls == 4.0
+    assert s.tasks["R1"].unstable is True
+    assert s.tasks["R2"].unstable is False
+    assert s.aggregate_k == 3
+    assert s.aggregate_n == 4
+    assert s.multi_rep is True
+    assert s.unstable_task_ids == ["R1"]
+    assert s.unstable_tasks == 1
+    assert 0.0 <= s.aggregate_wilson_lo <= s.aggregate_wilson_hi <= 1.0
 
 
 def test_multi_rep_synthetic_file_reports_wilson_unstable_and_noise_floor(tmp_path: Path, capsys):
@@ -231,15 +230,15 @@ def test_multi_rep_synthetic_file_reports_wilson_unstable_and_noise_floor(tmp_pa
     summary = summarize(loaded)
 
     assert len(loaded) == 9  # distinct rep keys are not deduped away
-    assert summary["R1"]["success"] == "3/3"
-    assert summary["R1"]["unstable"] is False
-    assert summary["R2"]["success"] == "2/3"
-    assert summary["R2"]["wilson_lo"] == pytest.approx(0.2077, abs=1e-4)
-    assert summary["R2"]["wilson_hi"] == pytest.approx(0.9385, abs=1e-4)
-    assert summary["R2"]["unstable"] is True
-    assert summary["R3"]["success"] == "0/3"
-    assert summary["R3"]["unstable"] is False
-    assert summary["_meta"]["unstable_task_ids"] == ["R2"]
+    assert summary.tasks["R1"].success == "3/3"
+    assert summary.tasks["R1"].unstable is False
+    assert summary.tasks["R2"].success == "2/3"
+    assert summary.tasks["R2"].wilson_lo == pytest.approx(0.2077, abs=1e-4)
+    assert summary.tasks["R2"].wilson_hi == pytest.approx(0.9385, abs=1e-4)
+    assert summary.tasks["R2"].unstable is True
+    assert summary.tasks["R3"].success == "0/3"
+    assert summary.tasks["R3"].unstable is False
+    assert summary.unstable_task_ids == ["R2"]
 
     report_mod.print_table(summary, "Summary: multi.jsonl")
     output = capsys.readouterr().out
@@ -280,8 +279,8 @@ def test_report_marks_entirely_estimated_result_token_columns(capsys):
         }
     ]
     summary = summarize(rows)
-    assert summary["_meta"]["result_tokens_mode"] == "estimated"
-    assert summary["R1"]["result_tokens_mode"] == "estimated"
+    assert summary.result_tokens_mode == "estimated"
+    assert summary.tasks["R1"].result_tokens_mode == "estimated"
 
     report_mod.print_table(summary, "estimated")
     output = capsys.readouterr().out
@@ -310,8 +309,8 @@ def test_report_marks_mixed_measured_and_estimated_columns(capsys):
         },
     ]
     summary = summarize(rows)
-    assert summary["_meta"]["result_tokens_mode"] == "mixed"
-    assert summary["R1"]["result_tokens_mode"] == "mixed"
+    assert summary.result_tokens_mode == "mixed"
+    assert summary.tasks["R1"].result_tokens_mode == "mixed"
 
     report_mod.print_table(summary, "mixed")
     output = capsys.readouterr().out

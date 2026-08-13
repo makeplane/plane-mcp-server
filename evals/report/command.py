@@ -81,11 +81,9 @@ def main(argv: list[str] | None = None) -> int:
         path = paths[0]
         rows = load_rows(path, dedupe=dedupe)
         summary = summarize(rows)
-        task_keys = [key for key in summary if key != "_meta"]
-        if not task_keys:
-            infrastructure_errors = (summary.get("_meta") or {}).get("infra_errors", 0)
-            if infrastructure_errors:
-                print(f"infra errors: {infrastructure_errors}")
+        if not summary.tasks:
+            if summary.infra_errors:
+                print(f"infra errors: {summary.infra_errors}")
             print(f"(no non-skipped / non-error rows in {path})")
             return 0
         print_table(summary, f"Summary: {path}")

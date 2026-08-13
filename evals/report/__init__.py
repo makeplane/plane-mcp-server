@@ -12,7 +12,7 @@ from .load import (
     read_result,
 )
 from .statistics import iqr, median, percentile, sign_test_pvalue, wilson_interval
-from .summary import ResultTokensMode, noise_floor_statement, result_tokens_mode, summarize
+from .summary import ResultTokensMode, Summary, TaskSummary, noise_floor_statement, result_tokens_mode, summarize
 from .table import (
     build_multi_surface_table,
     format_multi_rep_surface_cell,
@@ -32,6 +32,8 @@ __all__ = [
     "DedupeMode",
     "ResultRow",
     "ResultTokensMode",
+    "Summary",
+    "TaskSummary",
     "ab_compare",
     "build_multi_surface_table",
     "dedupe_rows_latest",

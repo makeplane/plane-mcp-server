@@ -744,38 +744,23 @@ def test_summarize_excludes_infra_errors_from_success():
         {"task_id": "R1", "success": False, "num_calls": 3, "calls": [], "error": None},
     ]
     summary = summarize(rows)
-    assert summary["_meta"]["infra_errors"] == 2
-    assert summary["R1"]["n"] == 2  # only non-infra, non-error rows
-    assert summary["R1"]["k"] == 1
-    assert summary["R1"]["success"] == "1/2"
-    assert summary["R1"]["infra_err"] == 2
+    assert summary.infra_errors == 2
+    assert summary.tasks["R1"].n == 2  # only non-infra, non-error rows
+    assert summary.tasks["R1"].k == 1
+    assert summary.tasks["R1"].success == "1/2"
+    assert summary.tasks["R1"].infra_err == 2
     assert is_infra_error_row(rows[1]) is True
     assert is_infra_error_row(rows[0]) is False
 
 
 def test_print_table_shows_infra_errors(capsys):
-    summary = {
-        "R1": {
-            "n": 1,
-            "k": 1,
-            "success": "1/1",
-            "wilson_lo": 0.2,
-            "wilson_hi": 1.0,
-            "med_calls": 1.0,
-            "calls_q1": 1.0,
-            "calls_q3": 1.0,
-            "optimal_calls": 1,
-            "mispick_rate": 0.0,
-            "errored_calls": 0,
-            "capped": 0,
-            "harness_err": 0,
-            "infra_err": 2,
-            "med_result_tokens": None,
-            "p95_result_tokens": None,
-            "med_cum_input": 0.0,
-        },
-        "_meta": {"infra_errors": 2},
-    }
+    summary = summarize(
+        [
+            {"task_id": "R1", "success": True, "num_calls": 1, "calls": []},
+            {"task_id": "R1", "error": "seed failed", "error_class": "infra_seed"},
+            {"task_id": "R1", "error": "CLI failed", "error_class": "infra_cli"},
+        ]
+    )
     report_mod.print_table(summary, "Summary: test")
     out = capsys.readouterr().out
     assert "infra errors: 2" in out
@@ -1125,5 +1110,5 @@ def test_task_skipped_from_seed_records_a_skip_row(tmp_path: Path, monkeypatch):
     # `skipped` is the discriminator, not `success` — a skip must leave the
     # success denominator empty rather than counting as a failed task.
     summary = summarize(load_rows(out))
-    assert "L2" not in summary
-    assert summary["_meta"]["aggregate_n"] == 0
+    assert "L2" not in summary.tasks
+    assert summary.aggregate_n == 0

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import Literal
 
 from evals.results import TaskResult
 from evals.tasks import TASKS_BY_ID
@@ -12,6 +13,59 @@ from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
 from .statistics import iqr, median, percentile, wilson_interval
 
 ResultTokensMode = Literal["measured", "estimated", "mixed", "unlabeled", "unavailable"]
+
+
+@dataclass(slots=True)
+class TaskSummary:
+    task_id: str
+    n: int
+    k: int
+    wilson_lo: float
+    wilson_hi: float
+    med_calls: float | None
+    calls_min: float | None
+    calls_max: float | None
+    calls_q1: float | None
+    calls_q3: float | None
+    optimal_calls: int | None
+    mispick_rate: float
+    errored_calls: int
+    capped: int
+    harness_err: int
+    infra_err: int
+    med_result_tokens: float | None
+    p95_result_tokens: float | None
+    result_tokens_mode: ResultTokensMode
+    med_cum_input: float | None
+
+    @property
+    def unstable(self) -> bool:
+        """True when repetitions of this task disagreed on pass/fail."""
+        return self.n > 1 and 0 < self.k < self.n
+
+    @property
+    def success(self) -> str:
+        return f"{self.k}/{self.n}" if self.n else "0/0"
+
+
+@dataclass(slots=True)
+class Summary:
+    tasks: dict[str, TaskSummary]
+    infra_errors: int
+    aggregate_k: int
+    aggregate_n: int
+    aggregate_wilson_lo: float
+    aggregate_wilson_hi: float
+    multi_rep: bool
+    result_tokens_mode: ResultTokensMode
+
+    @property
+    def unstable_task_ids(self) -> list[str]:
+        return [task_id for task_id, task in self.tasks.items() if task.unstable]
+
+    @property
+    def unstable_tasks(self) -> int:
+        return len(self.unstable_task_ids)
 
 
 def result_tokens_mode(rows: list[ResultRow]) -> ResultTokensMode:
@@ -44,13 +98,13 @@ def result_tokens_mode(rows: list[ResultRow]) -> ResultTokensMode:
     return "mixed"
 
 
-def summarize(rows: list[ResultRow]) -> dict[str, dict[str, Any]]:
+def summarize(rows: list[ResultRow]) -> Summary:
     """Aggregate per-task metrics.
 
     Rows with ``error_class`` starting ``infra_`` are excluded from success-rate
-    denominators and counted separately as ``infra_errors`` (total on the returned
-    dict under the special key ``_meta``). Other non-null ``error`` rows remain
-    harness errors (excluded from success, counted in ``harness_err``).
+    denominators and counted separately as ``infra_errors``. Other non-null
+    ``error`` rows remain harness errors (excluded from success, counted in
+    ``harness_err``).
     """
     by_task: dict[str, list[TaskResult]] = defaultdict(list)
     harness_errors_by_task: dict[str, int] = defaultdict(int)
@@ -77,14 +131,13 @@ def summarize(rows: list[ResultRow]) -> dict[str, dict[str, Any]]:
     # Include tasks that only had harness/infra errors so columns stay visible.
     all_task_ids = sorted(set(by_task) | set(harness_errors_by_task) | set(infrastructure_errors_by_task))
 
-    output: dict[str, dict[str, Any]] = {}
+    output: dict[str, TaskSummary] = {}
     total_passes = 0
     total_repetitions = 0
     for task_id in all_task_ids:
         task_results = by_task.get(task_id, [])
         repetition_count = len(task_results)
         pass_count = sum(1 for row in task_results if row.success)
-        unstable = repetition_count > 1 and 0 < pass_count < repetition_count
         total_passes += pass_count
         total_repetitions += repetition_count
         lower, upper = wilson_interval(pass_count, repetition_count) if repetition_count else (0.0, 0.0)
@@ -108,45 +161,41 @@ def summarize(rows: list[ResultRow]) -> dict[str, dict[str, Any]]:
                     result_tokens.append(float(call.result_tokens))
         capped = sum(1 for row in task_results if row.hit_max_iterations or row.stop_reason == "max_tokens")
         cumulative_inputs = [float(row.cum_input_tokens or 0) for row in task_results]
-        output[task_id] = {
-            "n": repetition_count,
-            "k": pass_count,
-            "success": f"{pass_count}/{repetition_count}" if repetition_count else "0/0",
-            "unstable": unstable,
-            "wilson_lo": lower,
-            "wilson_hi": upper,
-            "med_calls": median_calls,
-            "calls_min": minimum_calls,
-            "calls_max": maximum_calls,
-            "calls_q1": first_quartile,
-            "calls_q3": third_quartile,
-            "optimal_calls": optimal,
-            "mispick_rate": (mispicks / total_calls) if total_calls else 0.0,
-            "errored_calls": errored_calls,
-            "capped": capped,
-            "harness_err": harness_errors_by_task.get(task_id, 0),
-            "infra_err": infrastructure_errors_by_task.get(task_id, 0),
-            "med_result_tokens": median(result_tokens),
-            "p95_result_tokens": percentile(result_tokens, 0.95),
-            "result_tokens_mode": result_tokens_mode(task_results),
-            "med_cum_input": median(cumulative_inputs),
-        }
+        output[task_id] = TaskSummary(
+            task_id=task_id,
+            n=repetition_count,
+            k=pass_count,
+            wilson_lo=lower,
+            wilson_hi=upper,
+            med_calls=median_calls,
+            calls_min=minimum_calls,
+            calls_max=maximum_calls,
+            calls_q1=first_quartile,
+            calls_q3=third_quartile,
+            optimal_calls=optimal,
+            mispick_rate=(mispicks / total_calls) if total_calls else 0.0,
+            errored_calls=errored_calls,
+            capped=capped,
+            harness_err=harness_errors_by_task.get(task_id, 0),
+            infra_err=infrastructure_errors_by_task.get(task_id, 0),
+            med_result_tokens=median(result_tokens),
+            p95_result_tokens=percentile(result_tokens, 0.95),
+            result_tokens_mode=result_tokens_mode(task_results),
+            med_cum_input=median(cumulative_inputs),
+        )
     aggregate_lower, aggregate_upper = (
         wilson_interval(total_passes, total_repetitions) if total_repetitions else (0.0, 0.0)
     )
-    unstable_task_ids = sorted(task_id for task_id, values in output.items() if values.get("unstable"))
-    output["_meta"] = {
-        "infra_errors": infrastructure_errors,
-        "aggregate_k": total_passes,
-        "aggregate_n": total_repetitions,
-        "aggregate_wilson_lo": aggregate_lower,
-        "aggregate_wilson_hi": aggregate_upper,
-        "multi_rep": any(len(repetitions) > 1 for repetitions in repetitions_by_task.values()),
-        "unstable_task_ids": unstable_task_ids,
-        "unstable_tasks": len(unstable_task_ids),
-        "result_tokens_mode": result_tokens_mode([row for task_results in by_task.values() for row in task_results]),
-    }
-    return output
+    return Summary(
+        tasks=output,
+        infra_errors=infrastructure_errors,
+        aggregate_k=total_passes,
+        aggregate_n=total_repetitions,
+        aggregate_wilson_lo=aggregate_lower,
+        aggregate_wilson_hi=aggregate_upper,
+        multi_rep=any(len(repetitions) > 1 for repetitions in repetitions_by_task.values()),
+        result_tokens_mode=result_tokens_mode([row for task_results in by_task.values() for row in task_results]),
+    )
 
 
 def noise_floor_statement(unstable_tasks: int) -> str:

@@ -55,8 +55,6 @@ def ab_compare(
             }
         )
 
-    meta_a = summary_a.get("_meta") or {}
-    meta_b = summary_b.get("_meta") or {}
     return {
         "summary_a": summary_a,
         "summary_b": summary_b,
@@ -64,23 +62,23 @@ def ab_compare(
         "median_delta": median(deltas),
         "sign_test_p": sign_test_pvalue(deltas),
         "n_paired": len(deltas),
-        "multi_rep": bool(meta_a.get("multi_rep") or meta_b.get("multi_rep")),
-        "unstable_a": int(meta_a.get("unstable_tasks") or 0),
-        "unstable_b": int(meta_b.get("unstable_tasks") or 0),
+        "multi_rep": summary_a.multi_rep or summary_b.multi_rep,
+        "unstable_a": summary_a.unstable_tasks,
+        "unstable_b": summary_b.unstable_tasks,
         "success_a": {
-            "k": int(meta_a.get("aggregate_k") or 0),
-            "n": int(meta_a.get("aggregate_n") or 0),
+            "k": summary_a.aggregate_k,
+            "n": summary_a.aggregate_n,
             "wilson": (
-                float(meta_a.get("aggregate_wilson_lo") or 0.0),
-                float(meta_a.get("aggregate_wilson_hi") or 0.0),
+                summary_a.aggregate_wilson_lo,
+                summary_a.aggregate_wilson_hi,
             ),
         },
         "success_b": {
-            "k": int(meta_b.get("aggregate_k") or 0),
-            "n": int(meta_b.get("aggregate_n") or 0),
+            "k": summary_b.aggregate_k,
+            "n": summary_b.aggregate_n,
             "wilson": (
-                float(meta_b.get("aggregate_wilson_lo") or 0.0),
-                float(meta_b.get("aggregate_wilson_hi") or 0.0),
+                summary_b.aggregate_wilson_lo,
+                summary_b.aggregate_wilson_hi,
             ),
         },
     }
