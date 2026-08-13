@@ -62,6 +62,7 @@ from evals.drivers.claude import (
     parse_claude_transcript_calls,
     write_claude_mcp_config,
 )
+from evals.drivers.cli import CliDriver
 from evals.drivers.codex import (
     CodexCliDriver,
     find_codex_rollout,
@@ -110,6 +111,7 @@ __all__ = [
     "AntigravityCliDriver",
     "ApiDriver",
     "ClaudeCliDriver",
+    "CliDriver",
     "CodexCliDriver",
     "OpencodeCliDriver",
     "REPO_ROOT",

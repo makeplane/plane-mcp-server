@@ -4,21 +4,10 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
-import tempfile
-import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
-from evals.drivers.base import REPO_ROOT, AgentRun
-from evals.drivers.process import note_timeout_kill, run_cli_subprocess
-from evals.drivers.sidecar import (
-    apply_proxy_sidecar,
-    ensure_proxy_pythonpath,
-    harvest_proxy_after_cli_timeout,
-    proxy_wrap_server_command,
-)
+from evals.drivers.cli import CliDriver, CliLaunch, CliOutput
 
 # OpenCode CLI — proxy-first
 # ---------------------------------------------------------------------------
@@ -51,7 +40,7 @@ def write_opencode_mcp_config(
     path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
-class OpencodeCliDriver:
+class OpencodeCliDriver(CliDriver):
     """Run tasks via ``opencode run`` (proxy-first call recording).
 
     Probed flags (2026-08-12):
@@ -63,6 +52,11 @@ class OpencodeCliDriver:
     """
 
     name = "opencode-cli"
+    run_notes = ("no_turn_cap",)
+    temp_dir_prefix = "plane-eval-opencode-"
+    temp_dir_in_cwd = True
+    exit_note_prefix = "opencode"
+    include_stderr_in_exit_note = True
 
     def __init__(
         self,
@@ -75,142 +69,84 @@ class OpencodeCliDriver:
         record_result_payloads: bool = False,
     ) -> None:
         self.opencode_bin = opencode_bin
-        self.python_bin = python_bin or sys.executable
-        self._runner = runner or run_cli_subprocess
-        self.server_command = list(server_command) if server_command else None
-        self.use_proxy = use_proxy
-        self.record_result_payloads = record_result_payloads
+        super().__init__(
+            python_bin=python_bin,
+            runner=runner,
+            server_command=server_command,
+            use_proxy=use_proxy,
+            record_result_payloads=record_result_payloads,
+        )
 
-    def run_task(
+    def write_mcp_config(
+        self,
+        temp_dir: Path,
+        *,
+        task_cwd: Path,
+        server_command: list[str],
+        child_env: dict[str, str],
+    ) -> CliLaunch:
+        del task_cwd
+        # Project-local config avoids polluting the user's global config.
+        write_opencode_mcp_config(
+            temp_dir / "opencode.json",
+            command=server_command,
+            env=child_env,
+            server_name="plane",
+        )
+        return CliLaunch(cwd=temp_dir)
+
+    def build_command(
         self,
         prompt: str,
-        mcp_env: dict[str, str],
+        *,
         model: str | None,
         max_turns: int,
+        system: str | None,
+        launch: CliLaunch,
+    ) -> list[str]:
+        del max_turns, launch
+        full_prompt = prompt if not system else f"{system}\n\n{prompt}"
+        command = [self.opencode_bin, "run", "--format", "json"]
+        if model:
+            command.extend(["-m", model])
+        command.append(full_prompt)
+        return command
+
+    def parse_output(
+        self,
+        proc: subprocess.CompletedProcess[str],
         *,
-        system: str | None = None,
-        cwd: Path | None = None,
-    ) -> AgentRun:
-        base_cwd = (cwd or REPO_ROOT).resolve()
-        notes: list[str] = ["no_turn_cap"]
-        t0 = time.perf_counter()
-        child_env_plane = {k: v for k, v in mcp_env.items() if k.startswith("PLANE_") or k in ("PATH", "HOME")}
+        task_cwd: Path,
+        max_turns: int,
+        notes: list[str],
+    ) -> CliOutput:
+        del task_cwd, max_turns
+        final_text = (proc.stdout or "").strip()
+        # JSONL events: concatenate text-ish fields best-effort.
+        if final_text and "\n" in final_text:
+            parts: list[str] = []
+            for line in final_text.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(row, dict):
+                    for key in ("text", "message", "part", "delta"):
+                        value = row.get(key)
+                        if isinstance(value, str) and value.strip():
+                            parts.append(value)
+                    if row.get("type") in ("text", "message") and isinstance(row.get("content"), str):
+                        parts.append(row["content"])
+            if parts:
+                final_text = "\n".join(parts)
 
-        with tempfile.TemporaryDirectory(prefix="plane-eval-opencode-", dir=str(base_cwd)) as td:
-            # Project-local opencode.json so we do not pollute the user's global config.
-            proj = Path(td)
-            sidecar = proj / "proxy-sidecar.jsonl"
-            if self.server_command:
-                real_cmd = list(self.server_command)
-            else:
-                real_cmd = [self.python_bin, "-m", "plane_mcp", "stdio"]
-            if self.use_proxy:
-                launch = proxy_wrap_server_command(
-                    real_cmd,
-                    sidecar_path=sidecar,
-                    python_bin=self.python_bin,
-                    record_result_payloads=self.record_result_payloads,
-                )
-                child_env_plane = ensure_proxy_pythonpath(child_env_plane)
-            else:
-                launch = real_cmd
-            write_opencode_mcp_config(
-                proj / "opencode.json",
-                command=launch,
-                env=child_env_plane,
-                server_name="plane",
-            )
-
-            full_prompt = prompt if not system else f"{system}\n\n{prompt}"
-            cmd: list[str] = [
-                self.opencode_bin,
-                "run",
-                "--format",
-                "json",
-            ]
-            if model:
-                cmd.extend(["-m", model])
-            cmd.append(full_prompt)
-
-            timeout_s = max(120, max_turns * 60)
-            try:
-                proc = self._runner(
-                    cmd,
-                    cwd=str(proj),
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_s,
-                )
-            except subprocess.TimeoutExpired as exc:
-                wall = time.perf_counter() - t0
-                notes.append(f"timeout after {timeout_s}s")
-                note_timeout_kill(notes, exc)
-                calls_to: list[dict[str, Any]] = []
-                client_to: list[dict[str, Any]] = []
-                call_source = "json"
-                if self.use_proxy:
-                    calls_to, client_to, call_source = harvest_proxy_after_cli_timeout(
-                        calls_to, client_to, sidecar, notes
-                    )
-                return AgentRun(
-                    calls=calls_to,
-                    client_tool_calls=client_to,
-                    final_text="",
-                    usage=None,
-                    stopped_reason="timeout",
-                    usage_scope="run",
-                    call_source=call_source,
-                    wall_time_s=round(wall, 3),
-                    notes=notes,
-                )
-
-            wall = time.perf_counter() - t0
-            stdout = proc.stdout or ""
-            stderr = proc.stderr or ""
-            calls: list[dict[str, Any]] = []
-            client_calls: list[dict[str, Any]] = []
-            call_source = "json"
-            if self.use_proxy:
-                calls, client_calls, call_source = apply_proxy_sidecar(calls, client_calls, sidecar, notes)
-            if proc.returncode != 0:
-                notes.append(f"opencode_exit={proc.returncode}")
-                if stderr.strip():
-                    notes.append(stderr.strip()[:500])
-
-            final_text = stdout.strip()
-            # JSONL events: concatenate text-ish fields best-effort.
-            if final_text and "\n" in final_text:
-                parts: list[str] = []
-                for line in final_text.splitlines():
-                    line = line.strip()
-                    if not line.startswith("{"):
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(row, dict):
-                        for key in ("text", "message", "part", "delta"):
-                            v = row.get(key)
-                            if isinstance(v, str) and v.strip():
-                                parts.append(v)
-                        if row.get("type") in ("text", "message") and isinstance(row.get("content"), str):
-                            parts.append(row["content"])
-                if parts:
-                    final_text = "\n".join(parts)
-
-            return AgentRun(
-                calls=calls,
-                client_tool_calls=client_calls,
-                final_text=final_text,
-                usage=None,
-                stopped_reason="error" if proc.returncode else "end_turn",
-                usage_scope="run",
-                call_source=call_source,
-                hit_max_turns=False,
-                wall_time_s=round(wall, 3),
-                notes=notes,
-            )
+        return CliOutput(
+            final_text=final_text,
+            stopped_reason="error" if proc.returncode else "end_turn",
+        )
 
 
 __all__ = [

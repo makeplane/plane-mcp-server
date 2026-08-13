@@ -4,26 +4,13 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
-import tempfile
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from evals.drivers.base import (
-    REPO_ROOT,
-    AgentRun,
-    normalize_tool_call,
-    split_plane_and_client_calls,
-)
-from evals.drivers.process import note_timeout_kill, run_cli_subprocess
-from evals.drivers.sidecar import (
-    apply_proxy_sidecar,
-    ensure_proxy_pythonpath,
-    harvest_proxy_after_cli_timeout,
-    proxy_wrap_server_command,
-)
+from evals.drivers.base import normalize_tool_call, split_plane_and_client_calls
+from evals.drivers.cli import CliDriver, CliLaunch, CliOutput
+from evals.drivers.process import run_cli_subprocess
 
 
 def _codex_parse_tool_args(raw_args: Any) -> dict[str, Any]:
@@ -237,7 +224,7 @@ def write_codex_mcp_override_args(
 # ---------------------------------------------------------------------------
 
 
-class CodexCliDriver:
+class CodexCliDriver(CliDriver):
     """Run tasks via ``codex exec`` (experimental; metered quota).
 
     Live invocation is supported for the interface, but the eval harness should
@@ -247,6 +234,11 @@ class CodexCliDriver:
 
     name = "codex-cli"
     experimental = True
+    default_call_source = "stream"
+    run_notes = ("experimental:codex-cli",)
+    temp_dir_prefix = "plane-eval-codex-"
+    include_setup_in_wall_time = False
+    exit_note_prefix = "codex"
 
     def __init__(
         self,
@@ -260,173 +252,127 @@ class CodexCliDriver:
         record_result_payloads: bool = False,
     ) -> None:
         self.codex_bin = codex_bin
-        self.python_bin = python_bin or sys.executable
-        self._runner = runner or run_cli_subprocess
         self.allow_live = allow_live
-        self.server_command = list(server_command) if server_command else None
-        self.use_proxy = use_proxy
-        self.record_result_payloads = record_result_payloads
+        super().__init__(
+            python_bin=python_bin,
+            runner=runner,
+            server_command=server_command,
+            use_proxy=use_proxy,
+            record_result_payloads=record_result_payloads,
+        )
 
-    def run_task(
-        self,
-        prompt: str,
-        mcp_env: dict[str, str],
-        model: str | None,
-        max_turns: int,
-        *,
-        system: str | None = None,
-        cwd: Path | None = None,
-    ) -> AgentRun:
-        cwd = (cwd or REPO_ROOT).resolve()
-        notes = ["experimental:codex-cli"]
+    def validate_run(self) -> None:
         if self._runner is run_cli_subprocess and not self.allow_live:
             raise RuntimeError(
                 "CodexCliDriver refuses live runs by default (metered weekly quota). "
                 "Pass allow_live=True or inject a fake runner for tests."
             )
 
-        child_env = {k: v for k, v in mcp_env.items() if k.startswith("PLANE_") or k in ("PATH", "HOME")}
-        with tempfile.TemporaryDirectory(prefix="plane-eval-codex-") as td:
-            td_path = Path(td)
-            sidecar = td_path / "proxy-sidecar.jsonl"
-            if self.server_command:
-                real_cmd = list(self.server_command)
-            else:
-                real_cmd = [self.python_bin, "-m", "plane_mcp", "stdio"]
-            if self.use_proxy:
-                wrapped = proxy_wrap_server_command(
-                    real_cmd,
-                    sidecar_path=sidecar,
-                    python_bin=self.python_bin,
-                    record_result_payloads=self.record_result_payloads,
-                )
-                server_cmd, server_args = wrapped[0], wrapped[1:]
-                child_env = ensure_proxy_pythonpath(child_env)
-            else:
-                server_cmd, server_args = real_cmd[0], real_cmd[1:]
-            mcp_args = write_codex_mcp_override_args(
-                command=server_cmd,
-                args=server_args,
-                env=child_env,
-                server_name="plane",
-            )
-            cmd: list[str] = [
-                self.codex_bin,
-                "exec",
-                "--json",
-                "--skip-git-repo-check",
-                *mcp_args,
-            ]
-            if model:
-                cmd.extend(["-m", model])
-            full_prompt = prompt if not system else f"{system}\n\n{prompt}"
-            cmd.append(full_prompt)
+    def write_mcp_config(
+        self,
+        temp_dir: Path,
+        *,
+        task_cwd: Path,
+        server_command: list[str],
+        child_env: dict[str, str],
+    ) -> CliLaunch:
+        del temp_dir
+        config_args = write_codex_mcp_override_args(
+            command=server_command[0],
+            args=server_command[1:],
+            env=child_env,
+            server_name="plane",
+        )
+        return CliLaunch(cwd=task_cwd, config_args=config_args)
 
-            t0 = time.perf_counter()
-            timeout_s = max(120, max_turns * 60)
-            try:
-                proc = self._runner(
-                    cmd,
-                    cwd=str(cwd),
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_s,
-                )
-            except subprocess.TimeoutExpired as exc:
-                wall = time.perf_counter() - t0
-                notes.append(f"timeout after {timeout_s}s")
-                note_timeout_kill(notes, exc)
-                calls_to: list[dict[str, Any]] = []
-                client_to: list[dict[str, Any]] = []
-                call_source = "stream"
-                if self.use_proxy:
-                    calls_to, client_to, call_source = harvest_proxy_after_cli_timeout(
-                        calls_to, client_to, sidecar, notes
-                    )
-                return AgentRun(
-                    calls=calls_to,
-                    client_tool_calls=client_to,
-                    final_text="",
-                    usage=None,
-                    stopped_reason="timeout",
-                    raw_ref=None,
-                    usage_scope="run",
-                    call_source=call_source,
-                    hit_max_turns=False,
-                    wall_time_s=round(wall, 3),
-                    experimental=True,
-                    notes=notes,
-                )
-            wall = time.perf_counter() - t0
-            stdout = proc.stdout or ""
-            parsed = parse_codex_jsonl_events(stdout)
-            calls = list(parsed.get("calls") or [])
-            client_calls = list(parsed.get("client_tool_calls") or [])
-            call_source = "stream"
-            session_id = parsed.get("session_id")
+    def build_command(
+        self,
+        prompt: str,
+        *,
+        model: str | None,
+        max_turns: int,
+        system: str | None,
+        launch: CliLaunch,
+    ) -> list[str]:
+        del max_turns
+        command = [
+            self.codex_bin,
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            *launch.config_args,
+        ]
+        if model:
+            command.extend(["-m", model])
+        full_prompt = prompt if not system else f"{system}\n\n{prompt}"
+        command.append(full_prompt)
+        return command
 
-            # Exact-match rollout only — never steal another parallel task's file.
-            need_rollout = (not calls and not client_calls) or not parsed.get("final_text")
-            if need_rollout and session_id:
-                rollout = find_codex_rollout(session_id)
-                if rollout is not None:
-                    full = parse_codex_jsonl_events(rollout.read_text(encoding="utf-8").splitlines())
-                    if not calls and not client_calls:
-                        calls = list(full.get("calls") or [])
-                        client_calls = list(full.get("client_tool_calls") or [])
-                        if calls or client_calls:
-                            call_source = "transcript"
-                            notes.append(f"calls_from_rollout:{rollout}")
-                    if full.get("final_text") and not parsed.get("final_text"):
-                        parsed["final_text"] = full["final_text"]
-                        notes.append(f"final_text_from_rollout:{rollout}")
-                    if full.get("usage") and not parsed.get("usage"):
-                        parsed["usage"] = full["usage"]
-                else:
-                    notes.append("codex_rollout_unmatched")
-            elif need_rollout and not session_id:
+    def parse_output(
+        self,
+        proc: subprocess.CompletedProcess[str],
+        *,
+        task_cwd: Path,
+        max_turns: int,
+        notes: list[str],
+    ) -> CliOutput:
+        del task_cwd, max_turns
+        parsed = parse_codex_jsonl_events(proc.stdout or "")
+        calls = list(parsed.get("calls") or [])
+        client_calls = list(parsed.get("client_tool_calls") or [])
+        call_source = "stream"
+        session_id = parsed.get("session_id")
+
+        # Exact-match rollout only — never steal another parallel task's file.
+        need_rollout = (not calls and not client_calls) or not parsed.get("final_text")
+        if need_rollout and session_id:
+            rollout = find_codex_rollout(session_id)
+            if rollout is not None:
+                full = parse_codex_jsonl_events(rollout.read_text(encoding="utf-8").splitlines())
+                if not calls and not client_calls:
+                    calls = list(full.get("calls") or [])
+                    client_calls = list(full.get("client_tool_calls") or [])
+                    if calls or client_calls:
+                        call_source = "transcript"
+                        notes.append(f"calls_from_rollout:{rollout}")
+                if full.get("final_text") and not parsed.get("final_text"):
+                    parsed["final_text"] = full["final_text"]
+                    notes.append(f"final_text_from_rollout:{rollout}")
+                if full.get("usage") and not parsed.get("usage"):
+                    parsed["usage"] = full["usage"]
+            else:
                 notes.append("codex_rollout_unmatched")
+        elif need_rollout and not session_id:
+            notes.append("codex_rollout_unmatched")
 
-            if self.use_proxy:
-                calls, client_calls, proxy_src = apply_proxy_sidecar(calls, client_calls, sidecar, notes)
-                if proxy_src == "proxy":
-                    call_source = "proxy"
+        usage = parsed.get("usage")
+        usage_total = None
+        if isinstance(usage, dict):
+            usage_total = {
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
+                "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+                "total_input_tokens_including_cache": (
+                    int(usage.get("input_tokens") or 0)
+                    + int(usage.get("cache_read_input_tokens") or 0)
+                    + int(usage.get("cache_creation_input_tokens") or 0)
+                ),
+                "source": "codex_token_count",
+            }
 
-            if proc.returncode != 0:
-                notes.append(f"codex_exit={proc.returncode}")
-
-            usage = parsed.get("usage")
-            usage_total = None
-            if isinstance(usage, dict):
-                usage_total = {
-                    "input_tokens": usage.get("input_tokens"),
-                    "output_tokens": usage.get("output_tokens"),
-                    "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
-                    "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
-                    "total_input_tokens_including_cache": (
-                        int(usage.get("input_tokens") or 0)
-                        + int(usage.get("cache_read_input_tokens") or 0)
-                        + int(usage.get("cache_creation_input_tokens") or 0)
-                    ),
-                    "source": "codex_token_count",
-                }
-
-            raw_ref = f"session:{session_id}" if session_id else None
-            return AgentRun(
-                calls=calls,
-                client_tool_calls=client_calls,
-                final_text=parsed.get("final_text") or "",
-                usage=usage,
-                usage_total=usage_total,
-                stopped_reason=parsed.get("stopped_reason") or "end_turn",
-                raw_ref=raw_ref,
-                usage_scope="run",
-                call_source=call_source,
-                hit_max_turns=False,  # codex exec has no max-turns flag in --help
-                wall_time_s=round(wall, 3),
-                experimental=True,
-                notes=notes,
-            )
+        raw_ref = f"session:{session_id}" if session_id else None
+        return CliOutput(
+            calls=calls,
+            final_text=parsed.get("final_text") or "",
+            client_tool_calls=client_calls,
+            usage=usage,
+            usage_total=usage_total,
+            stopped_reason=parsed.get("stopped_reason") or "end_turn",
+            raw_ref=raw_ref,
+            call_source=call_source,
+            hit_max_turns=False,  # codex exec has no max-turns flag in --help
+        )
 
 
 __all__ = [

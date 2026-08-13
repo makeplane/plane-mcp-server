@@ -4,26 +4,12 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
-import tempfile
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from evals.drivers.base import (
-    REPO_ROOT,
-    AgentRun,
-    normalize_tool_call,
-    split_plane_and_client_calls,
-)
-from evals.drivers.process import note_timeout_kill, run_cli_subprocess
-from evals.drivers.sidecar import (
-    apply_proxy_sidecar,
-    ensure_proxy_pythonpath,
-    harvest_proxy_after_cli_timeout,
-    proxy_wrap_server_command,
-)
+from evals.drivers.base import normalize_tool_call, split_plane_and_client_calls
+from evals.drivers.cli import CliDriver, CliLaunch, CliOutput, CliOutputError
 
 
 def normalize_claude_usage(data: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -284,10 +270,11 @@ def write_claude_mcp_config(
 # ---------------------------------------------------------------------------
 
 
-class ClaudeCliDriver:
+class ClaudeCliDriver(CliDriver):
     """Run tasks via ``claude -p`` on the user's Claude Code subscription."""
 
     name = "claude-cli"
+    temp_dir_prefix = "plane-eval-claude-"
 
     def __init__(
         self,
@@ -302,194 +289,135 @@ class ClaudeCliDriver:
         record_result_payloads: bool = False,
     ) -> None:
         self.claude_bin = claude_bin
-        self.python_bin = python_bin or sys.executable
         self.permission_mode = permission_mode
         self.strict_mcp = strict_mcp
-        self._runner = runner or run_cli_subprocess
         # Full replacement for the MCP server launch (external surfaces under
         # benchmark): [command, *args]. None → this repo's `-m plane_mcp stdio`.
-        self.server_command = list(server_command) if server_command else None
-        self.use_proxy = use_proxy
-        self.record_result_payloads = record_result_payloads
+        super().__init__(
+            python_bin=python_bin,
+            runner=runner,
+            server_command=server_command,
+            use_proxy=use_proxy,
+            record_result_payloads=record_result_payloads,
+        )
 
-    def run_task(
+    def write_mcp_config(
+        self,
+        temp_dir: Path,
+        *,
+        task_cwd: Path,
+        server_command: list[str],
+        child_env: dict[str, str],
+    ) -> CliLaunch:
+        mcp_cfg = temp_dir / "mcp.json"
+        write_claude_mcp_config(
+            mcp_cfg,
+            command=server_command[0],
+            args=server_command[1:],
+            env=child_env,
+            server_name="plane",
+        )
+        return CliLaunch(cwd=task_cwd, config_args=["--mcp-config", str(mcp_cfg)])
+
+    def build_command(
         self,
         prompt: str,
-        mcp_env: dict[str, str],
+        *,
         model: str | None,
         max_turns: int,
+        system: str | None,
+        launch: CliLaunch,
+    ) -> list[str]:
+        command = [
+            self.claude_bin,
+            "-p",
+            "--output-format",
+            "json",
+            *launch.config_args,
+            "--permission-mode",
+            self.permission_mode,
+            "--max-turns",
+            str(max_turns),
+        ]
+        if self.strict_mcp:
+            command.append("--strict-mcp-config")
+        if model:
+            command.extend(["--model", model])
+        if system:
+            command.extend(["--append-system-prompt", system])
+        # --allowedTools is variadic and would swallow the trailing prompt.
+        command.extend(["--allowedTools=mcp__plane__*", prompt])
+        return command
+
+    def parse_output(
+        self,
+        proc: subprocess.CompletedProcess[str],
         *,
-        system: str | None = None,
-        cwd: Path | None = None,
-    ) -> AgentRun:
-        cwd = (cwd or REPO_ROOT).resolve()
-        notes: list[str] = []
-        t0 = time.perf_counter()
-
-        with tempfile.TemporaryDirectory(prefix="plane-eval-claude-") as td:
-            td_path = Path(td)
-            mcp_cfg = td_path / "mcp.json"
-            sidecar = td_path / "proxy-sidecar.jsonl"
-            # Only pass Plane-related env into the MCP child (plus PATH/HOME if present).
-            child_env = {k: v for k, v in mcp_env.items() if k.startswith("PLANE_") or k in ("PATH", "HOME")}
-            if self.server_command:
-                real_cmd = list(self.server_command)
-            else:
-                real_cmd = [self.python_bin, "-m", "plane_mcp", "stdio"]
-            if self.use_proxy:
-                wrapped = proxy_wrap_server_command(
-                    real_cmd,
-                    sidecar_path=sidecar,
-                    python_bin=self.python_bin,
-                    record_result_payloads=self.record_result_payloads,
-                )
-                server_cmd, server_args = wrapped[0], wrapped[1:]
-                child_env = ensure_proxy_pythonpath(child_env)
-            else:
-                server_cmd, server_args = real_cmd[0], real_cmd[1:]
-            write_claude_mcp_config(
-                mcp_cfg,
-                command=server_cmd,
-                args=server_args,
-                env=child_env,
-                server_name="plane",
-            )
-
-            cmd: list[str] = [
-                self.claude_bin,
-                "-p",
-                "--output-format",
-                "json",
-                "--mcp-config",
-                str(mcp_cfg),
-                "--permission-mode",
-                self.permission_mode,
-                "--max-turns",
-                str(max_turns),
-            ]
-            if self.strict_mcp:
-                cmd.append("--strict-mcp-config")
-            if model:
-                cmd.extend(["--model", model])
-            if system:
-                cmd.extend(["--append-system-prompt", system])
-            # Allow MCP tools from our server without interactive prompts
-            # --allowedTools is variadic and would swallow the trailing prompt; use = form.
-            cmd.append("--allowedTools=mcp__plane__*")
-            cmd.append(prompt)
-
-            timeout_s = max(120, max_turns * 60)
+        task_cwd: Path,
+        max_turns: int,
+        notes: list[str],
+    ) -> CliOutput:
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        parsed: dict[str, Any] | None = None
+        parse_err: str | None = None
+        # JSON may be the whole stdout or the last JSON object line.
+        for candidate in (stdout.strip(), *(reversed(stdout.strip().splitlines()) if stdout else [])):
+            if not candidate or not candidate.lstrip().startswith("{"):
+                continue
             try:
-                proc = self._runner(
-                    cmd,
-                    cwd=str(cwd),
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_s,
-                )
-            except subprocess.TimeoutExpired as exc:
-                wall = time.perf_counter() - t0
-                notes.append(f"timeout after {timeout_s}s")
-                note_timeout_kill(notes, exc)
-                # Wait for proxy finalization before harvesting / temp dir teardown.
-                calls: list[dict[str, Any]] = []
-                client_calls: list[dict[str, Any]] = []
-                call_source = "json"
-                if self.use_proxy:
-                    calls, client_calls, call_source = harvest_proxy_after_cli_timeout(
-                        calls, client_calls, sidecar, notes
-                    )
-                return AgentRun(
-                    calls=calls,
-                    client_tool_calls=client_calls,
-                    final_text="",
-                    usage=None,
-                    stopped_reason="timeout",
-                    raw_ref=None,
-                    usage_scope="run",
-                    call_source=call_source,
-                    hit_max_turns=False,
-                    wall_time_s=round(wall, 3),
-                    notes=notes,
-                )
+                parsed = parse_claude_json_result(candidate)
+                break
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                parse_err = str(exc)
 
-            wall = time.perf_counter() - t0
-            stdout = proc.stdout or ""
-            stderr = proc.stderr or ""
-
-            parsed: dict[str, Any] | None = None
-            parse_err: str | None = None
-            # JSON may be the whole stdout or the last JSON object line
-            for candidate in (stdout.strip(), *(reversed(stdout.strip().splitlines()) if stdout else [])):
-                if not candidate or not candidate.lstrip().startswith("{"):
-                    continue
-                try:
-                    parsed = parse_claude_json_result(candidate)
-                    break
-                except (json.JSONDecodeError, ValueError, TypeError) as exc:
-                    parse_err = str(exc)
-                    continue
-
-            if parsed is None:
-                notes.append(f"json_parse_failed: {parse_err or 'no JSON object in stdout'}")
-                if proc.returncode != 0:
-                    notes.append(f"claude_exit={proc.returncode}")
-                    if stderr.strip():
-                        notes.append(stderr.strip()[:500])
-                if self.use_proxy:
-                    apply_proxy_sidecar([], [], sidecar, notes)
-                detail = "; ".join(notes)
-                raise RuntimeError(f"claude cli failed: {detail}")
-
-            # Parseable JSON can still be a hard CLI failure (exit 1 + is_error subtype).
+        if parsed is None:
+            notes.append(f"json_parse_failed: {parse_err or 'no JSON object in stdout'}")
             if proc.returncode != 0:
                 notes.append(f"claude_exit={proc.returncode}")
                 if stderr.strip():
                     notes.append(stderr.strip()[:500])
+            raise CliOutputError("claude cli failed")
 
-            # JSON rarely embeds per-call tool detail — prefer transcript when present.
-            calls = list(parsed.get("calls") or [])
-            client_calls = list(parsed.get("client_tool_calls") or [])
-            call_source = "json" if (calls or client_calls) else "json"
-            session_id = parsed.get("session_id")
-            transcript = find_claude_transcript(session_id, cwd)
-            if transcript is not None:
-                tagged = parse_claude_transcript_calls(transcript)
-                t_plane, t_client = split_plane_and_client_calls(tagged)
-                if t_plane or t_client:
-                    calls, client_calls = t_plane, t_client
-                    call_source = "transcript"
-                    notes.append(f"calls_from_transcript:{transcript}")
-            if not calls and not client_calls:
-                notes.append("no_tool_calls_in_json_or_transcript")
+        # Parseable JSON can still be a hard CLI failure (exit 1 + is_error subtype).
+        if proc.returncode != 0:
+            notes.append(f"claude_exit={proc.returncode}")
+            if stderr.strip():
+                notes.append(stderr.strip()[:500])
 
-            # Proxy sidecar (when enabled) replaces CLI-parsed plane calls.
-            if self.use_proxy:
-                calls, client_calls, proxy_src = apply_proxy_sidecar(calls, client_calls, sidecar, notes)
-                if proxy_src == "proxy":
-                    call_source = "proxy"
+        calls = list(parsed.get("calls") or [])
+        client_calls = list(parsed.get("client_tool_calls") or [])
+        call_source = "json"
+        session_id = parsed.get("session_id")
+        transcript = find_claude_transcript(session_id, task_cwd)
+        if transcript is not None:
+            tagged = parse_claude_transcript_calls(transcript)
+            transcript_plane, transcript_client = split_plane_and_client_calls(tagged)
+            if transcript_plane or transcript_client:
+                calls, client_calls = transcript_plane, transcript_client
+                call_source = "transcript"
+                notes.append(f"calls_from_transcript:{transcript}")
+        if not calls and not client_calls:
+            notes.append("no_tool_calls_in_json_or_transcript")
 
-            num_turns = parsed.get("num_turns")
-            hit_max = bool(num_turns is not None and int(num_turns) >= max_turns)
-            stopped = parsed["stopped_reason"]
-            if hit_max and stopped in ("end_turn", "completed", ""):
-                stopped = "max_turns"
+        num_turns = parsed.get("num_turns")
+        hit_max = bool(num_turns is not None and int(num_turns) >= max_turns)
+        stopped = parsed["stopped_reason"]
+        if hit_max and stopped in ("end_turn", "completed", ""):
+            stopped = "max_turns"
 
-            raw_ref = str(transcript) if transcript else (f"session:{session_id}" if session_id else None)
-            return AgentRun(
-                calls=calls,
-                client_tool_calls=client_calls,
-                final_text=parsed["final_text"],
-                usage=parsed.get("usage"),
-                usage_total=parsed.get("usage_total"),
-                stopped_reason=stopped,
-                raw_ref=raw_ref,
-                usage_scope="run",
-                call_source=call_source,
-                hit_max_turns=hit_max,
-                wall_time_s=round(wall, 3),
-                notes=notes,
-            )
+        raw_ref = str(transcript) if transcript else (f"session:{session_id}" if session_id else None)
+        return CliOutput(
+            calls=calls,
+            final_text=parsed["final_text"],
+            client_tool_calls=client_calls,
+            usage=parsed.get("usage"),
+            usage_total=parsed.get("usage_total"),
+            stopped_reason=stopped,
+            raw_ref=raw_ref,
+            call_source=call_source,
+            hit_max_turns=hit_max,
+        )
 
 
 __all__ = [
