@@ -23,7 +23,7 @@ from evals.drivers.api.backend import (
     ToolSpec,
     create_backend,
 )
-from evals.drivers.base import AgentRun
+from evals.drivers.protocol import AgentRun
 from evals.drivers.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
 from evals.results import Usage
 

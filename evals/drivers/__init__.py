@@ -29,7 +29,7 @@ Codex (``codex exec``):
     ``response_item`` / ``function_call`` payloads (name + arguments JSON string)
   - Marked **experimental**; live runs are opt-in (metered quota).
 
-This package splits that surface into focused modules (base types, subprocess
+This package splits that surface into focused modules (protocol types, subprocess
 lifecycle, recording-proxy glue, and per-vendor drivers). Import from
 ``evals.drivers`` as before — public names are re-exported here.
 """
@@ -38,13 +38,37 @@ from __future__ import annotations
 
 from typing import Any
 
-from evals.drivers.antigravity import (
-    AntigravityCliDriver,
-    prepare_antigravity_fake_home,
-    write_antigravity_mcp_config,
-)
 from evals.drivers.api import ApiDriver
-from evals.drivers.base import (
+from evals.drivers.cli import (
+    AntigravityCliDriver,
+    ClaudeCliDriver,
+    CliDriver,
+    CodexCliDriver,
+    OpencodeCliDriver,
+    apply_proxy_sidecar,
+    ensure_proxy_pythonpath,
+    find_claude_transcript,
+    find_codex_rollout,
+    harvest_proxy_after_cli_timeout,
+    kill_process_group,
+    load_proxy_sidecar,
+    load_proxy_sidecar_calls,
+    normalize_claude_usage,
+    note_timeout_kill,
+    parse_claude_json_result,
+    parse_claude_transcript_calls,
+    parse_codex_jsonl_events,
+    parse_codex_rollout_calls,
+    prepare_antigravity_fake_home,
+    proxy_wrap_server_command,
+    run_cli_subprocess,
+    wait_for_proxy_meta,
+    write_antigravity_mcp_config,
+    write_claude_mcp_config,
+    write_codex_mcp_override_args,
+    write_opencode_mcp_config,
+)
+from evals.drivers.protocol import (
     REPO_ROOT,
     AgentDriver,
     AgentRun,
@@ -54,33 +78,6 @@ from evals.drivers.base import (
     normalize_tool_call,
     split_plane_and_client_calls,
     strip_mcp_prefix,
-)
-from evals.drivers.claude import (
-    ClaudeCliDriver,
-    find_claude_transcript,
-    normalize_claude_usage,
-    parse_claude_json_result,
-    parse_claude_transcript_calls,
-    write_claude_mcp_config,
-)
-from evals.drivers.cli import CliDriver
-from evals.drivers.codex import (
-    CodexCliDriver,
-    find_codex_rollout,
-    parse_codex_jsonl_events,
-    parse_codex_rollout_calls,
-    write_codex_mcp_override_args,
-)
-from evals.drivers.opencode import OpencodeCliDriver, write_opencode_mcp_config
-from evals.drivers.process import kill_process_group, note_timeout_kill, run_cli_subprocess
-from evals.drivers.sidecar import (
-    apply_proxy_sidecar,
-    ensure_proxy_pythonpath,
-    harvest_proxy_after_cli_timeout,
-    load_proxy_sidecar,
-    load_proxy_sidecar_calls,
-    proxy_wrap_server_command,
-    wait_for_proxy_meta,
 )
 from evals.results import CallRecord, TaskResult
 

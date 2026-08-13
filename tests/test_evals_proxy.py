@@ -31,7 +31,7 @@ from evals.drivers import (
     write_antigravity_mcp_config,
     write_opencode_mcp_config,
 )
-from evals.drivers.cli import CliDriver, CliLaunch, CliOutput
+from evals.drivers.cli.template import CliDriver, CliLaunch, CliOutput
 from evals.drivers.token_counting import estimate_result_tokens
 from evals.proxy import (
     SHUTDOWN_DEADLINE_S,
@@ -580,7 +580,7 @@ def test_agent_run_to_harness_propagates_proxy_fields():
 
 def test_cli_driver_template_inherits_proxy_first_and_timeout_harvest(tmp_path: Path, monkeypatch):
     clock = {"now": 0.0}
-    monkeypatch.setattr("evals.drivers.cli.time.perf_counter", lambda: clock["now"])
+    monkeypatch.setattr("evals.drivers.cli.template.time.perf_counter", lambda: clock["now"])
 
     class MinimalCliDriver(CliDriver):
         name = "minimal-cli"

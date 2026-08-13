@@ -8,8 +8,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from evals.drivers.base import normalize_tool_call, split_plane_and_client_calls
-from evals.drivers.cli import CliDriver, CliLaunch, CliOutput, CliOutputError
+from evals.drivers.cli.template import CliDriver, CliLaunch, CliOutput, CliOutputError
+from evals.drivers.protocol import normalize_tool_call, split_plane_and_client_calls
 
 
 def normalize_claude_usage(data: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:

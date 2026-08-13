@@ -12,14 +12,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from evals.drivers.base import REPO_ROOT, AgentRun
-from evals.drivers.process import note_timeout_kill, run_cli_subprocess
-from evals.drivers.sidecar import (
+from evals.drivers.cli.process import note_timeout_kill, run_cli_subprocess
+from evals.drivers.cli.sidecar import (
     apply_proxy_sidecar,
     ensure_proxy_pythonpath,
     harvest_proxy_after_cli_timeout,
     proxy_wrap_server_command,
 )
+from evals.drivers.protocol import REPO_ROOT, AgentRun
 
 
 @dataclass
