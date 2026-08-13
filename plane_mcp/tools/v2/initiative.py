@@ -27,6 +27,7 @@ from plane_mcp.toolkit import (
     build_description,
     coerce_list,
     envelope,
+    one_of,
     opt,
     page_params,
     require,
@@ -61,8 +62,13 @@ ACTIONS = (
     ),
     Action("delete", ("initiative_id",), destructive=True),
     Action("list_projects", ("initiative_id",), ("cursor", "per_page"), read=True),
-    Action("add_projects", ("initiative_id", "project_ids")),
-    Action("remove_projects", ("initiative_id", "project_ids"), destructive=True),
+    Action("add_projects", ("initiative_id", "project_ids"), note="returns nothing, read back with list_projects"),
+    Action(
+        "remove_projects",
+        ("initiative_id", "project_ids"),
+        note="returns nothing, read back with list_projects",
+        destructive=True,
+    ),
 )
 
 FOOTER = (
@@ -122,8 +128,8 @@ def register(mcp: FastMCP) -> None:
     ) -> Initiative | list[Initiative] | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
-        if state and state not in STATES:
-            return f"Error: state must be one of: {', '.join(STATES)}."
+        if error := one_of("state", state, STATES):
+            return error
         initiative_state: InitiativeState | None = state or None  # type: ignore[assignment]
 
         # Validated before the feature probe below, which costs a request.
@@ -190,5 +196,4 @@ def register(mcp: FastMCP) -> None:
         ids = coerce_list(project_ids)
         mutate = projects.add if action == "add_projects" else projects.remove
         mutate(workspace_slug=workspace_slug, initiative_id=initiative_id, project_ids=ids)
-        after: PaginatedProjectResponse = projects.list(workspace_slug=workspace_slug, initiative_id=initiative_id)
-        return after.results
+        return None

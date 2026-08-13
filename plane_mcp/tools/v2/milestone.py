@@ -44,7 +44,7 @@ ACTIONS = (
         "manage_work_items",
         ("project_id", "milestone_id"),
         ("add_ids", "remove_ids"),
-        note="pass at least one of add_ids or remove_ids",
+        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_work_items",
     ),
 )
 

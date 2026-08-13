@@ -14,7 +14,7 @@ from plane.models.query_params import PaginatedQueryParams, RetrieveQueryParams
 from plane.models.work_items import WorkItemForIntakeRequest
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, as_params, build_annotations, build_description, envelope, missing, opt
+from plane_mcp.toolkit import Action, as_params, build_annotations, build_description, envelope, missing, one_of, opt
 
 NAME = "intake"
 TITLE = "Intake queue"
@@ -88,8 +88,8 @@ def register(mcp: FastMCP) -> None:
         if action == "create":
             if not name:
                 return missing(action, "name")
-            if priority and priority not in PRIORITIES:
-                return f"Error: priority must be one of: {', '.join(PRIORITIES)}."
+            if error := one_of("priority", priority, PRIORITIES):
+                return error
             return client.intake.create(
                 workspace_slug=workspace_slug,
                 project_id=project_id,

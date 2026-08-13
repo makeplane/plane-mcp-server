@@ -5,16 +5,14 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from fastmcp import FastMCP
-from plane.errors.errors import HttpError
 from plane.models.modules import (
     CreateModule,
     Module,
     PaginatedArchivedModuleResponse,
     PaginatedModuleLiteResponse,
-    PaginatedModuleWorkItemResponse,
     UpdateModule,
 )
-from plane.models.query_params import LiteListQueryParams, WorkItemQueryParams
+from plane.models.query_params import LiteListQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
@@ -24,10 +22,10 @@ from plane_mcp.toolkit import (
     build_annotations,
     build_description,
     coerce_list,
-    envelope,
     missing,
+    one_of,
     opt,
-    pql_failure,
+    work_item_page,
 )
 
 NAME = "module"
@@ -70,7 +68,7 @@ ACTIONS = (
         "manage_work_items",
         ("project_id", "module_id"),
         ("add_ids", "remove_ids"),
-        note="pass at least one of add_ids or remove_ids",
+        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_work_items",
     ),
     Action("archive", ("project_id", "module_id")),
     Action("unarchive", ("project_id", "module_id")),
@@ -140,8 +138,8 @@ def register(mcp: FastMCP) -> None:
         if not project_id:
             return missing(action, "project_id")
 
-        if status and status not in STATUSES:
-            return f"Error: status must be one of: {', '.join(STATUSES)}."
+        if error := one_of("status", status, STATUSES):
+            return error
 
         if action == "list":
             params = LiteListQueryParams(cursor=opt(cursor), per_page=opt(per_page), order_by=opt(order_by))
@@ -201,26 +199,20 @@ def register(mcp: FastMCP) -> None:
             return None
 
         if action == "list_work_items":
-            try:
-                response: PaginatedModuleWorkItemResponse = client.modules.list_work_items(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    module_id=module_id,
-                    params=WorkItemQueryParams(
-                        pql=opt(pql),
-                        order_by=opt(order_by),
-                        per_page=opt(per_page),
-                        cursor=opt(cursor),
-                        expand=opt(expand),
-                        fields=opt(fields),
-                    ),
-                )
-            except HttpError as exc:
-                failure = pql_failure(NAME, action, pql, exc)
-                if failure is None:
-                    raise
-                return failure
-            return envelope(response, opt(fields))
+            return work_item_page(
+                NAME,
+                action,
+                client.modules.list_work_items,
+                pql=pql,
+                order_by=order_by,
+                cursor=cursor,
+                per_page=per_page,
+                expand=expand,
+                fields=fields,
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                module_id=module_id,
+            )
 
         if action == "manage_work_items":
             add = coerce_list(add_ids)

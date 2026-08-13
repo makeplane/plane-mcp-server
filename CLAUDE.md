@@ -71,7 +71,9 @@ Two surfaces live side by side. `tools/__init__.py` picks one at registration ti
 
 One module per resource, each exporting `NAME`, `ACTIONS`, `LEGACY` and `register(mcp)`. `ACTIONS` is the single source of truth: the tool description and its `ToolAnnotations` are generated from it, and the conformance suite asserts they agree with the function signature. See `tools/v2/README.md` for the full convention and the rules that are easy to break.
 
-`tools/v2/` contains resource modules plus `registry.py` (the `RESOURCES` tuple and alias tables), `legacy.py` (v1 name resolution) and `scope.py` (governance declarations). Shared helpers live in `plane_mcp/toolkit/`, not here — see below.
+`tools/v2/` contains resource modules plus `registry.py` (the `RESOURCES` tuple and alias tables) and `legacy.py` (v1 name resolution). Shared helpers live in `plane_mcp/toolkit/`, not here — see below.
+
+Where a resource exists at both project and workspace scope, it resolves that once in a local `_scope_of` rather than through a shared abstraction: the two resources that need it need different shapes (`work_item_type` is a two-way split, `work_item_property` three-way plus a method-name suffix).
 
 `RESOURCES` is an explicit tuple, not a directory scan. Its order is the advertised order and therefore a wire-format guarantee: tool definitions head a client's prompt cache, so reordering invalidates live conversations. Append; never re-sort. `test_resource_order_is_pinned` holds it to a literal list.
 
@@ -96,8 +98,8 @@ Shared building blocks for tool surfaces, split by *when* they act:
 | Module | Acts at | Provides |
 |---|---|---|
 | `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
-| `runtime.py` | call | `missing`, `needs`, `require`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
-| `paging.py` | response | `envelope`, `dump_results`, `pql_failure` |
+| `runtime.py` | call | `missing`, `needs`, `require`, `one_of`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
+| `paging.py` | response | `envelope`, `dump_results`, `pql_failure`, `work_item_page` |
 | `transforms.py` | listing | `StripOutputSchemas` |
 
 Names are re-exported from `plane_mcp/toolkit/__init__.py`, so a resource module needs one import: `from plane_mcp.toolkit import Action, build_description, missing, opt`.

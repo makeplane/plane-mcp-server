@@ -19,7 +19,16 @@ from plane.models.releases import (
 )
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, opt, page_params
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    missing,
+    one_of,
+    opt,
+    page_params,
+)
 
 NAME = "release"
 TITLE = "Releases"
@@ -67,7 +76,7 @@ ACTIONS = (
         "manage_work_items",
         ("release_id",),
         ("add_ids", "remove_ids"),
-        note="pass at least one of add_ids or remove_ids",
+        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_work_items",
     ),
 )
 
@@ -142,19 +151,11 @@ def register(mcp: FastMCP) -> None:
         external_id: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> (
-        Release
-        | PaginatedReleaseResponse
-        | PaginatedReleaseWorkItemResponse
-        | ReleaseChangelog
-        | list[Any]
-        | str
-        | None
-    ):
+    ) -> Release | PaginatedReleaseResponse | PaginatedReleaseWorkItemResponse | ReleaseChangelog | str | None:
         client, workspace_slug = get_plane_client_context()
 
-        if status and status not in STATUSES:
-            return f"Error: status must be one of: {', '.join(STATUSES)}."
+        if error := one_of("status", status, STATUSES):
+            return error
 
         releases = client.releases
 
@@ -247,4 +248,4 @@ def register(mcp: FastMCP) -> None:
                 release_id=release_id,
                 data=RemoveReleaseWorkItems(work_item_ids=remove),
             )
-        return work_items.list(workspace_slug=workspace_slug, release_id=release_id).results
+        return None

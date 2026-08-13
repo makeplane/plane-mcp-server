@@ -138,19 +138,26 @@ pytest tests/tools/v2/ -q
   resolves, and no description points at a retired v1 tool name. Descriptions
   are instructions a model follows literally; a dead pointer is a real defect.
 - `test_governance.py` — for resources Plane governs at both scopes, each scope
-  is pinned to its namespace and id keyword, and the declaration is checked
-  against the live SDK.
+  is pinned to its namespace and id keyword, and the resolver is checked against
+  the live SDK.
 
 ## Governance: workspace scope vs project scope
 
 Plane governs some resources at the workspace as well as the project — the same
-resource under two SDK namespaces, with different id keyword names and sometimes
-a smaller set of operations. `scope.py` declares that once per resource instead
-of each module hand-rolling `if project_id:`.
+resource under two SDK namespaces, with different id keyword names. The idiom
+the model sees is uniform: **supply `project_id` for the project's own set, omit
+it for the workspace's.**
 
-The idiom the model sees is uniform: **supply `project_id` for the project's own
-set, omit it for the workspace's.** Work item types are the only governed
-resource today; `scope.py` records what adding another takes.
+Getting it wrong is quiet: the call succeeds, against the wrong scope. So each
+resource resolves its scope once, in a local `_scope_of`, and `test_governance.py`
+pins both namespaces and both id keywords against the live SDK.
+
+There is deliberately no shared abstraction for this. Two resources need it and
+they need different shapes — `work_item_type` is a two-way project/workspace
+split, `work_item_property` is three-way and also varies the method name. A
+`scope.py` generalising the two-way case lived here for a while; it served one
+caller, half of it was unreachable, and it could not model the second case when
+that arrived. A local resolver per resource is the smaller thing that works.
 
 ## Where the code lives
 
@@ -161,7 +168,6 @@ This package holds resource modules and the catalogue, nothing else:
 | `tools/v2/<resource>.py` | one module per resource — the 28 tools |
 | `tools/v2/registry.py` | `RESOURCES`, in advertised order, plus the alias tables |
 | `tools/v2/legacy.py` | `LegacyNames` — a v1 migration artefact; dies with v1 |
-| `tools/v2/scope.py` | project-vs-workspace governance declarations |
 | `plane_mcp/toolkit/` | everything shared: `spec`, `runtime`, `paging`, `transforms` |
 
 The helpers used to live here as `_`-prefixed modules, where the underscore was

@@ -26,6 +26,7 @@ from plane_mcp.toolkit import (
     coerce_list,
     missing,
     needs,
+    one_of,
     opt,
     page_params,
 )
@@ -150,10 +151,10 @@ def register(mcp: FastMCP) -> None:
     ) -> CustomerProperty | PaginatedCustomerPropertyResponse | dict[str, list[str]] | str | None:
         client, workspace_slug = get_plane_client_context()
 
-        if property_type and property_type not in PROPERTY_TYPES:
-            return f"Error: property_type must be one of: {', '.join(PROPERTY_TYPES)}."
-        if relation_type and relation_type not in RELATION_TYPES:
-            return f"Error: relation_type must be one of: {', '.join(RELATION_TYPES)}."
+        if error := one_of("property_type", property_type, PROPERTY_TYPES):
+            return error
+        if error := one_of("relation_type", relation_type, RELATION_TYPES):
+            return error
 
         properties = client.customers.properties
         property_values = client.customers.property_values
@@ -174,7 +175,7 @@ def register(mcp: FastMCP) -> None:
                     relation_type=RelationType(relation_type) if relation_type else None,
                     description=opt(description),
                     is_required=is_required,
-                    default_value=coerce_list(default_value),
+                    default_value=coerce_list(default_value, split=False),
                     settings=_settings(property_type, display_format),
                     is_active=is_active,
                     is_multi=is_multi,
@@ -219,7 +220,7 @@ def register(mcp: FastMCP) -> None:
                     relation_type=RelationType(relation_type) if relation_type else None,
                     description=opt(description),
                     is_required=is_required,
-                    default_value=coerce_list(default_value),
+                    default_value=coerce_list(default_value, split=False),
                     is_active=is_active,
                     options=_json(options, list) if options else None,
                     external_source=opt(external_source),

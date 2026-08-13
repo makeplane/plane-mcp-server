@@ -6,7 +6,7 @@ workspace. attach and detach only change what one release carries.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from fastmcp import FastMCP
 from plane.models.releases import (
@@ -44,8 +44,8 @@ ACTIONS = (
     Action("create", ("name",), ("color", "sort_order"), note="adds to the workspace palette"),
     Action("update", ("label_id",), ("name", "color", "sort_order")),
     Action("delete", ("label_id",), note="removes it from the palette entirely", destructive=True),
-    Action("attach", ("release_id", "label_ids")),
-    Action("detach", ("release_id", "label_ids"), destructive=True),
+    Action("attach", ("release_id", "label_ids"), note="returns nothing, read back with list"),
+    Action("detach", ("release_id", "label_ids"), note="returns nothing, read back with list", destructive=True),
 )
 
 FOOTER = (
@@ -83,7 +83,7 @@ def register(mcp: FastMCP) -> None:
         sort_order: int | None = None,
         cursor: str = "",
         per_page: int = 0,
-    ) -> ReleaseLabel | PaginatedReleaseLabelResponse | list[Any] | str | None:
+    ) -> ReleaseLabel | PaginatedReleaseLabelResponse | str | None:
         client, workspace_slug = get_plane_client_context()
         labels = client.releases.labels
         item_labels = client.releases.item_labels
@@ -130,4 +130,4 @@ def register(mcp: FastMCP) -> None:
                 release_id=release_id,
                 data=RemoveReleaseItemLabel(label_ids=ids),
             )
-        return item_labels.list(workspace_slug=workspace_slug, release_id=release_id).results
+        return None

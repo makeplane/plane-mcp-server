@@ -23,12 +23,26 @@ from plane.models.work_items import (
 )
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, coerce_list, missing, needs, opt
+from plane_mcp.toolkit import (
+    Action,
+    build_annotations,
+    build_description,
+    coerce_list,
+    missing,
+    needs,
+    one_of,
+    opt,
+)
 
 NAME = "work_item_relation"
 TITLE = "Work item relations"
 
 DEPENDENCY_TYPES: tuple[str, ...] = get_args(DependencyTypeEnum)
+
+_OTHER_RELATIONS = (
+    "For any other relationship pass relation_definition_id and "
+    "relation_definition_label from the list_definitions action."
+)
 
 ACTIONS = (
     Action("list", ("project_id", "work_item_id"), read=True),
@@ -185,12 +199,8 @@ def register(mcp: FastMCP) -> None:
             if not targets:
                 return missing(action, "work_item_ids")
             if relation_type:
-                if relation_type not in DEPENDENCY_TYPES:
-                    return (
-                        f"Error: relation_type must be one of {list(DEPENDENCY_TYPES)}. For any "
-                        "other relationship pass relation_definition_id and "
-                        "relation_definition_label from the list_definitions action."
-                    )
+                if error := one_of("relation_type", relation_type, DEPENDENCY_TYPES, _OTHER_RELATIONS):
+                    return error
                 return client.work_items.dependencies.create(
                     workspace_slug=workspace_slug,
                     project_id=project_id,

@@ -163,6 +163,38 @@ def test_a_zero_that_means_something_reaches_the_sdk(tool_name, args, field, reg
     assert sent == 0, f"{tool_name}.{args['action']} dropped {field}=0; it was sent as {sent!r}"
 
 
+MEMBERSHIP_MUTATIONS = {
+    ("cycle", "manage_work_items"),
+    ("customer", "manage_work_items"),
+    ("initiative", "add_projects"),
+    ("initiative", "remove_projects"),
+    ("milestone", "manage_work_items"),
+    ("module", "manage_work_items"),
+    ("release", "manage_work_items"),
+    ("release_label", "attach"),
+    ("release_label", "detach"),
+}
+
+
+@pytest.mark.parametrize(("tool_name", "action_name"), sorted(MEMBERSHIP_MUTATIONS))
+def test_a_membership_mutation_returns_nothing(tool_name, action_name, resource_modules, registered, spy):
+    """Same verb, same answer -- and the note has to admit it."""
+    mod = next(m for m in resource_modules if m.NAME == tool_name)
+    action = next(a for a in mod.ACTIONS if a.name == action_name)
+    tool = registered[tool_name]
+
+    result = tool.fn(**_call_args(mod, action, tool))
+
+    assert result is None, (
+        f"{tool_name}.{action_name} returned {type(result).__name__}; a membership mutation answers "
+        "None so that one verb does not have three different shapes across the surface"
+    )
+    assert "returns nothing" in action.note, (
+        f"{tool_name}.{action_name} returns None but its note does not say so, which is the model's "
+        "only warning that it must call the list action to see the result"
+    )
+
+
 def test_action_literal_covers_every_declared_action(mod, action, registered):
     tool = registered[mod.NAME]
     enum = tool.parameters["properties"].get("action", {}).get("enum")

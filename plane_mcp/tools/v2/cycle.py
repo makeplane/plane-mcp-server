@@ -6,18 +6,16 @@ from datetime import date
 from typing import Annotated, Any, Literal, get_args
 
 from fastmcp import FastMCP
-from plane.errors.errors import HttpError
 from plane.models.cycles import (
     CreateCycle,
     Cycle,
     PaginatedArchivedCycleResponse,
     PaginatedCycleLiteResponse,
-    PaginatedCycleWorkItemResponse,
     TransferCycleWorkItemsRequest,
     UpdateCycle,
 )
 from plane.models.enums import CycleStatusEnum
-from plane.models.query_params import CycleLiteListQueryParams, LiteListQueryParams, WorkItemQueryParams
+from plane.models.query_params import CycleLiteListQueryParams, LiteListQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
@@ -27,11 +25,11 @@ from plane_mcp.toolkit import (
     build_annotations,
     build_description,
     coerce_list,
-    envelope,
     missing,
     needs,
+    one_of,
     opt,
-    pql_failure,
+    work_item_page,
 )
 
 NAME = "cycle"
@@ -64,7 +62,7 @@ ACTIONS = (
         "manage_work_items",
         ("project_id", "cycle_id"),
         ("add_ids", "remove_ids"),
-        note="pass at least one of add_ids or remove_ids",
+        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_work_items",
     ),
     Action("transfer_work_items", ("project_id", "cycle_id", "new_cycle_id"), note="moves everything to new_cycle_id"),
     Action("complete", ("project_id", "cycle_id"), note="sets end_date to today"),
@@ -149,8 +147,8 @@ def register(mcp: FastMCP) -> None:
                     project_id=project_id,
                     params=params.model_dump(exclude_none=True),
                 )
-            if status and status not in STATUSES:
-                return f"Error: status must be one of: {', '.join(STATUSES)}."
+            if error := one_of("status", status, STATUSES):
+                return error
             return client.cycles.list_lite(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
@@ -209,26 +207,20 @@ def register(mcp: FastMCP) -> None:
             return None
 
         if action == "list_work_items":
-            try:
-                response: PaginatedCycleWorkItemResponse = client.cycles.list_work_items(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    cycle_id=cycle_id,
-                    params=WorkItemQueryParams(
-                        pql=opt(pql),
-                        order_by=opt(order_by),
-                        per_page=opt(per_page),
-                        cursor=opt(cursor),
-                        expand=opt(expand),
-                        fields=opt(fields),
-                    ),
-                )
-            except HttpError as exc:
-                failure = pql_failure(NAME, action, pql, exc)
-                if failure is None:
-                    raise
-                return failure
-            return envelope(response, opt(fields))
+            return work_item_page(
+                NAME,
+                action,
+                client.cycles.list_work_items,
+                pql=pql,
+                order_by=order_by,
+                cursor=cursor,
+                per_page=per_page,
+                expand=expand,
+                fields=fields,
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                cycle_id=cycle_id,
+            )
 
         if action == "manage_work_items":
             add = coerce_list(add_ids)

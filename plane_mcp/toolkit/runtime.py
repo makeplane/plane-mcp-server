@@ -11,6 +11,7 @@ give SDK-shaped values back, so any surface can use them.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 
@@ -49,16 +50,28 @@ def require(actions: Any, action: str, **supplied: Any) -> str | None:
     return missing(action, *absent) if absent else None
 
 
+def one_of(name: str, value: Any, allowed: Sequence[str], hint: str = "") -> str | None:
+    """Error naming the permitted values, or None when `value` is valid or unset."""
+    if not value or value in allowed:
+        return None
+    message = f"Error: {name} must be one of: {', '.join(allowed)}."
+    return f"{message} {hint}" if hint else message
+
+
 def opt(value: Any) -> Any:
     """Normalise a sentinel default ("" / 0) back to None for SDK payloads."""
     return value if value not in ("", 0) else None
 
 
-def coerce_list(value: Any) -> list[Any] | None:
+def coerce_list(value: Any, *, split: bool = True) -> list[Any] | None:
     """Accept a JSON-encoded string where a list is expected.
 
     Models routinely send '["uuid"]' for a list parameter. Absorbing it here
     removes a failure class that is not worth surfacing to the caller.
+
+    `split` decides what a bare comma means: a separator in an id list, ordinary
+    punctuation in free text. Pass `split=False` for anything a person typed, or
+    the default value "Hello, world" is silently stored as two values.
     """
     if value is None:
         return None
@@ -74,6 +87,8 @@ def coerce_list(value: Any) -> list[Any] | None:
             except ValueError:
                 return [text]
             return parsed if isinstance(parsed, list) else [parsed]
+        if not split:
+            return [text]
         return [part.strip() for part in text.split(",") if part.strip()]
     return [value]
 

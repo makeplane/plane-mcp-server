@@ -73,7 +73,7 @@ ACTIONS = (
         "manage_work_items",
         ("customer_id",),
         ("link_ids", "unlink_ids", "customer_request_id"),
-        note="pass at least one of link_ids or unlink_ids",
+        note="pass at least one of link_ids or unlink_ids; returns nothing, read back with list_work_items",
     ),
 )
 
@@ -227,4 +227,4 @@ def register(mcp: FastMCP) -> None:
                 work_item_id=work_item_id,
                 customer_request_id=opt(customer_request_id),
             )
-        return work_items.list(workspace_slug=workspace_slug, customer_id=customer_id)
+        return None

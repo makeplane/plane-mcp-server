@@ -12,6 +12,7 @@ near-duplicate tool name that a model has to disambiguate on every call.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
 from fastmcp import FastMCP
@@ -41,6 +42,7 @@ from plane_mcp.toolkit import (
     coerce_list,
     missing,
     needs,
+    one_of,
     opt,
     page_params,
 )
@@ -166,6 +168,34 @@ LEGACY = {
     "set_work_item_property_value": "set_value",
     "delete_work_item_property_value": "delete_value",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class _Scope:
+    """Where one property lives, resolved once from the ids the caller supplied."""
+
+    namespace: Any
+    suffix: str
+    kwargs: dict[str, Any]
+    id_kwarg: str
+
+    def call(self, verb: str) -> Any:
+        return getattr(self.namespace, verb + self.suffix)
+
+    def target(self, property_id: str) -> dict[str, Any]:
+        return {**self.kwargs, self.id_kwarg: property_id}
+
+
+def _scope_of(client: Any, project_id: str, work_item_type_id: str) -> _Scope:
+    """project_id with work_item_type_id is type-scoped, project_id alone is
+    project-flat, neither is the workspace."""
+    properties = client.work_item_properties
+    if project_id and work_item_type_id:
+        scope = {"project_id": project_id, "type_id": work_item_type_id}
+        return _Scope(properties, "", scope, "work_item_property_id")
+    if project_id:
+        return _Scope(properties, "_project", {"project_id": project_id}, "property_id")
+    return _Scope(client.workspace_work_item_properties, "", {}, "property_id")
 
 
 def _settings(property_type: str, display_format: str) -> PropertySettings:
@@ -296,13 +326,14 @@ def register(mcp: FastMCP) -> None:
     ):
         client, workspace_slug = get_plane_client_context()
 
-        if property_type and property_type not in PROPERTY_TYPES:
-            return f"Error: property_type must be one of: {', '.join(PROPERTY_TYPES)}."
-        if relation_type and relation_type not in RELATION_TYPES:
-            return f"Error: relation_type must be one of: {', '.join(RELATION_TYPES)}."
+        if error := one_of("property_type", property_type, PROPERTY_TYPES):
+            return error
+        if error := one_of("relation_type", relation_type, RELATION_TYPES):
+            return error
 
         properties = client.work_item_properties
         workspace_properties = client.workspace_work_item_properties
+        scope = _scope_of(client, project_id, work_item_type_id)
 
         if action.endswith("_value"):
             if error := needs(action, project_id=project_id, work_item_id=work_item_id, property_id=property_id):
@@ -377,7 +408,7 @@ def register(mcp: FastMCP) -> None:
                 relation_type=RelationType(relation_type) if relation_type else None,
                 description=opt(description),
                 is_required=is_required,
-                default_value=coerce_list(default_value),
+                default_value=coerce_list(default_value, split=False),
                 settings=_settings(property_type, display_format),
                 is_active=is_active,
                 is_multi=is_multi,
@@ -385,16 +416,7 @@ def register(mcp: FastMCP) -> None:
                 external_id=opt(external_id),
                 options=parsed_options,
             )
-            if project_id and work_item_type_id:
-                return properties.create(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    type_id=work_item_type_id,
-                    data=data,
-                )
-            if project_id:
-                return properties.create_project(workspace_slug=workspace_slug, project_id=project_id, data=data)
-            return workspace_properties.create(workspace_slug=workspace_slug, data=data)
+            return scope.call("create")(workspace_slug=workspace_slug, **scope.kwargs, data=data)
 
         if action == "manage_type_properties":
             attach = coerce_list(attach_ids)
@@ -424,21 +446,10 @@ def register(mcp: FastMCP) -> None:
             if not work_item_property_id:
                 return missing(action, "work_item_property_id")
 
+            target = scope.target(work_item_property_id)
+
             if action == "retrieve":
-                if project_id and work_item_type_id:
-                    return properties.retrieve(
-                        workspace_slug=workspace_slug,
-                        project_id=project_id,
-                        type_id=work_item_type_id,
-                        work_item_property_id=work_item_property_id,
-                    )
-                if project_id:
-                    return properties.retrieve_project(
-                        workspace_slug=workspace_slug,
-                        project_id=project_id,
-                        property_id=work_item_property_id,
-                    )
-                return workspace_properties.retrieve(workspace_slug=workspace_slug, property_id=work_item_property_id)
+                return scope.call("retrieve")(workspace_slug=workspace_slug, **target)
 
             if action == "update":
                 data = UpdateWorkItemProperty(
@@ -447,54 +458,23 @@ def register(mcp: FastMCP) -> None:
                     relation_type=RelationType(relation_type) if relation_type else None,
                     description=opt(description),
                     is_required=is_required,
-                    default_value=coerce_list(default_value),
+                    default_value=coerce_list(default_value, split=False),
                     settings=_settings(property_type, display_format),
                     is_active=is_active,
                     is_multi=is_multi,
                     external_source=opt(external_source),
                     external_id=opt(external_id),
                 )
-                if project_id and work_item_type_id:
-                    return properties.update(
-                        workspace_slug=workspace_slug,
-                        project_id=project_id,
-                        type_id=work_item_type_id,
-                        work_item_property_id=work_item_property_id,
-                        data=data,
-                    )
-                if project_id:
-                    return properties.update_project(
-                        workspace_slug=workspace_slug,
-                        project_id=project_id,
-                        property_id=work_item_property_id,
-                        data=data,
-                    )
-                return workspace_properties.update(
-                    workspace_slug=workspace_slug, property_id=work_item_property_id, data=data
-                )
+                return scope.call("update")(workspace_slug=workspace_slug, **target, data=data)
 
-            if project_id and work_item_type_id:
-                properties.delete(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    type_id=work_item_type_id,
-                    work_item_property_id=work_item_property_id,
-                )
-            elif project_id:
-                properties.delete_project(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    property_id=work_item_property_id,
-                )
-            else:
-                workspace_properties.delete(workspace_slug=workspace_slug, property_id=work_item_property_id)
+            scope.call("delete")(workspace_slug=workspace_slug, **target)
             return None
 
         if not property_id:
             return missing(action, "property_id")
 
         scoped_options = properties.options if project_id else workspace_properties.options
-        scope: dict[str, Any] = {"project_id": project_id} if project_id else {}
+        option_scope: dict[str, Any] = {"project_id": project_id} if project_id else {}
 
         if action == "list_options":
             if project_id:
@@ -520,7 +500,7 @@ def register(mcp: FastMCP) -> None:
                     external_source=opt(external_source),
                     external_id=opt(external_id),
                 ),
-                **scope,
+                **option_scope,
             )
 
         if not option_id:
@@ -528,7 +508,7 @@ def register(mcp: FastMCP) -> None:
 
         if action == "retrieve_option":
             return scoped_options.retrieve(
-                workspace_slug=workspace_slug, property_id=property_id, option_id=option_id, **scope
+                workspace_slug=workspace_slug, property_id=property_id, option_id=option_id, **option_scope
             )
 
         if action == "update_option":
@@ -544,8 +524,10 @@ def register(mcp: FastMCP) -> None:
                     external_source=opt(external_source),
                     external_id=opt(external_id),
                 ),
-                **scope,
+                **option_scope,
             )
 
-        scoped_options.delete(workspace_slug=workspace_slug, property_id=property_id, option_id=option_id, **scope)
+        scoped_options.delete(
+            workspace_slug=workspace_slug, property_id=property_id, option_id=option_id, **option_scope
+        )
         return None

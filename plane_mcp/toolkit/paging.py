@@ -14,8 +14,10 @@ from typing import Any
 
 from fastmcp.utilities.logging import get_logger
 from plane.errors.errors import HttpError
+from plane.models.query_params import WorkItemQueryParams
 
 from plane_mcp.pql_reference import PQL_FULL_REFERENCE
+from plane_mcp.toolkit.runtime import opt
 
 logger = get_logger(__name__)
 
@@ -39,22 +41,73 @@ def dump_results(items: Any, fields: str | None) -> list[Any]:
     return dumped
 
 
+ENVELOPE_FIELDS = (
+    "total_count",
+    "count",
+    "next_cursor",
+    "prev_cursor",
+    "next_page_results",
+    "prev_page_results",
+)
+
+
 def envelope(response: Any, fields: str | None = None) -> dict[str, Any]:
     """Keep the full pagination envelope so paging stays discoverable.
 
     An action that takes a `cursor` must return one. Handing back only
     `response.results` lets a caller page in but never page on, and makes a
     truncated first page look like the whole set.
+
+    A few Plane responses carry `results` and nothing else. Those are refused
+    rather than defaulted to None: a null `next_cursor` reads as "last page",
+    which is the same lie by another route.
     """
+    absent = [name for name in ENVELOPE_FIELDS if not hasattr(response, name)]
+    if absent:
+        raise TypeError(
+            f"{type(response).__name__} has no {', '.join(absent)}, so it cannot be enveloped: "
+            "this endpoint does not paginate. Return response.results directly, leave cursor and "
+            "per_page out of the action's optional params, and record it in NOT_PAGINATED in "
+            "tests/tools/v2/test_pagination.py."
+        )
     return {
         "results": dump_results(response.results, fields),
-        "total_count": response.total_count,
-        "count": response.count,
-        "next_cursor": response.next_cursor,
-        "prev_cursor": response.prev_cursor,
-        "next_page_results": response.next_page_results,
-        "prev_page_results": response.prev_page_results,
+        **{name: getattr(response, name) for name in ENVELOPE_FIELDS},
     }
+
+
+def work_item_page(
+    tool: str,
+    action: str,
+    method: Any,
+    *,
+    pql: str = "",
+    order_by: str = "",
+    cursor: str = "",
+    per_page: int = 0,
+    expand: str = "",
+    fields: str = "",
+    **target: Any,
+) -> dict[str, Any]:
+    """One page of the work items belonging to a parent record."""
+    try:
+        response = method(
+            **target,
+            params=WorkItemQueryParams(
+                pql=opt(pql),
+                order_by=opt(order_by),
+                per_page=opt(per_page),
+                cursor=opt(cursor),
+                expand=opt(expand),
+                fields=opt(fields),
+            ),
+        )
+    except HttpError as exc:
+        failure = pql_failure(tool, action, pql, exc)
+        if failure is None:
+            raise
+        return failure
+    return envelope(response, opt(fields))
 
 
 def pql_failure(tool: str, action: str, pql: str, exc: HttpError) -> dict[str, Any] | None:

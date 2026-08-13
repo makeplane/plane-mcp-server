@@ -7,7 +7,7 @@ create when all you need is a usable type id.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastmcp import FastMCP
 from plane.models.projects import ProjectFeature
@@ -24,7 +24,6 @@ from plane_mcp.toolkit import (
     opt,
     page_params,
 )
-from plane_mcp.tools.v2.scope import WORK_ITEM_TYPE
 
 NAME = "work_item_type"
 TITLE = "Work item types"
@@ -72,6 +71,13 @@ LEGACY = {
     "delete_work_item_type": "delete",
     "import_work_item_types_to_project": "import_to_project",
 }
+
+
+def _scope_of(client: Any, project_id: str) -> tuple[Any, dict[str, Any], str]:
+    """The namespace, scope kwargs and id keyword that project_id selects."""
+    if project_id:
+        return client.work_item_types, {"project_id": project_id}, "work_item_type_id"
+    return client.workspace_work_item_types, {}, "type_id"
 
 
 def _named(types, target: str):
@@ -134,13 +140,12 @@ def register(mcp: FastMCP) -> None:
         per_page: int = 0,
     ) -> WorkItemType | list[WorkItemType] | str | None:
         client, workspace_slug = get_plane_client_context()
-        # project_id present -> the project's own types; absent -> the workspace's.
-        scope = WORK_ITEM_TYPE.bind(client, project_id)
+        types, scope, id_kwarg = _scope_of(client, project_id)
 
         if action == "list":
             # Only the project endpoint paginates; the workspace one returns all.
-            page = {"params": page_params(cursor, per_page)} if not scope.workspace else {}
-            return scope.namespace.list(workspace_slug=workspace_slug, **scope.scope_kwargs, **page)
+            page = {"params": page_params(cursor, per_page)} if project_id else {}
+            return types.list(workspace_slug=workspace_slug, **scope, **page)
 
         if action == "resolve":
             if error := needs(action, project_id=project_id, name=name):
@@ -159,9 +164,9 @@ def register(mcp: FastMCP) -> None:
         if action == "create":
             if not name:
                 return missing(action, "name")
-            return scope.namespace.create(
+            return types.create(
                 workspace_slug=workspace_slug,
-                **scope.scope_kwargs,
+                **scope,
                 data=CreateWorkItemType(
                     name=name,
                     description=opt(description),
@@ -174,16 +179,14 @@ def register(mcp: FastMCP) -> None:
 
         if not work_item_type_id:
             return missing(action, "work_item_type_id")
-        if not scope.supports(action):
-            return scope.unsupported(action)
 
-        target = {**scope.scope_kwargs, **scope.ids(work_item_type_id)}
+        target = {**scope, id_kwarg: work_item_type_id}
 
         if action == "retrieve":
-            return scope.namespace.retrieve(workspace_slug=workspace_slug, **target)
+            return types.retrieve(workspace_slug=workspace_slug, **target)
 
         if action == "update":
-            return scope.namespace.update(
+            return types.update(
                 workspace_slug=workspace_slug,
                 **target,
                 data=UpdateWorkItemType(
@@ -196,5 +199,5 @@ def register(mcp: FastMCP) -> None:
                 ),
             )
 
-        scope.namespace.delete(workspace_slug=workspace_slug, **target)
+        types.delete(workspace_slug=workspace_slug, **target)
         return None

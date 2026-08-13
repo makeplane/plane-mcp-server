@@ -1,17 +1,24 @@
 """Resources Plane governs at both the workspace and the project.
 
 The idiom is uniform and load-bearing: **supply project_id for the project's own
-set, omit it for the workspace's.** Getting it wrong is quiet — the call still
-succeeds, against the wrong scope — so each scope is pinned to the namespace and
+set, omit it for the workspace's.** Getting it wrong is quiet -- the call still
+succeeds, against the wrong scope -- so each scope is pinned to the namespace and
 the id keyword it must use. The two scopes do not agree on the id keyword, which
 is exactly the kind of detail that rots.
+
+Work item types are the only resource governed at both scopes today. The
+resolver lives in the module rather than in a shared abstraction: one caller
+does not justify one, and the two-way split here is not the three-way split
+`work_item_property` needs.
 """
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
-from plane_mcp.tools.v2.scope import WORK_ITEM_TYPE
+from plane_mcp.tools.v2.work_item_type import _scope_of
 
 PROJECT = "project-1"
 TYPE_ID = "type-1"
@@ -59,35 +66,20 @@ def test_each_scope_uses_its_own_id_keyword(work_item_type):
     assert spy.recorder.only().kwargs["type_id"] == TYPE_ID
 
 
-def test_the_declaration_matches_the_sdk():
+@pytest.mark.parametrize("project_id", ["", PROJECT], ids=["workspace", "project"])
+def test_the_resolver_matches_the_sdk(project_id):
     """A namespace or id keyword renamed in the SDK must fail here, not in production."""
-    import inspect
-
     from plane import PlaneClient
 
     client = PlaneClient(api_key="spy", base_url="http://spy.invalid")
-    for path, id_kwarg, actions in (
-        (WORK_ITEM_TYPE.project_namespace, WORK_ITEM_TYPE.project_id_kwarg, WORK_ITEM_TYPE.project_actions),
-        (WORK_ITEM_TYPE.workspace_namespace, WORK_ITEM_TYPE.workspace_id_kwarg, WORK_ITEM_TYPE.workspace_actions),
-    ):
-        namespace = client
-        for part in path.split("."):
-            namespace = getattr(namespace, part, None)
-            assert namespace is not None, f"the SDK has no {path}"
-        for action in actions:
-            method = getattr(namespace, action, None)
-            assert method is not None, f"{path} has no {action}()"
-            if action in ("retrieve", "update", "delete"):
-                assert id_kwarg in inspect.signature(method).parameters, f"{path}.{action}() does not take {id_kwarg!r}"
+    namespace, scope, id_kwarg = _scope_of(client, project_id)
 
-
-def test_workspace_scope_refuses_what_it_cannot_do(registered, spy):
-    """A scope that lacks an operation says so instead of calling the wrong thing."""
-    unsupported = WORK_ITEM_TYPE.project_actions - WORK_ITEM_TYPE.workspace_actions
-    if not unsupported:
-        pytest.skip("both scopes currently support the same actions")
-    tool = registered["work_item_type"].fn
-    for action in sorted(unsupported):
-        result = tool(action=action, work_item_type_id=TYPE_ID)
-        assert isinstance(result, str) and result.startswith("Error:")
-        assert not spy.recorder.calls
+    assert namespace is not None
+    for verb in ("list", "retrieve", "create", "update", "delete"):
+        method = getattr(namespace, verb, None)
+        assert method is not None, f"the SDK namespace has no {verb}()"
+        takes = inspect.signature(method).parameters
+        if verb in ("retrieve", "update", "delete"):
+            assert id_kwarg in takes, f"{verb}() does not take {id_kwarg!r}"
+        for name in scope:
+            assert name in takes, f"{verb}() does not take {name!r}"

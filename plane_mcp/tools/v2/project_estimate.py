@@ -22,7 +22,7 @@ from plane.models.estimates import (
 from plane.models.projects import Project
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, opt
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, one_of, opt
 
 NAME = "project_estimate"
 TITLE = "Project estimates"
@@ -101,8 +101,8 @@ def register(mcp: FastMCP) -> None:
 
         if not project_id:
             return missing(action, "project_id")
-        if type and type not in TYPES:
-            return f"Error: type must be one of: {', '.join(TYPES)}."
+        if error := one_of("type", type, TYPES):
+            return error
 
         estimates = client.estimates
 

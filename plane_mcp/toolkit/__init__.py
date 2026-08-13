@@ -22,13 +22,14 @@ submodules stay importable for callers that want to be explicit.
 
 from __future__ import annotations
 
-from plane_mcp.toolkit.paging import dump_results, envelope, pql_failure
+from plane_mcp.toolkit.paging import dump_results, envelope, pql_failure, work_item_page
 from plane_mcp.toolkit.runtime import (
     as_params,
     coerce_list,
     ids_of,
     missing,
     needs,
+    one_of,
     opt,
     page_params,
     require,
@@ -54,8 +55,10 @@ __all__ = [
     "ids_of",
     "missing",
     "needs",
+    "one_of",
     "opt",
     "page_params",
     "pql_failure",
     "require",
+    "work_item_page",
 ]
