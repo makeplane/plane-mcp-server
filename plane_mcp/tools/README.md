@@ -102,7 +102,7 @@ directions.
 | `<resource>.py` | one module per resource |
 | `registry.py` | `RESOURCES` in advertised order, plus the alias tables |
 | `legacy.py` | `LegacyNames` — resolves retired tool names |
-| `../../toolkit/` | shared helpers: `spec`, `runtime`, `paging`, `transforms` |
+| `../../toolkit/` | shared helpers: `spec`, `runtime`, `paging`, `governance`, `transforms` |
 
 `RESOURCES` is an explicit tuple, not a directory scan. Its order is the
 advertised order and therefore a wire-format guarantee: tool definitions head a
@@ -155,6 +155,14 @@ Each resource resolves scope locally rather than through a shared abstraction,
 because the shapes differ: `workitem_type` is a two-way split, `workitem_property`
 is three-way and also varies the method name. Keep new ones local until a common
 shape is established by more than one caller.
+
+**When the workspace owns the resource outright**, the project-scoped write is
+refused, and that refusal — not a feature flag — is what says so: the flag is
+cached, and the lockout outlives it being toggled off. `workspace_owns(exc, field)`
+from the toolkit reads both shapes Plane uses, so a newly governed resource passes
+its field name and needs nothing else. `workitem_type resolve` is the worked
+example: create in the project, or on refusal adopt from the workspace catalogue
+and import.
 
 ## Tools
 

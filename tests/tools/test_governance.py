@@ -15,8 +15,10 @@ does not justify one, and the two-way split here is not the three-way split
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
+from plane.errors.errors import HttpError
 
 from plane_mcp.tools.workitem_type import _scope_of
 
@@ -88,3 +90,98 @@ def test_the_resolver_matches_the_sdk(project_id):
             assert id_kwarg in takes, f"{verb}() does not take {id_kwarg!r}"
         for name in scope:
             assert name in takes, f"{verb}() does not take {name!r}"
+
+class _Features:
+    """A features payload; `extra: allow` on the SDK model means unknown keys survive."""
+
+    def __init__(self, **flags):
+        self._flags = flags
+
+    def model_dump(self):
+        return dict(self._flags)
+
+
+def _refusal() -> HttpError:
+    """The 400 Plane raises when a governed workspace refuses project-level types."""
+    return HttpError(
+        "Bad Request",
+        status_code=400,
+        response={"work_item_types": ["Cannot enable project-level work item types when workspace-level ..."]},
+    )
+
+
+def _typed(name: str):
+    """Enough of a WorkItemType for `resolve` to match on and return."""
+    return SimpleNamespace(id=f"{name.lower()}-id", name=name)
+
+
+def test_resolve_returns_a_type_already_usable_in_the_project(registered, spy):
+    """The first read is project-scoped, which is correct in both modes."""
+    spy.returns["work_item_types.list"] = [_typed("Bug")]
+
+    result = registered["workitem_type"].fn(action="resolve", project_id=PROJECT, name="Bug")
+
+    assert result.name == "Bug"
+    assert spy.recorder.methods == ["work_item_types.list"], "resolve looked further than it needed to"
+
+
+def test_resolve_creates_in_the_project_when_the_project_owns_types(registered, spy):
+    spy.returns["work_item_types.list"] = []
+    spy.returns["projects.get_features"] = _Features(work_item_types=True)
+    spy.returns["work_item_types.create"] = _typed("Bug")
+
+    result = registered["workitem_type"].fn(action="resolve", project_id=PROJECT, name="Bug")
+
+    assert result.name == "Bug"
+    assert "work_item_types.create" in spy.recorder.methods
+    assert "workspace_work_item_types.create" not in spy.recorder.methods
+
+
+def test_resolve_adopts_from_the_workspace_when_the_project_is_refused(registered, spy):
+    """The reported failure: resolve dead-ended on this 400 instead of adopting."""
+    spy.returns["work_item_types.list"] = []
+    spy.returns["projects.get_features"] = _Features(work_item_types=False)
+    spy.returns["projects.update_features"] = _refusal()
+    spy.returns["workspace_work_item_types.list"] = []
+    spy.returns["workspace_work_item_types.create"] = _typed("Bug")
+
+    result = registered["workitem_type"].fn(action="resolve", project_id=PROJECT, name="Bug")
+
+    assert result.name == "Bug"
+    assert "workspace_work_item_types.create" in spy.recorder.methods
+    assert "work_item_types.import_to_project" in spy.recorder.methods, "created but never imported into the project"
+    assert "work_item_types.create" not in spy.recorder.methods
+
+
+def test_resolve_reuses_an_existing_workspace_type_rather_than_duplicating(registered, spy):
+    spy.returns["work_item_types.list"] = []
+    spy.returns["projects.get_features"] = _Features(work_item_types=False)
+    spy.returns["projects.update_features"] = _refusal()
+    spy.returns["workspace_work_item_types.list"] = [_typed("Bug")]
+
+    result = registered["workitem_type"].fn(action="resolve", project_id=PROJECT, name="Bug")
+
+    assert result.name == "Bug"
+    assert "workspace_work_item_types.create" not in spy.recorder.methods
+    assert "work_item_types.import_to_project" in spy.recorder.methods
+
+
+def test_resolve_does_not_swallow_an_unrelated_failure(registered, spy):
+    """Only the governance refusal may reroute; anything else is the caller's to see."""
+    spy.returns["work_item_types.list"] = []
+    spy.returns["projects.get_features"] = _Features(work_item_types=False)
+    spy.returns["projects.update_features"] = HttpError("Forbidden", status_code=403, response={})
+
+    with pytest.raises(HttpError):
+        registered["workitem_type"].fn(action="resolve", project_id=PROJECT, name="Bug")
+
+
+def test_the_project_feature_key_matches_the_sdk():
+    """A rename once rewrote this literal, silencing the read; the SDK field is the authority."""
+    from plane.models.projects import ProjectFeature
+
+    from plane_mcp.tools.workitem_type import PROJECT_TYPES_FEATURE
+
+    assert PROJECT_TYPES_FEATURE in ProjectFeature.model_fields, (
+        f"{PROJECT_TYPES_FEATURE!r} is not a ProjectFeature field: {sorted(ProjectFeature.model_fields)}"
+    )
