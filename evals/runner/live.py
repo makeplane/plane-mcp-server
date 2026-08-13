@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +76,16 @@ def is_infra_cli_stop_reason(stop_reason: str | None) -> bool:
     if reason == "error" or reason.startswith("error_"):
         return True
     return False
+
+
+def _elapsed(since: float) -> str:
+    """Wall time as mm:ss (or h:mm:ss past an hour) for progress lines."""
+    seconds = int(time.monotonic() - since)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def _timeout_error_message(agent: TaskResult) -> str:
@@ -173,7 +184,7 @@ def _seed_fixtures(
     except TaskSkipped as skip:
         row.skipped = skip.reason
         row.verify_note = skip.reason
-        print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}")
+        print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}", flush=True)
         return False
     except Exception as exc:
         row.success = False
@@ -183,18 +194,20 @@ def _seed_fixtures(
         print(
             f"  {task['id']} rep={repetition} ERROR[infra_seed]: {exc}",
             file=sys.stderr,
+            flush=True,
         )
         if context.get("project_name"):
             print(
                 f"  orphaned project may remain: {context['project_name']}",
                 file=sys.stderr,
+                flush=True,
             )
         return False
     if "bug_type" in task_needs and not context.get("bug_type"):
         reason = context.get("bug_type_skip_reason") or "bug_type unavailable"
         row.skipped = reason
         row.verify_note = reason
-        print(f"  {task['id']} rep={repetition} SKIPPED: {reason}")
+        print(f"  {task['id']} rep={repetition} SKIPPED: {reason}", flush=True)
         return False
     return True
 
@@ -234,6 +247,7 @@ async def _drive_agent(
         print(
             f"  {task['id']} rep={repetition} ERROR[infra_seed]: {exc}",
             file=sys.stderr,
+            flush=True,
         )
         return None
     except Exception as exc:
@@ -328,11 +342,14 @@ async def _verify_task(
         )
         row.success = bool(ok)
         row.verify_note = note
-        print(f"  {task['id']} rep={repetition} success={ok} calls={agent.num_calls} note={note!r}")
+        print(
+            f"  {task['id']} rep={repetition} success={ok} calls={agent.num_calls} note={note!r}",
+            flush=True,
+        )
     except TaskSkipped as skip:
         row.skipped = skip.reason
         row.verify_note = skip.reason
-        print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}")
+        print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}", flush=True)
     except Exception as exc:
         row.success = False
         row.error = f"{type(exc).__name__}: {exc}"
@@ -499,7 +516,7 @@ async def run_live(
         except SystemExit as exc:
             print(exc, file=sys.stderr)
             return 2
-        print(f"resume: skipping {skip_count} completed rows, retrying {retry_count}")
+        print(f"resume: skipping {skip_count} completed rows, retrying {retry_count}", flush=True)
 
     # First line of a new/empty file is a meta header (skipped by loaders).
     meta = make_run_meta_row(
@@ -516,7 +533,7 @@ async def run_live(
         git_sha=git_revision,
     )
     if maybe_write_run_meta(out_path, meta):
-        print(f"wrote meta header battery={battery} label={label}")
+        print(f"wrote meta header battery={battery} label={label}", flush=True)
 
     plane, workspace_slug = make_plane_client()
     # User chose --driver explicitly: codex live is allowed (they own the quota).
@@ -538,14 +555,29 @@ async def run_live(
         f"requested_model={model_alias} resolved_model={model_id} "
         f"label={label} tasks={[task['id'] for task in tasks]} reps={reps}"
     )
-    print(f"writing {out_path}")
+    print(f"writing {out_path}", flush=True)
+
+    # A battery is tens of minutes of silence otherwise: one line before each
+    # repetition says what is running now, and one after says where the run is.
+    total_runs = len(tasks) * reps
+    started_at = time.monotonic()
+    finished = 0
+    passed = 0
+    skipped = 0
+    failed = 0
 
     with out_path.open("a", encoding="utf-8") as file:
         for task in tasks:
             for repetition in range(reps):
                 if (task["id"], repetition, label) in resume_skip:
-                    print(f"  {task['id']} rep={repetition} RESUME_SKIP")
+                    finished += 1
+                    print(f"  {task['id']} rep={repetition} RESUME_SKIP", flush=True)
                     continue
+                print(
+                    f"[{finished + 1:>2}/{total_runs}] {task['id']} rep={repetition} "
+                    f"running ({_elapsed(started_at)} elapsed)",
+                    flush=True,
+                )
                 row = await _run_task_repetition(
                     plane=plane,
                     driver=driver,
@@ -568,4 +600,21 @@ async def run_live(
                 file.write(json.dumps(row.to_row(), default=str) + "\n")
                 file.flush()
 
+                finished += 1
+                if row.skipped:
+                    skipped += 1
+                elif row.success:
+                    passed += 1
+                else:
+                    failed += 1
+                print(
+                    f"          {finished}/{total_runs} done · {passed} pass · "
+                    f"{failed} fail · {skipped} skip · {_elapsed(started_at)} elapsed",
+                    flush=True,
+                )
+
+    print(
+        f"finished {finished}/{total_runs} in {_elapsed(started_at)}: {passed} pass, {failed} fail, {skipped} skip",
+        flush=True,
+    )
     return 0

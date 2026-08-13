@@ -815,3 +815,56 @@ def test_run_live_passes_server_cmd_to_non_claude(monkeypatch, tmp_path: Path):
     assert rc == 0
     assert captured["name"] == "opencode-cli"
     assert captured["kwargs"].get("server_command") == ["/bin/foreign", "stdio"]
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting
+# ---------------------------------------------------------------------------
+
+
+def test_elapsed_formats_minutes_then_hours(monkeypatch):
+    from evals.runner.live import _elapsed
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(runner_live.time, "monotonic", lambda: clock["now"])
+    clock["now"] = 1000.0 + 9
+    assert _elapsed(1000.0) == "00:09"
+    clock["now"] = 1000.0 + 75
+    assert _elapsed(1000.0) == "01:15"
+    clock["now"] = 1000.0 + 3671
+    assert _elapsed(1000.0) == "1:01:11"
+
+
+def test_run_live_reports_progress_per_repetition(tmp_path: Path, monkeypatch, capsys):
+    """A battery is tens of minutes long; each task must announce itself when it starts.
+
+    Without this the operator sees nothing until the whole run ends, which is how
+    a stalled run looks identical to a working one.
+    """
+    out = tmp_path / "out.jsonl"
+
+    async def passes(_plane, _ctx, _run):
+        return True, "ok"
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "ws"))
+    monkeypatch.setattr(runner_live, "seed", lambda *a, **k: k["ctx"].update({"project_name": "EVAL x"}))
+    monkeypatch.setattr(runner_live, "teardown", lambda *a, **k: None)
+
+    async def fake_drive(**kwargs):
+        return TaskResult(final_text="done", num_calls=2)
+
+    monkeypatch.setattr(runner_live, "_drive_agent", fake_drive)
+    monkeypatch.setattr(runner_live, "get_driver", lambda *a, **k: MagicMock())
+
+    tasks = [_taxonomy_task("R1", passes), _taxonomy_task("R2", passes)]
+    rc = asyncio.run(run_live(tasks, model_alias="standard", reps=1, label="local", out_path=out))
+    assert rc == 0
+
+    printed = capsys.readouterr().out
+    # Position out of total, before the task runs.
+    assert "[ 1/2] R1 rep=0 running" in printed
+    assert "[ 2/2] R2 rep=0 running" in printed
+    # A running tally after each, and one closing summary.
+    assert "1/2 done · 1 pass · 0 fail · 0 skip" in printed
+    assert "finished 2/2 in " in printed
+    assert "2 pass, 0 fail, 0 skip" in printed
