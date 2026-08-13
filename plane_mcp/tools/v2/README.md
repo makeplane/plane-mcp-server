@@ -1,27 +1,29 @@
-# The consolidated tool surface
+# Tool surface `v2`
 
-28 tools instead of 177, advertising 55k characters instead of 500k — an 89%
-reduction with the same capability.
+The default surface: **28 tools**, one per Plane resource, each taking an
+`action` parameter that selects the operation. 183 actions in total.
 
-This is not a cost optimisation. The published tool caps of several MCP clients
-sit below 177 (Cursor 40, Windsurf 100, Antigravity 100, VS Code Copilot 128),
-and a client that truncates the listing silently makes the tools past its cap
-unreachable. The flat surface is not *expensive* on those clients; it is
-*incomplete*. Fitting inside every cap is the point.
+```python
+workitem(action="create", project_id=..., name="Fix login")
+workitem(action="list", project_id=..., pql='state__group = "started"')
+cycle(action="archive", project_id=..., cycle_id=...)
+```
 
-> "tools v2" is this server's tool surface, not Plane's API v2. They version
-> independently.
+A compact catalogue — 28 tools, ~57k characters — loads fully in every MCP client
+and leaves the context budget to the conversation.
+
+> "v2" is the version of *this server's tool surface*. It is unrelated to Plane's
+> API versions.
 
 ## The shape of a resource module
 
-One module per resource, one tool per module, one `action` parameter that
-selects the operation. Every module has the same five parts, in this order:
+One module per resource, five parts, in this order:
 
 ```python
 NAME = "label"                       # 1. identity
 TITLE = "Labels"
 
-ACTIONS = (                          # 2. the declaration -- the single source of truth
+ACTIONS = (                          # 2. the declaration -- single source of truth
     Action("list", ("project_id",), ("cursor", "per_page"), read=True),
     Action("create", ("project_id", "name"), ("color", "description")),
     Action("delete", ("project_id", "label_id"), destructive=True),
@@ -29,7 +31,7 @@ ACTIONS = (                          # 2. the declaration -- the single source o
 
 FOOTER = "color is a hex code such as #EF4444."   # 3. cross-cutting notes
 
-LEGACY = {"list_labels": "list", ...}             # 4. v1 name -> action
+LEGACY = {"list_labels": "list", ...}             # 4. retired name -> action
 
 def register(mcp):                                # 5. dispatch
     @mcp.tool(
@@ -41,29 +43,27 @@ def register(mcp):                                # 5. dispatch
         ...
 ```
 
-`ACTIONS` generates the description and the annotations, so documentation cannot
-drift from behaviour. The conformance suite asserts the `Literal` matches
-`ACTIONS`, that every documented parameter exists, and that the description was
-generated rather than hand-written.
+`ACTIONS` generates the description and the MCP annotations, so documentation
+cannot drift from behaviour. `Action(read=True)` and `Action(destructive=True)`
+become `readOnlyHint` and `destructiveHint`.
 
-## Rules that are easy to break
+Register a new resource by adding the module and one entry in `registry.py`.
+
+## Conventions
 
 **Parameters are plain typed defaults** — `= ""`, `= 0`, `= False`. Never
 `X | None = None`: Pydantic renders every optional union as a verbose
-`anyOf`-with-null block, and that verbosity is most of what this surface exists
-to remove. Where `False` or `0` is a *meaningful value* distinct from "not
-supplied" — a feature toggle, an intake status of `-2` — use `bool | None` or
-`int | None` and say why in a comment.
+`anyOf`-with-null block. Where `False` or `0` is a *meaningful value* distinct
+from "not supplied" — a visibility of `0`, an intake status of `-2` — use
+`bool | None` or `int | None` and say why in a comment.
 
-**A dropped value must become an error, not a default.** v1 typed its enums as
-`Literal`, so a bad value was rejected before the call. Here they are `str`, so
-the dispatch has to check them. Without that check a bad value is silently
-dropped and the caller gets a plausible wrong answer — an unfiltered list, a
-release created with the default status — that reads as success.
+**Validate enum-valued parameters.** They are `str` in the schema, so check them
+in the dispatch with `one_of()`. An unrecognised value then returns an error
+naming the permitted set, rather than being dropped from the payload.
 
-**A guard names only what is absent.** Guard order is shared-prefix first: check
-what every action needs, then what one action needs. For a guard covering more
-than one parameter, use `needs()` rather than a shared condition —
+**A guard names only what is absent.** Guard order is shared-prefix first: what
+every action needs, then what one action needs. For a guard covering more than
+one parameter use `needs()` rather than a shared condition:
 
 ```python
 if error := needs(action, name=name, owned_by=owned_by):   # names owned_by only
@@ -73,122 +73,144 @@ if not name or not owned_by:                               # blames both
     return missing(action, "name", "owned_by")
 ```
 
-The error string is the model's self-correction channel, so a message that
-blames a parameter the caller supplied costs a whole round trip.
-`test_guards.py` enforces this for every declared required parameter.
+The error string is the model's self-correction channel: naming exactly what is
+absent lets it retry correctly on the next call.
+
+**An action that accepts a `cursor` must return one.** Return `envelope(response)`
+rather than `response.results`, so the caller receives `next_cursor` and can page
+through the full set.
 
 **Match the SDK's `params` type.** Some endpoints take `Mapping[str, Any]`
-(`page_params`), others take a Pydantic query-params model (`as_params`) and
-call `.model_dump()` on it. A dict passed to the second kind raises
-`AttributeError` at call time — `SpyClient` in the test suite rejects it up
-front.
+(`page_params`), others a Pydantic query-params model (`as_params`) and call
+`.model_dump()` on it. A dict passed to the second kind raises `AttributeError`
+at call time.
 
-## The listing transforms
+**The surface spells it `workitem`; `plane-sdk` spells it `work_item`.** Tool
+names, action names and parameters use `workitem`. SDK namespaces, keyword
+arguments and model names keep `work_item`, as do Plane's PQL field names
+(`work_items__release_id`). `test_vocabulary.py` pins the boundary in both
+directions.
 
-Two `Transform`s wrap the registered tools:
+## Layout
 
-- `StripOutputSchemas` (`plane_mcp/toolkit/transforms.py`) removes `outputSchema`
-  from the listing. It was two thirds of the v1 payload and no client forwards it
-  to a model. It is catalogue-agnostic, so it lives in the toolkit.
-- `LegacyNames` (`tools/v2/legacy.py`) resolves each v1 tool name to its
-  `(tool, action)` pair on lookup, with `action` hidden and pre-filled. It
-  encodes this catalogue's history, so it stays with the catalogue.
+| Path | Contents |
+|---|---|
+| `<resource>.py` | one module per resource |
+| `registry.py` | `RESOURCES` in advertised order, plus the alias tables |
+| `legacy.py` | `LegacyNames` — resolves retired tool names |
+| `../../toolkit/` | shared helpers: `spec`, `runtime`, `paging`, `transforms` |
 
-Both implement `list_tools`/`get_tool` only. Execution keeps the full schema, so
-results — including `structuredContent` — are unchanged.
+`RESOURCES` is an explicit tuple, not a directory scan. Its order is the
+advertised order and therefore a wire-format guarantee: tool definitions head a
+client's prompt cache, so reordering invalidates live conversations. Append;
+never re-sort. `test_resource_order_is_pinned` holds it to a literal list.
 
-## Legacy names
+## Listing transforms
 
-169 of the 177 v1 names resolve through `LegacyNames`. They are not advertised;
-they are accepted, so a saved prompt or a script that calls `create_work_item`
-keeps working.
+Two `Transform`s wrap the registered tools. Both implement `list_tools`/`get_tool`
+only, so execution keeps the full schema and results — including
+`structuredContent` — are unchanged.
 
-An alias renames a tool; it cannot reshape one. Seven v1 tools chose between two
+- **`StripOutputSchemas`** (`toolkit/transforms.py`) drops `outputSchema` from the
+  listing: roughly two thirds of the wire payload, for a field the MCP spec
+  defines as a client-side validation contract and no client forwards to a model.
+- **`LegacyNames`** (`legacy.py`) resolves a retired tool name to its
+  `(tool, action)` pair on lookup, with `action` hidden and pre-filled.
+
+## Retired tool names
+
+169 names from the flat surface still resolve. They are not advertised — they
+cost nothing in the listing — but a saved prompt or script calling
+`create_work_item` keeps working, and each resolution is logged so the set of
+remaining callers is an observation rather than a guess.
+
+An alias renames a tool; it cannot reshape one. Seven names chose between two
 operations with a parameter (`manage_project_archive(archive=False)`,
-`manage_release_labels(action="detach")`), and no single `(tool, action)` pair
-reproduces that. They are declared in each module's `LEGACY_UNMAPPED` with the
+`manage_release_labels(action="detach")`) and no single `(tool, action)` pair
+reproduces that. Each is declared in its module's `LEGACY_UNMAPPED` with the
 replacement to use, and the conformance suite holds that list to a budget.
+
+## Scope: project vs workspace
+
+Plane governs some resources at the workspace as well as the project — the same
+resource under two SDK namespaces, with different id keyword names. The idiom a
+model sees is uniform: **supply `project_id` for the project's own set, omit it
+for the workspace's.**
+
+Getting it wrong is quiet — the call succeeds against the wrong scope — so each
+resource resolves scope once in a local `_scope_of`, and `test_governance.py`
+pins both namespaces and both id keywords against the live SDK.
+
+Each resource resolves scope locally rather than through a shared abstraction,
+because the shapes differ: `workitem_type` is a two-way split, `workitem_property`
+is three-way and also varies the method name. Keep new ones local until a common
+shape is established by more than one caller.
+
+## Tools
+
+| Tool | Actions |
+|---|---|
+| `customer` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` |
+| `customer_property` | `list` · `retrieve` · `create` · `update` · `delete` · `get_values` · `set_values` |
+| `customer_request` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `cycle` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` · `transfer_workitems` · `complete` · `archive` · `unarchive` |
+| `get_pql_reference` | *(no action parameter)* |
+| `initiative` | `list` · `retrieve` · `create` · `update` · `delete` · `list_projects` · `add_projects` · `remove_projects` |
+| `intake` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `label` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `member` | `me` · `list_workspace` · `list_project` · `list_roles` · `retrieve_role` |
+| `milestone` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` |
+| `module` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` · `archive` · `unarchive` |
+| `page` | `list` · `retrieve` · `create` · `list_workitem_pages` · `attach_to_workitem` · `detach_from_workitem` |
+| `project` | `list` · `retrieve` · `create` · `update` · `delete` · `archive` · `unarchive` · `worklog_summary` · `get_features` · `update_features` |
+| `project_estimate` | `retrieve` · `create` · `update` · `delete` · `link` · `list_points` · `create_points` · `update_point` · `delete_point` |
+| `release` | `list` · `retrieve` · `create` · `update` · `delete` · `get_changelog` · `update_changelog` · `list_workitems` · `manage_workitems` |
+| `release_label` | `list` · `create` · `update` · `delete` · `attach` · `detach` |
+| `release_tag` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `state` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `work_log` | `list` · `create` · `update` · `delete` |
+| `workitem` | `list` · `list_archived` · `retrieve` · `retrieve_by_identifier` · `search` · `count` · `create` · `update` · `delete` · `archive` · `manage_assignee` · `manage_label` |
+| `workitem_activity` | `list` · `retrieve` |
+| `workitem_attachment` | `list` · `read` · `download_url` · `upload_from_url` · `delete` |
+| `workitem_comment` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `workitem_link` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `workitem_property` | `list` · `retrieve` · `create` · `update` · `delete` · `manage_type_properties` · `list_options` · `retrieve_option` · `create_option` · `update_option` · `delete_option` · `get_value` · `set_value` · `delete_value` |
+| `workitem_relation` | `list` · `create` · `delete` · `list_definitions` · `create_definition` · `update_definition` · `delete_definition` |
+| `workitem_type` | `list` · `retrieve` · `resolve` · `create` · `update` · `delete` · `import_to_project` |
+| `workspace` | `get_features` · `update_features` |
+
+Every tool's own description lists its actions with their required and optional
+parameters; that description is generated from `ACTIONS` and is the authoritative
+reference at call time.
+
+## Epics
+
+There are no epic tools. An epic is a work item whose type is named "Epic":
+
+1. `workitem_type resolve` with `project_id` and `name="Epic"` → `id` is the `type_id`.
+2. `workitem create` with that `type_id`.
+3. `workitem list` with `pql='type = "<type id>"'`.
 
 ## Tests
 
 ```bash
-pytest tests/tools/v2/ -q
+pytest tests/tools/v2 -q        # no network, no credentials
 ```
 
-- `test_conformance.py` — surface-wide invariants: tool count within client
-  caps, listing within budget, strict-mode compatible schemas, annotations
-  correct, catalogue order pinned to a literal list, every legacy name
-  accounted for.
-- `test_dispatch.py` — every action of every resource, executed against
-  `SpyClient`, which binds each call against the genuine SDK signature and
-  type-checks the arguments. Also asserts that an action called bare names what
-  it needs instead of reaching the network.
-- `test_pagination.py` — every action declaring `cursor` must return a
-  `next_cursor`, and an action whose endpoint does not paginate must not
-  advertise one. Derived from `ACTIONS`, so a new resource is covered
-  automatically.
-- `test_guards.py` — omitting one declared required parameter must produce an
-  error naming that parameter and no other.
-- `test_workitem_property.py` — the defects where this resource answered
-  plausibly instead of correctly: type-guessed values, swallowed option JSON,
-  and errors reported as an empty result.
-- `test_attachments.py` — the actions needing populated state or an outbound
-  fetch, including the image-versus-text return channel and the SSRF guard.
-- `test_references.py` — every backticked `tool action` in a description
-  resolves, and no description points at a retired v1 tool name. Descriptions
-  are instructions a model follows literally; a dead pointer is a real defect.
-- `test_governance.py` — for resources Plane governs at both scopes, each scope
-  is pinned to its namespace and id keyword, and the resolver is checked against
-  the live SDK.
+Every action of every resource runs against `SpyClient`, a stand-in that binds
+each call against the genuine `plane-sdk` signature and type-checks the
+arguments. Payload-shape mistakes a plain mock would accept — a flat body where
+the SDK wants a nested model, a dict where it wants a Pydantic object — are
+caught here rather than at runtime.
 
-## Governance: workspace scope vs project scope
-
-Plane governs some resources at the workspace as well as the project — the same
-resource under two SDK namespaces, with different id keyword names. The idiom
-the model sees is uniform: **supply `project_id` for the project's own set, omit
-it for the workspace's.**
-
-Getting it wrong is quiet: the call succeeds, against the wrong scope. So each
-resource resolves its scope once, in a local `_scope_of`, and `test_governance.py`
-pins both namespaces and both id keywords against the live SDK.
-
-There is deliberately no shared abstraction for this. Two resources need it and
-they need different shapes — `workitem_type` is a two-way project/workspace
-split, `workitem_property` is three-way and also varies the method name. A
-`scope.py` generalising the two-way case lived here for a while; it served one
-caller, half of it was unreachable, and it could not model the second case when
-that arrived. A local resolver per resource is the smaller thing that works.
-
-## Where the code lives
-
-This package holds resource modules and the catalogue, nothing else:
-
-| Path | What |
+| File | Guarantees |
 |---|---|
-| `tools/v2/<resource>.py` | one module per resource — the 28 tools |
-| `tools/v2/registry.py` | `RESOURCES`, in advertised order, plus the alias tables |
-| `tools/v2/legacy.py` | `LegacyNames` — a v1 migration artefact; dies with v1 |
-| `plane_mcp/toolkit/` | everything shared: `spec`, `runtime`, `paging`, `transforms` |
-
-The helpers used to live here as `_`-prefixed modules, where the underscore was
-not a privacy marker — it was the filter the discovery loop used to tell helpers
-from resources. That made an ordinary helper's *filename* load-bearing and made
-`spec`, imported by all 28 resource modules, look private. They now sit in
-`plane_mcp/toolkit/`, outside a directory that is scheduled to be renamed when
-v1 is dropped.
-
-`RESOURCES` is an explicit tuple rather than a `pkgutil` scan. The order is a
-wire-format guarantee — tool definitions head a client's prompt cache — and
-`test_resource_order_is_pinned` holds it to a literal list, so a change shows up
-as a diff instead of as a silent cache-buster.
-
-## Adding a resource
-
-1. Copy the five-part shape from `label.py`.
-2. Declare `ACTIONS` first; the description and annotations follow from it.
-3. Map every v1 name in `LEGACY`, or explain the break in `LEGACY_UNMAPPED`.
-4. Append the module to `RESOURCES` in `registry.py` and to `CATALOGUE` in
-   `test_conformance.py`. Append — do not re-sort; re-sorting invalidates every
-   live client's prompt cache.
-5. Run `pytest tests/tools/v2/ -q`. The dispatch suite parametrises over
-   `ACTIONS`, so the new resource is exercised action by action.
+| `test_conformance.py` | Surface-wide invariants: tool count, listing size, strict-mode schemas, annotations derived from `ACTIONS`, catalogue order pinned, every retired name accounted for |
+| `test_dispatch.py` | Every action reaches the SDK with well-typed arguments; called bare, it names what is missing instead of issuing a request |
+| `test_guards.py` | Omitting one declared required parameter names *that* parameter and no other |
+| `test_pagination.py` | An action declaring `cursor` returns a `next_cursor`; an unpaginated endpoint does not advertise one |
+| `test_vocabulary.py` | `workitem` everywhere a model reads; `work_item` preserved in SDK calls and retired names |
+| `test_references.py` | Every backticked `tool action` in a description, in the server instructions, and in the PQL reference resolves |
+| `test_governance.py` | Project-vs-workspace scope pinned to its namespace and id keyword |
+| `test_workitem_property.py` | Values reach the SDK in the type the property expects; malformed option JSON and absent scopes are reported, not swallowed |
+| `test_attachments.py` | The image-versus-text return channel, size limits, and the SSRF guard |

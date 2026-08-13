@@ -62,7 +62,7 @@ Two surfaces live side by side. `tools/__init__.py` picks one at registration ti
 
 | Value | Surface | Tools | Advertised |
 |---|---|---|---|
-| `v2` (default) | `tools/v2/` — one action-dispatch tool per resource | 28 | ~55k chars |
+| `v2` (default) | `tools/v2/` — one action-dispatch tool per resource | 28 | ~57k chars |
 | `v1` | `tools/v1/` — the original flat tools | 177 | ~500k chars |
 
 `v1` is retained for one major release and logs a deprecation warning. Note that "tools v2" is this server's tool surface, not Plane's API v2 — they version independently.
