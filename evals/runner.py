@@ -14,10 +14,11 @@ from typing import Any
 
 from evals.drivers import (
     KNOWN_DRIVERS,
-    agent_run_to_harness_dict,
+    agent_run_to_task_result,
     get_driver,
 )
 from evals.drivers.api import MODEL_TIERS
+from evals.results import RESULT_SCHEMA_VERSION, TaskResult
 from evals.seed import make_plane_client, seed, teardown
 from evals.tasks import (
     PromptBindError,
@@ -94,7 +95,7 @@ def stdio_server_env(*, surface: str = "full", extra: dict[str, str] | None = No
     return env
 
 
-def should_skip_resume_row(row: dict[str, Any]) -> bool:
+def should_skip_resume_row(row: TaskResult | dict[str, Any]) -> bool:
     """Return True if a prior row is a completed result that resume should skip.
 
     Re-run when ``error_class`` starts with ``infra_`` or when ``error`` is non-null.
@@ -102,10 +103,11 @@ def should_skip_resume_row(row: dict[str, Any]) -> bool:
     surface/plan skips are stable outcomes, not infra failures).
     Pure function — unit-tested without the live battery.
     """
-    ec = row.get("error_class")
+    result = row if isinstance(row, TaskResult) else TaskResult.from_row(row)
+    ec = result.error_class
     if isinstance(ec, str) and ec.startswith("infra_"):
         return False
-    if row.get("error") is not None:
+    if result.error is not None:
         return False
     return True
 
@@ -151,9 +153,9 @@ def is_infra_cli_stop_reason(stop_reason: str | None) -> bool:
     return False
 
 
-def _timeout_error_message(agent: dict[str, Any]) -> str:
+def _timeout_error_message(agent: TaskResult) -> str:
     """Prefer the driver's recorded timeout note over recomputing MAX_ITERATIONS."""
-    for note in agent.get("driver_notes") or []:
+    for note in agent.driver_notes:
         if isinstance(note, str) and note.startswith("timeout after"):
             return note
     return "timeout"
@@ -225,13 +227,12 @@ def load_resume_skip_keys(
             # Meta / header rows: checked above, not part of resume key set.
             if is_meta_or_non_task_row(row):
                 continue
-            tid = row.get("task_id")
-            rep = row.get("rep")
-            if tid is None or rep is None:
+            result = TaskResult.from_row(row)
+            if not result.task_id:
                 continue
-            key = (str(tid), int(rep))
+            key = (result.task_id, result.rep)
             seen.add(key)
-            if should_skip_resume_row(row):
+            if should_skip_resume_row(result):
                 skip_keys.add(key)
             else:
                 # Prior infra/error row: do not skip (will re-run). Drop any earlier skip.
@@ -256,6 +257,7 @@ def make_run_meta_row(
 ) -> dict[str, Any]:
     """Build the single first-line meta record for a new output JSONL."""
     return {
+        "schema_version": RESULT_SCHEMA_VERSION,
         "row_type": "meta",
         "run_id": run_id,
         "surface": surface,
@@ -292,7 +294,7 @@ async def run_agent_task_via_driver(
     optimal_tools: set[str] | None = None,
     alternate_tools: set[str] | None = None,
     server_env: dict[str, str] | None = None,
-) -> dict[str, Any]:
+) -> TaskResult:
     """Run one task through the selected AgentDriver."""
     project_name = ctx["project_name"]
     system = _system_preamble(workspace_slug, project_name)
@@ -312,7 +314,7 @@ async def run_agent_task_via_driver(
         system=system,
         cwd=Path(__file__).resolve().parent.parent,
     )
-    return agent_run_to_harness_dict(
+    return agent_run_to_task_result(
         agent_run,
         optimal=optimal,
         alternate=alternate,
@@ -334,45 +336,24 @@ def _base_row(
     rep: int,
     battery: str,
     classification: str,
-) -> dict[str, Any]:
-    return {
-        "run_id": run_id,
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "git_sha": git_sha,
-        "battery": battery,
-        "surface": surface,
-        "driver": driver_name,
-        "provider": provider,
-        "classification": classification,
-        "model": model_id,
-        "requested_model": model_request,
-        "requested_tier": requested_tier,
-        "resolved_model": model_id,
-        "task_id": task["id"],
-        "author": task_author(task),
-        "rep": rep,
-        "success": False,
-        "verify_note": "",
-        "skipped": None,
-        "error": None,
-        "error_class": None,
-        "final_text": "",
-        "stop_reason": None,
-        "provider_stop_reason": None,
-        "hit_max_iterations": False,
-        "result_pair_mismatch": False,
-        "token_count_failures": 0,
-        "result_tokens_estimated": None,
-        "calls": [],
-        "num_calls": 0,
-        "errored_calls": 0,
-        "alternate_calls": 0,
-        "out_of_set_calls": 0,
-        "total_result_tokens": 0,
-        "usage_per_iteration": [],
-        "cum_input_tokens": 0,
-        "wall_time_s": 0.0,
-    }
+) -> TaskResult:
+    return TaskResult(
+        run_id=run_id,
+        ts=datetime.now(timezone.utc).isoformat(),
+        git_sha=git_sha,
+        battery=battery,
+        surface=surface,
+        driver=driver_name,
+        provider=provider,
+        classification=classification,
+        model=model_id,
+        requested_model=model_request,
+        requested_tier=requested_tier,
+        resolved_model=model_id,
+        task_id=str(task["id"]),
+        author=task_author(task),
+        rep=rep,
+    )
 
 
 async def run_live(
@@ -510,8 +491,8 @@ async def run_live(
                         # Surface-unsupported tasks: record skip, no seed/agent.
                         if surface_sets.get("skip"):
                             reason = surface_sets["skip"]
-                            row["skipped"] = reason
-                            row["verify_note"] = reason
+                            row.skipped = reason
+                            row.verify_note = reason
                             print(f"  {task['id']} rep={rep} SKIPPED: {reason}")
                         else:
                             task_needs = set(task.get("needs") or set())
@@ -519,14 +500,14 @@ async def run_live(
                             try:
                                 seed(plane, run_id=uuid.uuid4().hex, needs=task_needs, ctx=ctx)
                             except TaskSkipped as skip:
-                                row["skipped"] = skip.reason
-                                row["verify_note"] = skip.reason
+                                row.skipped = skip.reason
+                                row.verify_note = skip.reason
                                 print(f"  {task['id']} rep={rep} SKIPPED: {skip.reason}")
                             except Exception as exc:
-                                row["success"] = False
-                                row["error"] = f"{type(exc).__name__}: {exc}"
-                                row["error_class"] = "infra_seed"
-                                row["verify_note"] = ""
+                                row.success = False
+                                row.error = f"{type(exc).__name__}: {exc}"
+                                row.error_class = "infra_seed"
+                                row.verify_note = ""
                                 print(
                                     f"  {task['id']} rep={rep} ERROR[infra_seed]: {exc}",
                                     file=sys.stderr,
@@ -539,11 +520,11 @@ async def run_live(
                             else:
                                 if "bug_type" in task_needs and not ctx.get("bug_type"):
                                     reason = ctx.get("bug_type_skip_reason") or "bug_type unavailable"
-                                    row["skipped"] = reason
-                                    row["verify_note"] = reason
+                                    row.skipped = reason
+                                    row.verify_note = reason
                                     print(f"  {task['id']} rep={rep} SKIPPED: {reason}")
                                 else:
-                                    agent: dict[str, Any] | None = None
+                                    agent: TaskResult | None = None
                                     # Agent wrap: API failures and CLI failures are infrastructure.
                                     # Contained CLI stops (timeout / error subtypes) return AgentRun.
                                     try:
@@ -560,10 +541,10 @@ async def run_live(
                                         )
                                     except PromptBindError as exc:
                                         # Empty/missing seed IDs in the prompt — not an agent failure.
-                                        row["success"] = False
-                                        row["error"] = f"{type(exc).__name__}: {exc}"
-                                        row["error_class"] = "infra_seed"
-                                        row["verify_note"] = ""
+                                        row.success = False
+                                        row.error = f"{type(exc).__name__}: {exc}"
+                                        row.error_class = "infra_seed"
+                                        row.verify_note = ""
                                         print(
                                             f"  {task['id']} rep={rep} ERROR[infra_seed]: {exc}",
                                             file=sys.stderr,
@@ -576,10 +557,10 @@ async def run_live(
                                             agent_err_class = "infra_api"
                                         else:
                                             agent_err_class = "infra_cli"
-                                        row["success"] = False
-                                        row["error"] = f"{type(exc).__name__}: {exc}"
-                                        row["error_class"] = agent_err_class
-                                        row["verify_note"] = ""
+                                        row.success = False
+                                        row.error = f"{type(exc).__name__}: {exc}"
+                                        row.error_class = agent_err_class
+                                        row.verify_note = ""
                                         print(
                                             f"  {task['id']} rep={rep} ERROR[{agent_err_class}]: {exc}",
                                             file=sys.stderr,
@@ -587,74 +568,73 @@ async def run_live(
                                         agent = None
 
                                     if agent is not None:
-                                        row.update(agent)
+                                        row.apply_agent_result(agent)
                                         # Driver-level requested_model is the resolved ID.
                                         # Restore run-level intent and retain both identities.
-                                        row["requested_model"] = model_alias
-                                        row["requested_tier"] = requested_tier
-                                        row["resolved_model"] = model_id
+                                        row.requested_model = model_alias
+                                        row.requested_tier = requested_tier
+                                        row.resolved_model = model_id
                                         if external:
                                             # Empty overlay sets would classify every call
                                             # out-of-set; null the counters instead.
-                                            row["alternate_calls"] = None
-                                            row["out_of_set_calls"] = None
+                                            row.alternate_calls = None
+                                            row.out_of_set_calls = None
 
                                         # CLI infra stops: timeout + error subtypes except error_max_turns.
-                                        stop_reason = agent.get("stop_reason")
+                                        stop_reason = agent.stop_reason
                                         if driver_name.endswith("-cli") and is_infra_cli_stop_reason(
                                             str(stop_reason) if stop_reason is not None else None
                                         ):
-                                            row["success"] = False
-                                            row["error_class"] = "infra_cli"
+                                            row.success = False
+                                            row.error_class = "infra_cli"
                                             if stop_reason == "timeout":
-                                                row["error"] = _timeout_error_message(agent)
+                                                row.error = _timeout_error_message(agent)
                                             else:
-                                                notes = [
-                                                    n for n in (agent.get("driver_notes") or []) if isinstance(n, str)
-                                                ]
+                                                notes = [n for n in agent.driver_notes if isinstance(n, str)]
                                                 detail = "; ".join(notes) if notes else str(stop_reason)
-                                                row["error"] = detail
-                                            row["verify_note"] = ""
+                                                row.error = detail
+                                            row.verify_note = ""
                                             print(
-                                                f"  {task['id']} rep={rep} ERROR[infra_cli]: {row['error']}",
+                                                f"  {task['id']} rep={rep} ERROR[infra_cli]: {row.error}",
                                                 file=sys.stderr,
                                             )
                                         else:
                                             verify = task["verify"]
                                             try:
+                                                agent_row = agent.to_row()
                                                 ok, note = await verify(
                                                     plane,
                                                     ctx,
                                                     {
-                                                        "final_text": agent["final_text"],
-                                                        "calls": agent["calls"],
+                                                        "final_text": agent.final_text,
+                                                        "calls": agent_row["calls"],
                                                     },
                                                 )
-                                                row["success"] = bool(ok)
-                                                row["verify_note"] = note
+                                                row.success = bool(ok)
+                                                row.verify_note = note
                                                 print(
                                                     f"  {task['id']} rep={rep} success={ok} "
-                                                    f"calls={agent['num_calls']} note={note!r}"
+                                                    f"calls={agent.num_calls} note={note!r}"
                                                 )
                                             except TaskSkipped as skip:
-                                                row["skipped"] = skip.reason
-                                                row["verify_note"] = skip.reason
+                                                row.skipped = skip.reason
+                                                row.verify_note = skip.reason
                                                 print(f"  {task['id']} rep={rep} SKIPPED: {skip.reason}")
                                             except Exception as exc:
-                                                row["success"] = False
-                                                row["error"] = f"{type(exc).__name__}: {exc}"
-                                                row["error_class"] = "task"
-                                                row["verify_note"] = ""
+                                                row.success = False
+                                                row.error = f"{type(exc).__name__}: {exc}"
+                                                row.error_class = "task"
+                                                row.verify_note = ""
                                                 print(
                                                     f"  {task['id']} rep={rep} ERROR[task]: {exc}",
                                                     file=sys.stderr,
                                                 )
                     except Exception as exc:
                         # Anything outside seed/driver/verify wraps.
-                        row["success"] = False
-                        row["error"] = f"{type(exc).__name__}: {exc}"
-                        row["error_class"] = "task"
-                        row["verify_note"] = ""
+                        row.success = False
+                        row.error = f"{type(exc).__name__}: {exc}"
+                        row.error_class = "task"
+                        row.verify_note = ""
                         print(f"  {task['id']} rep={rep} ERROR[task]: {exc}", file=sys.stderr)
                         if ctx.get("project_name"):
                             print(
@@ -669,7 +649,7 @@ async def run_live(
                             if ctx.get("project_name"):
                                 print(f"  orphaned project: {ctx['project_name']}", file=sys.stderr)
 
-                    fh.write(json.dumps(row, default=str) + "\n")
+                    fh.write(json.dumps(row.to_row(), default=str) + "\n")
                     fh.flush()
 
     await _run_tasks()

@@ -237,7 +237,6 @@ class CodexCliDriver(CliDriver):
     default_call_source = "stream"
     run_notes = ("experimental:codex-cli",)
     temp_dir_prefix = "plane-eval-codex-"
-    include_setup_in_wall_time = False
     exit_note_prefix = "codex"
 
     def __init__(

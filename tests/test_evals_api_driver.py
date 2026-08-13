@@ -159,7 +159,7 @@ def test_registered_third_party_backend_runs_without_driver_changes():
     assert run.model == "dummy-model-actual"
     assert run.stopped_reason == "end_turn"
     assert run.provider_stop_reason == "dummy_complete"
-    assert run.usage_per_iteration == [{"in": 7, "out": 2, "cache_read": 0, "cache_write": 0}]
+    assert run.usage_per_iteration == [Usage(7, 2, 0, 0)]
 
 
 def test_api_driver_multi_turn_tool_loop_and_usage_accumulation():
@@ -203,11 +203,7 @@ def test_api_driver_multi_turn_tool_loop_and_usage_accumulation():
     assert run.final_text == "done"
     assert run.stopped_reason == "end_turn"
     assert run.cum_input_tokens == 60
-    assert run.usage_per_iteration == [
-        {"in": 10, "out": 2, "cache_read": 3, "cache_write": 1},
-        {"in": 20, "out": 4, "cache_read": 6, "cache_write": 0},
-        {"in": 30, "out": 6, "cache_read": 9, "cache_write": 0},
-    ]
+    assert run.usage_per_iteration == [Usage(10, 2, 3, 1), Usage(20, 4, 6, 0), Usage(30, 6, 9, 0)]
     assert [call["result_chars"] for call in run.calls] == [len("first result"), len("second")]
     assert [call["result_tokens"] for call in run.calls] == [
         estimate_result_tokens(len("first result")),

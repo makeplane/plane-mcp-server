@@ -18,6 +18,7 @@ from evals import runner as runner_mod
 from evals import seed as seed_mod
 from evals.drivers import AgentRun, ClaudeCliDriver, parse_claude_json_result
 from evals.report import is_infra_error_row, load_rows, summarize
+from evals.results import RESULT_SCHEMA_VERSION
 from evals.run import (
     is_infra_cli_stop_reason,
     load_resume_skip_keys,
@@ -242,6 +243,7 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
     rows = _data_rows(out)
     assert len(rows) == 1
     row = rows[0]
+    assert row["schema_version"] == RESULT_SCHEMA_VERSION
     assert row["error_class"] == "infra_seed"
     assert row["success"] is False
     assert "HttpError" in (row["error"] or "")
@@ -252,6 +254,7 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
     assert row["resolved_model"] == "sonnet"
     assert row["model"] == "sonnet"
     meta = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+    assert meta["schema_version"] == RESULT_SCHEMA_VERSION
     assert meta["requested_tier"] == "standard"
     assert meta["resolved_model"] == "sonnet"
 
@@ -785,8 +788,8 @@ def test_load_rows_dedupe_latest_wins(tmp_path: Path):
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     loaded = load_rows(p)  # default dedupe=latest
     assert len(loaded) == 1
-    assert loaded[0]["num_calls"] == 9
-    assert loaded[0]["success"] is False
+    assert loaded[0].num_calls == 9
+    assert loaded[0].success is False
 
 
 def test_load_rows_no_dedupe_warns_on_duplicate_keys(tmp_path: Path, capsys):

@@ -17,10 +17,16 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Literal
 
+from evals.results import TaskResult
 from evals.tasks import TASKS_BY_ID
 
 DedupeMode = Literal["latest", "none"]
 ResultTokensMode = Literal["measured", "estimated", "mixed", "unlabeled", "unavailable"]
+ResultRow = TaskResult | dict[str, Any]
+
+
+def _task_result(row: ResultRow) -> TaskResult:
+    return row if isinstance(row, TaskResult) else TaskResult.from_row(row)
 
 
 def wilson_interval(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -83,15 +89,19 @@ def _iqr(xs: list[float]) -> tuple[float | None, float | None, float | None]:
     return (_percentile(xs, 0.25), _median(xs), _percentile(xs, 0.75))
 
 
-def result_tokens_mode(rows: list[dict[str, Any]]) -> ResultTokensMode:
+def result_tokens_mode(rows: list[ResultRow]) -> ResultTokensMode:
     """Classify token counts without treating unmarked legacy data as measured."""
     labels: set[str] = set()
-    for row in rows:
-        row_estimated = row.get("result_tokens_estimated")
-        for call in row.get("calls") or []:
-            if call.get("result_tokens") is None:
+    for raw_row in rows:
+        row = _task_result(raw_row)
+        for call in row.calls:
+            if call.result_tokens is None:
                 continue
-            estimated = call.get("result_tokens_estimated", row_estimated)
+            estimated = (
+                call.result_tokens_estimated
+                if call.result_tokens_estimated is not None
+                else row.result_tokens_estimated
+            )
             if estimated is True:
                 labels.add("estimated")
             elif estimated is False:
@@ -109,42 +119,45 @@ def result_tokens_mode(rows: list[dict[str, Any]]) -> ResultTokensMode:
     return "mixed"
 
 
-def is_meta_row(row: dict[str, Any]) -> bool:
+def is_meta_row(row: ResultRow) -> bool:
     """True for run-header meta lines (or any row without a task_id)."""
+    if isinstance(row, TaskResult):
+        return not row.task_id
     if row.get("row_type") == "meta":
         return True
     return row.get("task_id") is None
 
 
-def is_infra_error_row(row: dict[str, Any]) -> bool:
+def is_infra_error_row(row: ResultRow) -> bool:
     """True when a row failed for infrastructure reasons (seed/cli/api), not task verify.
 
     Any ``error_class`` starting with ``infra_`` (``infra_seed``, ``infra_cli``,
     ``infra_api``, ``infra_sdk``, …) is excluded from success-rate denominators.
     """
-    ec = row.get("error_class")
+    ec = _task_result(row).error_class
     return isinstance(ec, str) and ec.startswith("infra_")
 
 
-def dedupe_rows_latest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def dedupe_rows_latest(rows: list[ResultRow]) -> list[TaskResult]:
     """Keep only the last row per (task_id, rep, surface); preserve key insertion order."""
-    latest: dict[tuple[Any, Any, Any], dict[str, Any]] = {}
-    order: list[tuple[Any, Any, Any]] = []
-    for r in rows:
-        key = (r.get("task_id"), r.get("rep"), r.get("surface"))
+    latest: dict[tuple[str, int, str], TaskResult] = {}
+    order: list[tuple[str, int, str]] = []
+    for raw_row in rows:
+        row = _task_result(raw_row)
+        key = (row.task_id, row.rep, row.surface)
         if key not in latest:
             order.append(key)
-        latest[key] = r
+        latest[key] = row
     return [latest[k] for k in order]
 
 
-def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[dict[str, Any]]:
+def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[TaskResult]:
     """Load JSONL data rows (skip meta / missing task_id).
 
     Default ``dedupe="latest"`` keeps the last row per (task_id, rep, surface)
     so resume appends do not double-count. Pass ``dedupe="none"`` for forensics.
     """
-    rows: list[dict[str, Any]] = []
+    rows: list[TaskResult] = []
     with path.open(encoding="utf-8") as fh:
         for line_no, line in enumerate(fh, start=1):
             line = line.strip()
@@ -160,13 +173,13 @@ def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[dict[str, An
                 continue
             if not isinstance(row, dict) or is_meta_row(row):
                 continue
-            rows.append(row)
+            rows.append(TaskResult.from_row(row))
     if dedupe == "latest":
         return dedupe_rows_latest(rows)
     # Forensics: warn on duplicates but keep all.
-    seen_keys: set[tuple[Any, Any, Any]] = set()
+    seen_keys: set[tuple[str, int, str]] = set()
     for r in rows:
-        key = (r.get("task_id"), r.get("rep"), r.get("surface"))
+        key = (r.task_id, r.rep, r.surface)
         if key in seen_keys:
             print(
                 f"warning: {path}: duplicate (task_id, rep, surface)={key} "
@@ -178,7 +191,7 @@ def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[dict[str, An
     return rows
 
 
-def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def summarize(rows: list[ResultRow]) -> dict[str, dict[str, Any]]:
     """Aggregate per-task metrics.
 
     Rows with ``error_class`` starting ``infra_`` are excluded from success-rate
@@ -186,22 +199,23 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     dict under the special key ``_meta``). Other non-null ``error`` rows remain
     harness errors (excluded from success, counted in ``harness_err``).
     """
-    by_task: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_task: dict[str, list[TaskResult]] = defaultdict(list)
     harness_err_by_task: dict[str, int] = defaultdict(int)
     infra_err_by_task: dict[str, int] = defaultdict(int)
     infra_errors = 0
-    for r in rows:
+    for raw_row in rows:
+        r = _task_result(raw_row)
         if is_meta_row(r):
             continue
-        tid = r["task_id"]
+        tid = r.task_id
         if is_infra_error_row(r):
             infra_errors += 1
             infra_err_by_task[tid] += 1
             continue  # infra seed/cli — excluded from success aggregates
-        if r.get("error"):
+        if r.error:
             harness_err_by_task[tid] += 1
             continue  # harness/API errors excluded from success/medians (F4)
-        if r.get("skipped"):
+        if r.skipped:
             continue  # skipped rows are excluded from success denominators
         by_task[tid].append(r)
 
@@ -214,11 +228,11 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     for task_id in all_task_ids:
         trs = by_task.get(task_id, [])
         n = len(trs)
-        k = sum(1 for r in trs if r.get("success"))
+        k = sum(1 for r in trs if r.success)
         total_k += k
         total_n += n
         lo, hi = wilson_interval(k, n) if n else (0.0, 0.0)
-        calls = [float(r.get("num_calls") or 0) for r in trs]
+        calls = [float(r.num_calls) for r in trs]
         q1, med_calls, q3 = _iqr(calls)
         min_calls = min(calls) if calls else None
         max_calls = max(calls) if calls else None
@@ -228,16 +242,16 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         errored = 0
         result_tokens: list[float] = []
         for r in trs:
-            for c in r.get("calls") or []:
+            for c in r.calls:
                 total_calls += 1
-                if c.get("class") in ("alternate", "out_of_set"):
+                if c.classification in ("alternate", "out_of_set"):
                     mispick += 1
-                if c.get("is_error"):
+                if c.is_error:
                     errored += 1
-                if c.get("result_tokens") is not None:
-                    result_tokens.append(float(c["result_tokens"]))
-        capped = sum(1 for r in trs if r.get("hit_max_iterations") or r.get("stop_reason") == "max_tokens")
-        cum_inputs = [float(r.get("cum_input_tokens") or 0) for r in trs]
+                if c.result_tokens is not None:
+                    result_tokens.append(float(c.result_tokens))
+        capped = sum(1 for r in trs if r.hit_max_iterations or r.stop_reason == "max_tokens")
+        cum_inputs = [float(r.cum_input_tokens or 0) for r in trs]
         out[task_id] = {
             "n": n,
             "k": k,
@@ -366,8 +380,8 @@ def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
 
 
 def ab_compare(
-    rows_a: list[dict[str, Any]],
-    rows_b: list[dict[str, Any]],
+    rows_a: list[ResultRow],
+    rows_b: list[ResultRow],
 ) -> dict[str, Any]:
     """Compare two result sets: paired call-count deltas + success rates.
 
@@ -378,14 +392,15 @@ def ab_compare(
     sum_a = summarize(rows_a)
     sum_b = summarize(rows_b)
 
-    def _success_rows_by_task(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-        out: dict[str, dict[str, Any]] = {}
-        for r in rows:
-            if is_meta_row(r) or is_infra_error_row(r) or r.get("error") or r.get("skipped"):
+    def _success_rows_by_task(rows: list[ResultRow]) -> dict[str, TaskResult]:
+        out: dict[str, TaskResult] = {}
+        for raw_row in rows:
+            r = _task_result(raw_row)
+            if is_meta_row(r) or is_infra_error_row(r) or r.error or r.skipped:
                 continue
-            if not r.get("success"):
+            if not r.success:
                 continue
-            tid = str(r["task_id"])
+            tid = r.task_id
             out[tid] = r  # last wins (dedupe already applied)
         return out
 
@@ -395,8 +410,8 @@ def ab_compare(
     deltas: list[float] = []
     per_task: list[dict[str, Any]] = []
     for tid in shared:
-        ca = float(sa[tid].get("num_calls") or 0)
-        cb = float(sb[tid].get("num_calls") or 0)
+        ca = float(sa[tid].num_calls)
+        cb = float(sb[tid].num_calls)
         d = cb - ca  # B − A (negative = B fewer calls = better if lower is better)
         deltas.append(d)
         per_task.append({"task_id": tid, "calls_a": ca, "calls_b": cb, "delta": d})
@@ -459,21 +474,21 @@ def _task_sort_key(tid: str) -> tuple[str, int]:
     return (tid[0] if tid else "", int(digits) if digits else 0)
 
 
-def format_surface_cell(row: dict[str, Any] | None) -> str:
+def format_surface_cell(row: ResultRow | None) -> str:
     """Cell for multi-surface table: '✅ Nc/Mmp', 'skip', 'ERR', or '—'."""
     if row is None:
         return "—"
-    if row.get("skipped"):
+    result = _task_result(row)
+    if result.skipped:
         return "skip"
-    if row.get("error") or is_infra_error_row(row):
+    if result.error or is_infra_error_row(result):
         return "ERR"
-    ok = "✅" if row.get("success") else "❌"
-    n_calls = row.get("num_calls")
-    n_calls_s = str(n_calls) if n_calls is not None else "?"
-    if row.get("classification") == "external":
+    ok = "✅" if result.success else "❌"
+    n_calls_s = str(result.num_calls)
+    if result.classification == "external":
         return f"{ok} {n_calls_s}c"
-    alt = row.get("alternate_calls")
-    oos = row.get("out_of_set_calls")
+    alt = result.alternate_calls
+    oos = result.out_of_set_calls
     # None counters (external nulling) → omit mispick suffix.
     if alt is None and oos is None:
         return f"{ok} {n_calls_s}c"
@@ -484,7 +499,7 @@ def format_surface_cell(row: dict[str, Any] | None) -> str:
 
 
 def build_multi_surface_table(
-    file_rows: list[tuple[str, list[dict[str, Any]]]],
+    file_rows: list[tuple[str, list[ResultRow]]],
 ) -> dict[str, Any]:
     """Build a per-task × per-surface grid from labeled row sets.
 
@@ -493,20 +508,21 @@ def build_multi_surface_table(
     For each column, the latest row per task_id is used (rep-agnostic: last wins).
     """
     columns: list[str] = []
-    by_col: dict[str, dict[str, dict[str, Any]]] = {}
+    by_col: dict[str, dict[str, TaskResult]] = {}
     for label, rows in file_rows:
         columns.append(label)
-        col_map: dict[str, dict[str, Any]] = {}
-        for r in rows:
-            if is_meta_row(r):
+        col_map: dict[str, TaskResult] = {}
+        for raw_row in rows:
+            if is_meta_row(raw_row):
                 continue
-            tid = str(r["task_id"])
+            r = _task_result(raw_row)
+            tid = r.task_id
             col_map[tid] = r  # last wins
         by_col[label] = col_map
 
     all_tasks = sorted({t for m in by_col.values() for t in m}, key=_task_sort_key)
     cells: dict[str, dict[str, str]] = {}
-    raw: dict[str, dict[str, dict[str, Any] | None]] = {}
+    raw: dict[str, dict[str, TaskResult | None]] = {}
     for tid in all_tasks:
         cells[tid] = {}
         raw[tid] = {}
@@ -525,18 +541,18 @@ def build_multi_surface_table(
             if is_infra_error_row(r):
                 infra += 1
                 continue
-            if r.get("error"):
+            if r.error:
                 continue
-            if r.get("skipped"):
+            if r.skipped:
                 continue
             run += 1
-            if r.get("success"):
+            if r.success:
                 succ += 1
-            calls += int(r.get("num_calls") or 0)
-            if r.get("classification") == "external":
+            calls += r.num_calls
+            if r.classification == "external":
                 mispick_comparable = False
             else:
-                alt, oos = r.get("alternate_calls"), r.get("out_of_set_calls")
+                alt, oos = r.alternate_calls, r.out_of_set_calls
                 if alt is None and oos is None:
                     mispick_comparable = False
                 else:
@@ -600,11 +616,11 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
     return "\n".join(lines) + "\n"
 
 
-def _surface_label_for_file(path: Path, rows: list[dict[str, Any]]) -> str:
+def _surface_label_for_file(path: Path, rows: list[TaskResult]) -> str:
     """Pick a column label from the file's dominant surface field, else stem."""
     counts: dict[str, int] = defaultdict(int)
     for r in rows:
-        s = r.get("surface")
+        s = r.surface
         if s:
             counts[str(s)] += 1
     if counts:
@@ -651,7 +667,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(paths) < 1:
             print("error: --table requires at least one JSONL", file=sys.stderr)
             return 2
-        labeled: list[tuple[str, list[dict[str, Any]]]] = []
+        labeled: list[tuple[str, list[TaskResult]]] = []
         used_labels: set[str] = set()
         for path in paths:
             rows = load_rows(path, dedupe=dedupe)

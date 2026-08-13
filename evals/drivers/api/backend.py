@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
+from evals.results import Usage
+
 MODEL_TIERS = frozenset({"standard", "fast"})
 
 
@@ -35,25 +37,6 @@ class StopReason(str, Enum):
     PAUSE_TURN = "pause_turn"
     MODEL_CONTEXT_WINDOW_EXCEEDED = "model_context_window_exceeded"
     UNKNOWN = "unknown"
-
-
-@dataclass(frozen=True)
-class Usage:
-    """Provider-neutral token usage for one model turn."""
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_read_input_tokens: int = 0
-    cache_creation_input_tokens: int = 0
-
-    def to_legacy_dict(self) -> dict[str, int]:
-        """Return the established per-iteration JSONL shape."""
-        return {
-            "in": self.input_tokens,
-            "out": self.output_tokens,
-            "cache_read": self.cache_read_input_tokens,
-            "cache_write": self.cache_creation_input_tokens,
-        }
 
 
 @dataclass(frozen=True)

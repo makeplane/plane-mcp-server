@@ -26,6 +26,7 @@ from evals.report import (
     summarize,
     wilson_interval,
 )
+from evals.results import RESULT_SCHEMA_VERSION, CallRecord, TaskResult, Usage
 from evals.run import (
     is_meta_or_non_task_row,
     load_resume_skip_keys,
@@ -107,7 +108,58 @@ def test_load_rows_skips_meta_and_missing_task_id(tmp_path: Path):
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     rows = load_rows(p)
     assert len(rows) == 1
-    assert rows[0]["task_id"] == "R1"
+    assert rows[0].task_id == "R1"
+
+
+def test_task_result_schema_round_trip_owns_usage_shape():
+    result = TaskResult(
+        task_id="R1",
+        calls=[
+            CallRecord(
+                tool="find_work_items",
+                classification="optimal",
+                result_tokens=3,
+                result_tokens_estimated=False,
+                result_token_count_method="backend",
+            )
+        ],
+        num_calls=1,
+        usage_per_iteration=[Usage(10, 2, 3, 4)],
+    )
+
+    row = result.to_row()
+    assert row["schema_version"] == RESULT_SCHEMA_VERSION
+    assert row["usage_per_iteration"] == [{"in": 10, "out": 2, "cache_read": 3, "cache_write": 4}]
+    loaded = TaskResult.from_row(row)
+    assert loaded.calls[0].tool == "find_work_items"
+    assert loaded.usage_per_iteration == [Usage(10, 2, 3, 4)]
+
+
+def test_real_historical_rows_parse_and_report_with_backward_defaults():
+    fixture = Path(__file__).parent / "fixtures" / "evals_historical_rows.jsonl"
+    rows = load_rows(fixture)
+
+    assert [row.schema_version for row in rows] == [0, 0]
+    by_task = {row.task_id: row for row in rows}
+    battery4 = by_task["L3"]
+    assert battery4.final_text == ""
+    assert battery4.result_tokens_estimated is None
+    assert battery4.alternate_calls is None
+    assert battery4.calls[0].result_tokens is None
+    assert battery4.calls[0].action == "create"
+
+    battery5 = by_task["R2"]
+    assert battery5.final_text.endswith("\n4")
+    assert battery5.result_tokens_estimated is True
+    assert [call.result_tokens for call in battery5.calls] == [315, 64]
+
+    summary = summarize(rows)
+    assert summary["L3"]["success"] == "1/1"
+    assert summary["L3"]["med_calls"] == 1
+    assert summary["L3"]["result_tokens_mode"] == "unavailable"
+    assert summary["R2"]["success"] == "1/1"
+    assert summary["R2"]["med_calls"] == 2
+    assert summary["R2"]["result_tokens_mode"] == "estimated"
 
 
 def test_dedupe_rows_latest_pure():
@@ -118,9 +170,9 @@ def test_dedupe_rows_latest_pure():
     ]
     out = dedupe_rows_latest(rows)
     assert len(out) == 2
-    by_id = {r["task_id"]: r for r in out}
-    assert by_id["R1"]["num_calls"] == 5
-    assert by_id["R2"]["num_calls"] == 3
+    by_id = {r.task_id: r for r in out}
+    assert by_id["R1"].num_calls == 5
+    assert by_id["R2"].num_calls == 3
 
 
 def test_summarize_aggregate_wilson_and_call_variance():

@@ -59,7 +59,6 @@ class CliDriver(ABC):
     run_notes: tuple[str, ...] = ()
     temp_dir_prefix = "plane-eval-cli-"
     temp_dir_in_cwd = False
-    include_setup_in_wall_time = True
     exit_note_prefix: str | None = None
     include_stderr_in_exit_note = False
 
@@ -163,7 +162,6 @@ class CliDriver(ABC):
         task_cwd = (cwd or REPO_ROOT).resolve()
         notes = list(self.run_notes)
         self.validate_run()
-        started_at = time.perf_counter() if self.include_setup_in_wall_time else None
         temp_parent = str(task_cwd) if self.temp_dir_in_cwd else None
 
         with tempfile.TemporaryDirectory(prefix=self.temp_dir_prefix, dir=temp_parent) as td:
@@ -198,9 +196,9 @@ class CliDriver(ABC):
                 system=system,
                 launch=launch,
             )
-            if started_at is None:
-                started_at = time.perf_counter()
             timeout_s = max(120, max_turns * 60)
+            # Persisted schema v1 defines wall time as the CLI invocation only.
+            started_at = time.perf_counter()
 
             try:
                 proc = self.invoke_cli(command, launch=launch, timeout_s=timeout_s)

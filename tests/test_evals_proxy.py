@@ -29,6 +29,7 @@ from evals.drivers import (
     write_antigravity_mcp_config,
     write_opencode_mcp_config,
 )
+from evals.drivers.cli import CliDriver, CliLaunch, CliOutput
 from evals.proxy import (
     SHUTDOWN_DEADLINE_S,
     SidecarRecorder,
@@ -575,6 +576,100 @@ def test_agent_run_to_harness_propagates_proxy_fields():
 # ---------------------------------------------------------------------------
 # Antigravity / OpenCode adapters (arg construction only)
 # ---------------------------------------------------------------------------
+
+
+def test_cli_driver_template_inherits_proxy_first_and_timeout_harvest(tmp_path: Path, monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr("evals.drivers.cli.time.perf_counter", lambda: clock["now"])
+
+    class MinimalCliDriver(CliDriver):
+        name = "minimal-cli"
+        temp_dir_prefix = "plane-eval-minimal-"
+
+        def write_mcp_config(
+            self,
+            temp_dir: Path,
+            *,
+            task_cwd: Path,
+            server_command: list[str],
+            child_env: dict[str, str],
+        ) -> CliLaunch:
+            del temp_dir, child_env
+            # Harness-owned setup takes five seconds on the fake clock. The
+            # persisted wall time must start after this hook returns.
+            clock["now"] = 5.0
+            self.sidecar_path = Path(server_command[server_command.index("--log") + 1])
+            return CliLaunch(cwd=task_cwd)
+
+        def build_command(
+            self,
+            prompt: str,
+            *,
+            model: str | None,
+            max_turns: int,
+            system: str | None,
+            launch: CliLaunch,
+        ) -> list[str]:
+            del model, max_turns, system, launch
+            return ["minimal", prompt]
+
+        def parse_output(
+            self,
+            proc: subprocess.CompletedProcess[str],
+            *,
+            task_cwd: Path,
+            max_turns: int,
+            notes: list[str],
+        ) -> CliOutput:
+            del proc, task_cwd, max_turns, notes
+            return CliOutput(
+                final_text="done",
+                calls=[
+                    {"tool": "cli_fallback_one", "args": {}, "origin": "plane"},
+                    {"tool": "cli_fallback_two", "args": {}, "origin": "plane"},
+                ],
+            )
+
+    def write_complete_sidecar(path: Path, tool: str) -> None:
+        rows = [
+            {
+                "tool": tool,
+                "args": {},
+                "is_error": False,
+                "result_chars": 2,
+                "duration_ms": 1,
+                "seq": 1,
+            },
+            {"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False},
+        ]
+        path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    success_driver: MinimalCliDriver
+
+    def success_runner(cmd, **kwargs):
+        write_complete_sidecar(success_driver.sidecar_path, "proxy_first")
+        clock["now"] = 7.0
+        return subprocess.CompletedProcess(cmd, 0, stdout="ignored", stderr="")
+
+    success_driver = MinimalCliDriver(runner=success_runner, use_proxy=True)
+    success = success_driver.run_task("go", {}, None, 1, cwd=tmp_path)
+    assert success.call_source == "proxy"
+    assert [call["tool"] for call in success.calls] == ["proxy_first"]
+    assert success.wall_time_s == 2.0
+
+    timeout_driver: MinimalCliDriver
+
+    def timeout_runner(cmd, **kwargs):
+        write_complete_sidecar(timeout_driver.sidecar_path, "before_timeout")
+        clock["now"] = 8.0
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs["timeout"])
+
+    timeout_driver = MinimalCliDriver(runner=timeout_runner, use_proxy=True)
+    timed_out = timeout_driver.run_task("go", {}, None, 1, cwd=tmp_path)
+    assert timed_out.stopped_reason == "timeout"
+    assert timed_out.call_source == "proxy"
+    assert [call["tool"] for call in timed_out.calls] == ["before_timeout"]
+    assert timed_out.wall_time_s == 3.0
 
 
 def test_antigravity_driver_writes_mcp_config_under_isolated_home(tmp_path: Path):

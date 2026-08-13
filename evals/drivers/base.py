@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from evals.results import CallRecord, TaskResult, Usage
 from evals.token_counting import (
     TOKEN_ESTIMATE_METHOD,
     count_result_text_tokens,
@@ -31,7 +32,7 @@ class AgentRun:
     # Plane MCP tools only for classification: {tool, args, origin='plane', raw_tool?}
     calls: list[dict[str, Any]]
     final_text: str
-    usage: dict[str, Any] | None
+    usage: Usage | dict[str, Any] | None
     stopped_reason: str
     raw_ref: str | None = None
     # Client/harness built-ins (ToolSearch, Bash, …) — excluded from mispick metrics
@@ -45,7 +46,7 @@ class AgentRun:
     wall_time_s: float = 0.0
     experimental: bool = False
     notes: list[str] = field(default_factory=list)
-    usage_per_iteration: list[dict[str, int]] = field(default_factory=list)
+    usage_per_iteration: list[Usage] = field(default_factory=list)
     cum_input_tokens: int | None = None
     result_pair_mismatch: bool = False
     token_count_failures: int = 0
@@ -158,14 +159,14 @@ def split_plane_and_client_calls(
     return plane, client
 
 
-def agent_run_to_harness_dict(
+def agent_run_to_task_result(
     run: AgentRun,
     *,
     optimal: set[str],
     alternate: set[str],
     classify: Callable[[str, set[str], set[str]], str],
-) -> dict[str, Any]:
-    """Map an ``AgentRun`` onto the dict shape expected by ``run_live`` rows.
+) -> TaskResult:
+    """Map an ``AgentRun`` onto the typed driver-owned portion of a task result.
 
     Only **plane** MCP tools are classified and counted in ``num_calls`` /
     mispick metrics. Client built-ins (``ToolSearch``, …) go to
@@ -180,7 +181,7 @@ def agent_run_to_harness_dict(
     client_src = list(run.client_tool_calls) + client_extra
 
     is_cli = run.call_source in ("json", "transcript", "stream", "proxy") or run.usage_scope == "run"
-    calls: list[dict[str, Any]] = []
+    calls: list[CallRecord] = []
     local_token_count_failures = 0
     for c in plane_src:
         tool = c.get("tool") or ""
@@ -210,26 +211,25 @@ def agent_run_to_harness_dict(
             estimated = True
             count_method = TOKEN_ESTIMATE_METHOD
 
-        rec: dict[str, Any] = {
-            "tool": tool,
-            "class": classify(str(tool), optimal, alternate),
-            "args_chars": args_chars,
-            "result_tokens": result_tokens,
-            "result_chars": result_chars,
-            "result_kind": str(c.get("result_kind") or "text"),
-            "is_error": bool(c.get("is_error")),
-            "result_tokens_estimated": bool(estimated),
-            "result_token_count_method": str(count_method),
-        }
-        if c.get("duration_ms") is not None:
-            rec["duration_ms"] = c["duration_ms"]
+        rec = CallRecord(
+            tool=str(tool),
+            classification=classify(str(tool), optimal, alternate),
+            args_chars=args_chars,
+            result_tokens=result_tokens,
+            result_chars=result_chars,
+            result_kind=str(c.get("result_kind") or "text"),
+            is_error=bool(c.get("is_error")),
+            result_tokens_estimated=bool(estimated),
+            result_token_count_method=str(count_method),
+            duration_ms=c.get("duration_ms"),
+        )
         # Action-dispatch surfaces: the action arg IS the second half of the
         # tool choice — keep it (args content is otherwise not persisted).
         if isinstance(args, dict) and isinstance(args.get("action"), str):
-            rec["action"] = args["action"]
+            rec.action = args["action"]
         calls.append(rec)
 
-    client_tool_calls: list[dict[str, Any]] = []
+    client_tool_calls: list[CallRecord] = []
     for c in client_src:
         tool = c.get("tool") or c.get("raw_tool") or ""
         args = c.get("args") or {}
@@ -238,11 +238,11 @@ def agent_run_to_harness_dict(
         except Exception:
             args_chars = len(str(args))
         client_tool_calls.append(
-            {
-                "tool": tool,
-                "args_chars": args_chars,
-                "raw_tool": c.get("raw_tool") or tool,
-            }
+            CallRecord(
+                tool=str(tool),
+                args_chars=args_chars,
+                raw_tool=str(c.get("raw_tool") or tool),
+            )
         )
 
     stop_reason = run.stopped_reason
@@ -250,9 +250,9 @@ def agent_run_to_harness_dict(
     if hit_max:
         stop_reason = stop_reason if stop_reason not in ("end_turn", "completed", None, "") else "max_turns"
 
-    errored = sum(1 for c in calls if c.get("is_error"))
-    alternate_n = sum(1 for c in calls if c["class"] == "alternate")
-    out_of_set_n = sum(1 for c in calls if c["class"] == "out_of_set")
+    errored = sum(1 for c in calls if c.is_error)
+    alternate_n = sum(1 for c in calls if c.classification == "alternate")
+    out_of_set_n = sum(1 for c in calls if c.classification == "out_of_set")
 
     # CLI path: never write misleading cum_input_tokens from uncached-only field.
     # usage_total is driver-owned — do not re-derive it here (Claude vs Codex
@@ -260,11 +260,11 @@ def agent_run_to_harness_dict(
     usage_total = run.usage_total
 
     if run.usage_per_iteration:
-        usage_per_iteration = [dict(item) for item in run.usage_per_iteration]
+        usage_per_iteration = list(run.usage_per_iteration)
         cum_input = (
             run.cum_input_tokens
             if run.cum_input_tokens is not None
-            else sum(item.get("in", 0) for item in usage_per_iteration)
+            else sum(item.input_tokens for item in usage_per_iteration)
         )
         cum_reason = None
     elif is_cli:
@@ -273,7 +273,7 @@ def agent_run_to_harness_dict(
             "CLI driver: Claude usage.input_tokens is uncached-only; "
             "see usage_total (cache_read/cache_creation/output/cost) for run accounting"
         )
-        usage_per_iteration: list[dict[str, int]] = []
+        usage_per_iteration: list[Usage] = []
     else:
         cum_input = 0
         cum_reason = None
@@ -281,7 +281,7 @@ def agent_run_to_harness_dict(
         if run.usage and run.usage_scope == "iteration":
             pass
 
-    estimated_states = [bool(c["result_tokens_estimated"]) for c in calls]
+    estimated_states = [bool(c.result_tokens_estimated) for c in calls]
     if estimated_states:
         result_tokens_estimated = any(estimated_states)
         result_tokens_mode = (
@@ -293,49 +293,61 @@ def agent_run_to_harness_dict(
         )
         result_tokens_mode = "estimated" if result_tokens_estimated else "measured"
 
-    count_methods = {str(c["result_token_count_method"]) for c in calls}
+    count_methods = {str(c.result_token_count_method) for c in calls}
     if not count_methods:
         result_token_count_method = "none"
     elif len(count_methods) == 1:
         result_token_count_method = next(iter(count_methods))
     else:
         result_token_count_method = "mixed"
-    result = {
-        "final_text": run.final_text,
-        "calls": calls,
-        "num_calls": len(calls),
-        "client_tool_calls": client_tool_calls,
-        "client_tool_call_count": len(client_tool_calls),
-        "errored_calls": errored,
-        "alternate_calls": alternate_n,
-        "out_of_set_calls": out_of_set_n,
-        "total_result_tokens": sum(int(c["result_tokens"]) for c in calls),
-        "usage_per_iteration": usage_per_iteration,
-        "cum_input_tokens": cum_input,
-        "cum_input_tokens_reason": cum_reason,
-        "wall_time_s": run.wall_time_s,
-        "stop_reason": stop_reason,
-        "provider_stop_reason": run.provider_stop_reason,
-        "hit_max_iterations": hit_max,
-        "result_pair_mismatch": run.result_pair_mismatch,
-        "token_count_failures": run.token_count_failures + local_token_count_failures,
-        "result_tokens_estimated": result_tokens_estimated,
-        "result_tokens_mode": result_tokens_mode,
-        "result_token_count_method": result_token_count_method,
-        "usage_scope": run.usage_scope,
-        "call_source": run.call_source,
-        "driver_raw_ref": run.raw_ref,
-        "driver_notes": list(run.notes),
-        "usage": run.usage,
-        "usage_total": usage_total,
-    }
-    if run.provider is not None:
-        result["provider"] = run.provider
-    if run.model is not None:
-        result["model"] = run.model
-    if run.requested_model is not None:
-        result["requested_model"] = run.requested_model
-    return result
+    return TaskResult(
+        final_text=run.final_text,
+        calls=calls,
+        num_calls=len(calls),
+        client_tool_calls=client_tool_calls,
+        client_tool_call_count=len(client_tool_calls),
+        errored_calls=errored,
+        alternate_calls=alternate_n,
+        out_of_set_calls=out_of_set_n,
+        total_result_tokens=sum(int(c.result_tokens or 0) for c in calls),
+        usage_per_iteration=usage_per_iteration,
+        cum_input_tokens=cum_input,
+        cum_input_tokens_reason=cum_reason,
+        wall_time_s=run.wall_time_s,
+        stop_reason=stop_reason,
+        provider_stop_reason=run.provider_stop_reason,
+        hit_max_iterations=hit_max,
+        result_pair_mismatch=run.result_pair_mismatch,
+        token_count_failures=run.token_count_failures + local_token_count_failures,
+        result_tokens_estimated=result_tokens_estimated,
+        result_tokens_mode=result_tokens_mode,
+        result_token_count_method=result_token_count_method,
+        usage_scope=run.usage_scope,
+        call_source=run.call_source,
+        driver_raw_ref=run.raw_ref,
+        driver_notes=list(run.notes),
+        usage=run.usage,
+        usage_total=usage_total,
+        provider=run.provider,
+        model=run.model,
+        requested_model=run.requested_model,
+    )
+
+
+def agent_run_to_harness_dict(
+    run: AgentRun,
+    *,
+    optimal: set[str],
+    alternate: set[str],
+    classify: Callable[[str, set[str], set[str]], str],
+) -> dict[str, Any]:
+    """Compatibility wrapper returning the public persisted-row dictionary."""
+    return agent_run_to_task_result(
+        run,
+        optimal=optimal,
+        alternate=alternate,
+        classify=classify,
+    ).to_row()
 
 
 __all__ = [
@@ -343,6 +355,7 @@ __all__ = [
     "AgentRun",
     "AgentDriver",
     "agent_run_to_harness_dict",
+    "agent_run_to_task_result",
     "is_plane_mcp_tool",
     "normalize_tool_call",
     "split_plane_and_client_calls",

@@ -24,6 +24,7 @@ from evals.drivers.api.backend import (
     create_backend,
 )
 from evals.drivers.base import AgentRun
+from evals.results import Usage
 from evals.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
 
 DEFAULT_MAX_TOKENS = 8192
@@ -206,7 +207,7 @@ class ApiDriver:
         backend = self._make_backend(model)
         calls: list[dict[str, Any]] = []
         pending_results: list[tuple[int, str]] = []
-        usage_per_iteration: list[dict[str, int]] = []
+        usage_per_iteration: list[Usage] = []
         total_input_tokens = 0
         total_output_tokens = 0
         total_cache_read_input_tokens = 0
@@ -237,7 +238,7 @@ class ApiDriver:
                     stop_reason = turn.stop_reason
                     provider_stop_reason = turn.provider_stop_reason
                     if turn.usage is not None:
-                        usage_per_iteration.append(turn.usage.to_legacy_dict())
+                        usage_per_iteration.append(turn.usage)
                         total_input_tokens += turn.usage.input_tokens
                         total_output_tokens += turn.usage.output_tokens
                         total_cache_read_input_tokens += turn.usage.cache_read_input_tokens

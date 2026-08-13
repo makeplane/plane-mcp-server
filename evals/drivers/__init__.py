@@ -49,6 +49,7 @@ from evals.drivers.base import (
     AgentDriver,
     AgentRun,
     agent_run_to_harness_dict,
+    agent_run_to_task_result,
     is_plane_mcp_tool,
     normalize_tool_call,
     split_plane_and_client_calls,
@@ -81,6 +82,7 @@ from evals.drivers.sidecar import (
     proxy_wrap_server_command,
     wait_for_proxy_meta,
 )
+from evals.results import CallRecord, TaskResult
 
 # Registry
 # ---------------------------------------------------------------------------
@@ -111,11 +113,14 @@ __all__ = [
     "AntigravityCliDriver",
     "ApiDriver",
     "ClaudeCliDriver",
+    "CallRecord",
     "CliDriver",
     "CodexCliDriver",
     "OpencodeCliDriver",
     "REPO_ROOT",
+    "TaskResult",
     "agent_run_to_harness_dict",
+    "agent_run_to_task_result",
     "apply_proxy_sidecar",
     "ensure_proxy_pythonpath",
     "find_claude_transcript",
