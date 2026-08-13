@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 from fastmcp.utilities.types import Image
 
-from plane_mcp.tools.v2 import work_item_attachment as module
+from plane_mcp.tools.v2 import workitem_attachment as module
 
 PROJECT = "project-1"
 WORK_ITEM = "work-item-1"
@@ -45,14 +45,14 @@ def attachment_tool(registered, spy, monkeypatch):
         spy.returns["work_items.attachments.list"] = [_attachment(name, content_type)]
         monkeypatch.setattr(module.requests, "get", lambda *a, **k: _Response(payload, {"Content-Type": content_type}))
 
-    return registered["work_item_attachment"].fn, spy, stub
+    return registered["workitem_attachment"].fn, spy, stub
 
 
 def test_read_returns_an_image_for_an_image(attachment_tool):
     tool, _, stub = attachment_tool
     stub("diagram.png", "image/png")
 
-    result = tool(action="read", project_id=PROJECT, work_item_id=WORK_ITEM, attachment_id=ATTACHMENT)
+    result = tool(action="read", project_id=PROJECT, workitem_id=WORK_ITEM, attachment_id=ATTACHMENT)
 
     assert isinstance(result, Image)
     assert result._mime_type == "image/png"
@@ -62,7 +62,7 @@ def test_read_returns_text_for_a_text_file(attachment_tool):
     tool, _, stub = attachment_tool
     stub("notes.md", "text/markdown", b"# Notes\nbody")
 
-    result = tool(action="read", project_id=PROJECT, work_item_id=WORK_ITEM, attachment_id=ATTACHMENT)
+    result = tool(action="read", project_id=PROJECT, workitem_id=WORK_ITEM, attachment_id=ATTACHMENT)
 
     assert result == "# Notes\nbody"
 
@@ -72,7 +72,7 @@ def test_read_refuses_an_unsupported_type_and_points_at_download_url(attachment_
     stub("spec.pdf", "application/pdf")
 
     with pytest.raises(ValueError, match="download_url"):
-        tool(action="read", project_id=PROJECT, work_item_id=WORK_ITEM, attachment_id=ATTACHMENT)
+        tool(action="read", project_id=PROJECT, workitem_id=WORK_ITEM, attachment_id=ATTACHMENT)
 
 
 def test_read_refuses_a_file_over_the_limit(attachment_tool):
@@ -80,14 +80,14 @@ def test_read_refuses_a_file_over_the_limit(attachment_tool):
     stub("huge.png", "image/png", b"\x00" * (module.IMAGE_READ_LIMIT + 1))
 
     with pytest.raises(ValueError, match="exceeds"):
-        tool(action="read", project_id=PROJECT, work_item_id=WORK_ITEM, attachment_id=ATTACHMENT)
+        tool(action="read", project_id=PROJECT, workitem_id=WORK_ITEM, attachment_id=ATTACHMENT)
 
 
 def test_download_url_returns_the_link_and_the_name(attachment_tool):
     tool, _, stub = attachment_tool
     stub("spec.pdf", "application/pdf")
 
-    result = tool(action="download_url", project_id=PROJECT, work_item_id=WORK_ITEM, attachment_id=ATTACHMENT)
+    result = tool(action="download_url", project_id=PROJECT, workitem_id=WORK_ITEM, attachment_id=ATTACHMENT)
 
     assert result == {
         "download_url": "https://files.example.com/a",
@@ -104,7 +104,7 @@ def test_upload_from_url_rejects_a_private_address(attachment_tool):
         tool(
             action="upload_from_url",
             project_id=PROJECT,
-            work_item_id=WORK_ITEM,
+            workitem_id=WORK_ITEM,
             url="http://169.254.169.254/latest/meta-data/",
         )
     assert not spy.recorder.calls
@@ -118,7 +118,7 @@ def test_upload_from_url_sends_the_fetched_bytes(attachment_tool, monkeypatch):
     result = tool(
         action="upload_from_url",
         project_id=PROJECT,
-        work_item_id=WORK_ITEM,
+        workitem_id=WORK_ITEM,
         url="https://example.com/diagram.png",
     )
 

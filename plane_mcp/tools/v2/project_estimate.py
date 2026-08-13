@@ -1,7 +1,7 @@
 """A project's estimate system and its points.
 
 A project has at most one estimate. To set a work item's estimate: retrieve the
-estimate, list its points, then pass the chosen point's id to work_item update
+estimate, list its points, then pass the chosen point's id to workitem update
 as estimate_point.
 """
 
@@ -49,7 +49,7 @@ FOOTER = (
     f'type is one of: {", ".join(TYPES)}. A point\'s `value` is its display label ("5", "XL") and '
     'its `key` is the sort order. points takes a JSON array such as [{"value": "1", "key": 0}]. '
     "To set a work item's estimate: retrieve to get the estimate_id, list_points to see the "
-    "available values, then pass the chosen point's id to `work_item update` as estimate_point."
+    "available values, then pass the chosen point's id to `workitem update` as estimate_point."
 )
 
 LEGACY = {

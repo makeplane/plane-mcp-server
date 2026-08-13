@@ -34,7 +34,7 @@ from plane_mcp.toolkit import (
     opt,
 )
 
-NAME = "work_item_relation"
+NAME = "workitem_relation"
 TITLE = "Work item relations"
 
 DEPENDENCY_TYPES: tuple[str, ...] = get_args(DependencyTypeEnum)
@@ -45,16 +45,16 @@ _OTHER_RELATIONS = (
 )
 
 ACTIONS = (
-    Action("list", ("project_id", "work_item_id"), read=True),
+    Action("list", ("project_id", "workitem_id"), read=True),
     Action(
         "create",
-        ("project_id", "work_item_id", "work_item_ids"),
+        ("project_id", "workitem_id", "workitem_ids"),
         ("relation_type", "relation_definition_id", "relation_definition_label"),
         note="pass relation_type for a dependency, or definition id + label for a custom relation",
     ),
     Action(
         "delete",
-        ("project_id", "work_item_id", "related_work_item_id"),
+        ("project_id", "workitem_id", "related_workitem_id"),
         ("is_dependency",),
         note="removes one relation; dependencies and custom relations are independent, so "
         "is_dependency must match the kind that was created (default false)",
@@ -110,7 +110,7 @@ def register(mcp: FastMCP) -> None:
         ),
         annotations=build_annotations(TITLE, ACTIONS),
     )
-    def work_item_relation(
+    def workitem_relation(
         action: Literal[
             "list",
             "create",
@@ -121,9 +121,9 @@ def register(mcp: FastMCP) -> None:
             "delete_definition",
         ],
         project_id: str = "",
-        work_item_id: str = "",
-        work_item_ids: list[str] | None = None,
-        related_work_item_id: str = "",
+        workitem_id: str = "",
+        workitem_ids: list[str] | None = None,
+        related_workitem_id: str = "",
         relation_type: str = "",
         relation_definition_id: str = "",
         relation_definition_label: str = "",
@@ -179,15 +179,15 @@ def register(mcp: FastMCP) -> None:
             client.work_item_relation_definitions.delete(workspace_slug=workspace_slug, definition_id=definition_id)
             return None
 
-        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+        if error := needs(action, project_id=project_id, workitem_id=workitem_id):
             return error
 
         if action == "list":
             dependencies = client.work_items.dependencies.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
             )
             custom = client.work_items.custom_relations.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
             )
             return {
                 "dependencies": dependencies.model_dump(),
@@ -195,16 +195,16 @@ def register(mcp: FastMCP) -> None:
             }
 
         if action == "create":
-            targets = coerce_list(work_item_ids)
+            targets = coerce_list(workitem_ids)
             if not targets:
-                return missing(action, "work_item_ids")
+                return missing(action, "workitem_ids")
             if relation_type:
                 if error := one_of("relation_type", relation_type, DEPENDENCY_TYPES, _OTHER_RELATIONS):
                     return error
                 return client.work_items.dependencies.create(
                     workspace_slug=workspace_slug,
                     project_id=project_id,
-                    work_item_id=work_item_id,
+                    work_item_id=workitem_id,
                     data=CreateWorkItemDependency(
                         relation_type=relation_type,  # type: ignore[arg-type]
                         work_item_ids=targets,
@@ -214,7 +214,7 @@ def register(mcp: FastMCP) -> None:
                 return client.work_items.custom_relations.create(
                     workspace_slug=workspace_slug,
                     project_id=project_id,
-                    work_item_id=work_item_id,
+                    work_item_id=workitem_id,
                     data=CreateWorkItemCustomRelation(
                         relation_definition_id=relation_definition_id,
                         relation_definition_type=relation_definition_label,
@@ -227,13 +227,13 @@ def register(mcp: FastMCP) -> None:
                 "Call the list_definitions action to find one."
             )
 
-        if not related_work_item_id:
-            return missing(action, "related_work_item_id")
+        if not related_workitem_id:
+            return missing(action, "related_workitem_id")
         remove = client.work_items.dependencies.remove if is_dependency else client.work_items.custom_relations.remove
         remove(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            work_item_id=work_item_id,
-            related_work_item_id=related_work_item_id,
+            work_item_id=workitem_id,
+            related_work_item_id=related_workitem_id,
         )
         return None

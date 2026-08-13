@@ -20,7 +20,7 @@ MAX_ADVERTISED_TOOLS = 35  # strictest published client cap is 40 -- leave headr
 NAME_BUDGET = 46  # 64-char provider limit, less room for a client prefix
 UNMAPPED_BUDGET = 7  # legacy tools that cannot be aliased; see the test for the shape
 
-# "resolve" is deliberately absent: work_item_type.resolve creates the type when
+# "resolve" is deliberately absent: workitem_type.resolve creates the type when
 # it does not exist, so the name reads like a lookup but the action is not one.
 READ_PREFIXES = ("list", "retrieve", "get", "search", "count", "read", "me")
 
@@ -52,15 +52,15 @@ CATALOGUE = [
     "release_label",
     "release_tag",
     "state",
-    "work_item",
-    "work_item_activity",
-    "work_item_attachment",
-    "work_item_comment",
-    "work_item_link",
-    "work_item_property",
-    "work_item_relation",
-    "work_item_type",
     "work_log",
+    "workitem",
+    "workitem_activity",
+    "workitem_attachment",
+    "workitem_comment",
+    "workitem_link",
+    "workitem_property",
+    "workitem_relation",
+    "workitem_type",
     "workspace",
 ]
 
@@ -76,7 +76,7 @@ def test_resource_order_is_pinned(resource_modules):
 
 
 def test_module_filename_matches_its_tool_name(resource_modules):
-    """Keeps the catalogue greppable: `work_item` lives in `work_item.py`."""
+    """Keeps the catalogue greppable: `workitem` lives in `workitem.py`."""
     for mod in resource_modules:
         filename = mod.__name__.rsplit(".", 1)[-1]
         assert filename == mod.NAME, f"{filename}.py declares NAME = {mod.NAME!r}"

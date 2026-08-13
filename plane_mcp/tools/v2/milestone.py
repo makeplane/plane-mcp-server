@@ -39,12 +39,12 @@ ACTIONS = (
         note="only the fields you pass are changed",
     ),
     Action("delete", ("project_id", "milestone_id"), destructive=True),
-    Action("list_work_items", ("project_id", "milestone_id"), ("cursor", "per_page"), read=True),
+    Action("list_workitems", ("project_id", "milestone_id"), ("cursor", "per_page"), read=True),
     Action(
-        "manage_work_items",
+        "manage_workitems",
         ("project_id", "milestone_id"),
         ("add_ids", "remove_ids"),
-        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_work_items",
+        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_workitems",
     ),
 )
 
@@ -56,8 +56,8 @@ LEGACY = {
     "create_milestone": "create",
     "update_milestone": "update",
     "delete_milestone": "delete",
-    "list_milestone_work_items": "list_work_items",
-    "manage_milestone_work_items": "manage_work_items",
+    "list_milestone_work_items": "list_workitems",
+    "manage_milestone_work_items": "manage_workitems",
 }
 
 
@@ -74,8 +74,8 @@ def register(mcp: FastMCP) -> None:
             "create",
             "update",
             "delete",
-            "list_work_items",
-            "manage_work_items",
+            "list_workitems",
+            "manage_workitems",
         ],
         project_id: str = "",
         milestone_id: str = "",
@@ -140,7 +140,7 @@ def register(mcp: FastMCP) -> None:
             client.milestones.delete(workspace_slug=workspace_slug, project_id=project_id, milestone_id=milestone_id)
             return None
 
-        if action == "list_work_items":
+        if action == "list_workitems":
             items: PaginatedMilestoneWorkItemResponse = client.milestones.list_work_items(
                 workspace_slug=workspace_slug,
                 project_id=project_id,

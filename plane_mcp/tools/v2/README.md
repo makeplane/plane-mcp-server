@@ -129,7 +129,7 @@ pytest tests/tools/v2/ -q
   automatically.
 - `test_guards.py` — omitting one declared required parameter must produce an
   error naming that parameter and no other.
-- `test_work_item_property.py` — the defects where this resource answered
+- `test_workitem_property.py` — the defects where this resource answered
   plausibly instead of correctly: type-guessed values, swallowed option JSON,
   and errors reported as an empty result.
 - `test_attachments.py` — the actions needing populated state or an outbound
@@ -153,8 +153,8 @@ resource resolves its scope once, in a local `_scope_of`, and `test_governance.p
 pins both namespaces and both id keywords against the live SDK.
 
 There is deliberately no shared abstraction for this. Two resources need it and
-they need different shapes — `work_item_type` is a two-way project/workspace
-split, `work_item_property` is three-way and also varies the method name. A
+they need different shapes — `workitem_type` is a two-way project/workspace
+split, `workitem_property` is three-way and also varies the method name. A
 `scope.py` generalising the two-way case lived here for a while; it served one
 caller, half of it was unreachable, and it could not model the second case when
 that arrived. A local resolver per resource is the smaller thing that works.

@@ -371,11 +371,11 @@ V2_RESOLVERS = {
     "members": "`member list_workspace`",
     "states": "`state list`",
     "labels": "`label list`",
-    "types": "`work_item_type list`",
+    "types": "`workitem_type list`",
     "cycles": "`cycle list`",
     "modules": "`module list`",
     "milestones": "`milestone list`",
-    "properties": "`work_item_property list`",
+    "properties": "`workitem_property list`",
 }
 
 

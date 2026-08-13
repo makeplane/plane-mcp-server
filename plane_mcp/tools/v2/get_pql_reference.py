@@ -32,7 +32,7 @@ def register(mcp: FastMCP) -> None:
         name=NAME,
         description=build_description(
             "Plane Query Language (PQL) syntax reference. Call this before composing a `pql` "
-            "filter for the work_item list, list_archived or count actions.",
+            "filter for the workitem list, list_archived or count actions.",
             ACTIONS,
             FOOTER,
         ),

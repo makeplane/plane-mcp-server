@@ -1,4 +1,4 @@
-"""Defects where `work_item_property` answered plausibly instead of correctly.
+"""Defects where `workitem_property` answered plausibly instead of correctly.
 
 Each test here corresponds to a call that succeeded, returned something a model
 would believe, and was wrong. That failure mode is worse than an exception: an
@@ -12,10 +12,10 @@ from plane.errors.errors import HttpError
 
 
 def _set_value(registered, spy, value):
-    registered["work_item_property"].fn(
+    registered["workitem_property"].fn(
         action="set_value",
         project_id="proj-1",
-        work_item_id="wi-1",
+        workitem_id="wi-1",
         property_id="prop-1",
         value=value,
     )
@@ -48,15 +48,15 @@ def test_a_typed_value_reaches_the_sdk_unchanged(sent, registered, spy):
 
 def test_false_is_a_value_not_an_omission(registered, spy):
     """`False` is falsy; the required-parameter guard must not read it as unset."""
-    result = registered["work_item_property"].fn(
-        action="set_value", project_id="p", work_item_id="w", property_id="pr", value=False
+    result = registered["workitem_property"].fn(
+        action="set_value", project_id="p", workitem_id="w", property_id="pr", value=False
     )
     assert not (isinstance(result, str) and result.startswith("Error:")), result
     assert spy.recorder.only().kwargs["data"].value is False
 
 
 def test_set_value_still_requires_a_value(registered, spy):
-    result = registered["work_item_property"].fn(action="set_value", project_id="p", work_item_id="w", property_id="pr")
+    result = registered["workitem_property"].fn(action="set_value", project_id="p", workitem_id="w", property_id="pr")
     assert isinstance(result, str) and result.startswith("Error:") and "value" in result
     assert not spy.recorder.calls
 
@@ -70,7 +70,7 @@ def test_set_value_still_requires_a_value(registered, spy):
 )
 def test_malformed_options_is_an_error_not_a_silent_drop(bad, registered, spy):
     """The property was being created with zero options and reported as success."""
-    result = registered["work_item_property"].fn(
+    result = registered["workitem_property"].fn(
         action="create",
         project_id="proj-1",
         display_name="Tier",
@@ -85,7 +85,7 @@ def test_malformed_options_is_an_error_not_a_silent_drop(bad, registered, spy):
 
 
 def test_well_formed_options_still_reach_the_sdk(registered, spy):
-    registered["work_item_property"].fn(
+    registered["workitem_property"].fn(
         action="create",
         project_id="proj-1",
         display_name="Tier",
@@ -105,7 +105,7 @@ def test_list_propagates_auth_and_server_errors(status, registered, spy):
     spy.returns["workspace_work_item_properties.list"] = HttpError(f"boom {status}", status_code=status)
 
     with pytest.raises(HttpError):
-        registered["work_item_property"].fn(action="list")
+        registered["workitem_property"].fn(action="list")
 
 
 def test_list_still_falls_back_when_a_scope_is_genuinely_empty(registered, spy):
@@ -117,6 +117,6 @@ def test_list_still_falls_back_when_a_scope_is_genuinely_empty(registered, spy):
     """
     spy.returns["work_item_properties.list_project"] = HttpError("nope", status_code=404)
 
-    result = registered["work_item_property"].fn(action="list", project_id="proj-1", work_item_type_id="type-1")
+    result = registered["workitem_property"].fn(action="list", project_id="proj-1", workitem_type_id="type-1")
 
     assert result == []

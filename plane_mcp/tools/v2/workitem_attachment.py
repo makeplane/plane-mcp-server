@@ -30,20 +30,20 @@ from plane_mcp.attachments import (
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs
 
-NAME = "work_item_attachment"
+NAME = "workitem_attachment"
 TITLE = "Work item attachments"
 
 ACTIONS = (
-    Action("list", ("project_id", "work_item_id"), read=True),
+    Action("list", ("project_id", "workitem_id"), read=True),
     Action(
         "read",
-        ("project_id", "work_item_id", "attachment_id"),
+        ("project_id", "workitem_id", "attachment_id"),
         note="returns images and text inline; use download_url for anything else",
         read=True,
     ),
-    Action("download_url", ("project_id", "work_item_id", "attachment_id"), read=True),
-    Action("upload_from_url", ("project_id", "work_item_id", "url"), ("name",)),
-    Action("delete", ("project_id", "work_item_id", "attachment_id"), destructive=True),
+    Action("download_url", ("project_id", "workitem_id", "attachment_id"), read=True),
+    Action("upload_from_url", ("project_id", "workitem_id", "url"), ("name",)),
+    Action("delete", ("project_id", "workitem_id", "attachment_id"), destructive=True),
 )
 
 FOOTER = (
@@ -62,34 +62,34 @@ LEGACY = {
 }
 
 
-def _find(client, workspace_slug: str, project_id: str, work_item_id: str, attachment_id: str):
+def _find(client, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str):
     """Locate attachment metadata. The retrieve endpoint returns bytes, so list instead."""
     try:
         attachments = client.work_items.attachments.list(
-            workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+            workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
         )
     except HttpError as exc:
         raise ValueError(f"Failed to fetch attachment metadata: HTTP {exc.status_code} - {exc.response}") from exc
     attachment = next((a for a in attachments if a.id == attachment_id), None)
     if attachment is None:
-        raise ValueError(f"Attachment {attachment_id!r} not found on work item {work_item_id!r}")
+        raise ValueError(f"Attachment {attachment_id!r} not found on work item {workitem_id!r}")
     return attachment
 
 
-def _download_url(client, workspace_slug: str, project_id: str, work_item_id: str, attachment_id: str) -> str:
+def _download_url(client, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str) -> str:
     try:
         return client.work_items.attachments.get_download_url(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            work_item_id=work_item_id,
+            work_item_id=workitem_id,
             attachment_id=attachment_id,
         )
     except HttpError as exc:
         raise ValueError(f"Failed to get download URL: HTTP {exc.status_code} - {exc.response}") from exc
 
 
-def _read(client, workspace_slug: str, project_id: str, work_item_id: str, attachment_id: str):
-    attachment = _find(client, workspace_slug, project_id, work_item_id, attachment_id)
+def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str):
+    attachment = _find(client, workspace_slug, project_id, workitem_id, attachment_id)
     attrs = attachment.attributes or {}
     name = attrs.get("name") or attachment_id
     content_type = attrs.get("type") or ""
@@ -105,7 +105,7 @@ def _read(client, workspace_slug: str, project_id: str, work_item_id: str, attac
             "For PDFs and Office documents use the download_url action."
         )
 
-    url = _download_url(client, workspace_slug, project_id, work_item_id, attachment_id)
+    url = _download_url(client, workspace_slug, project_id, workitem_id, attachment_id)
     try:
         response = requests.get(url, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
@@ -125,7 +125,7 @@ def _read(client, workspace_slug: str, project_id: str, work_item_id: str, attac
     return payload.decode("utf-8", errors="replace")
 
 
-def _upload(client, workspace_slug: str, project_id: str, work_item_id: str, url: str, name: str):
+def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url: str, name: str):
     assert_public_url(url)
     try:
         response = requests.get(url, timeout=HTTP_TIMEOUT)
@@ -152,7 +152,7 @@ def _upload(client, workspace_slug: str, project_id: str, work_item_id: str, url
         attachment = client.work_items.attachments.upload_from_bytes(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            work_item_id=work_item_id,
+            work_item_id=workitem_id,
             file_bytes=payload,
             name=filename,
             content_type=content_type,
@@ -168,41 +168,41 @@ def register(mcp: FastMCP) -> None:
         description=build_description("Files attached to a work item.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
-    def work_item_attachment(
+    def workitem_attachment(
         action: Literal["list", "read", "download_url", "upload_from_url", "delete"],
         project_id: str = "",
-        work_item_id: str = "",
+        workitem_id: str = "",
         attachment_id: str = "",
         url: str = "",
         name: str = "",
     ) -> Image | list[dict[str, Any]] | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
-        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+        if error := needs(action, project_id=project_id, workitem_id=workitem_id):
             return error
 
         if action == "list":
             attachments = client.work_items.attachments.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
             )
             return [attachment_to_dict(a, workspace_slug) for a in attachments]
 
         if action == "upload_from_url":
             if not url:
                 return missing(action, "url")
-            return _upload(client, workspace_slug, project_id, work_item_id, url, name)
+            return _upload(client, workspace_slug, project_id, workitem_id, url, name)
 
         if not attachment_id:
             return missing(action, "attachment_id")
 
         if action == "read":
-            return _read(client, workspace_slug, project_id, work_item_id, attachment_id)
+            return _read(client, workspace_slug, project_id, workitem_id, attachment_id)
 
         if action == "download_url":
-            attachment = _find(client, workspace_slug, project_id, work_item_id, attachment_id)
+            attachment = _find(client, workspace_slug, project_id, workitem_id, attachment_id)
             attrs = attachment.attributes or {}
             return {
-                "download_url": _download_url(client, workspace_slug, project_id, work_item_id, attachment_id),
+                "download_url": _download_url(client, workspace_slug, project_id, workitem_id, attachment_id),
                 "attachment_id": attachment_id,
                 "name": attrs.get("name") or attachment_id,
             }
@@ -210,7 +210,7 @@ def register(mcp: FastMCP) -> None:
         client.work_items.attachments.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            work_item_id=work_item_id,
+            work_item_id=workitem_id,
             attachment_id=attachment_id,
         )
         return None

@@ -24,8 +24,8 @@ ACTIONS = (
     Action(
         "create",
         ("customer_id", "name"),
-        ("description_html", "link", "work_item_ids"),
-        note="work_item_ids can only be set here; change links afterwards with customer manage_work_items",
+        ("description_html", "link", "workitem_ids"),
+        note="workitem_ids can only be set here; change links afterwards with customer manage_workitems",
     ),
     Action(
         "update",
@@ -37,8 +37,8 @@ ACTIONS = (
 )
 
 FOOTER = (
-    "link is a URL associated with the request. work_item_ids is never echoed back -- read the "
-    "links with `customer list_work_items`."
+    "link is a URL associated with the request. workitem_ids is never echoed back -- read the "
+    "links with `customer list_workitems`."
 )
 
 LEGACY = {
@@ -63,7 +63,7 @@ def register(mcp: FastMCP) -> None:
         name: str = "",
         description_html: str = "",
         link: str = "",
-        work_item_ids: str = "",
+        workitem_ids: str = "",
         query: str = "",
         cursor: str = "",
         per_page: int = 0,
@@ -92,7 +92,7 @@ def register(mcp: FastMCP) -> None:
                     name=name,
                     description_html=opt(description_html),
                     link=opt(link),
-                    work_item_ids=coerce_list(work_item_ids),
+                    work_item_ids=coerce_list(workitem_ids),
                 ),
             )
 

@@ -8,10 +8,10 @@ from fastmcp import FastMCP
 from mcp.types import Icon
 
 from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
-from plane_mcp.instructions import SERVER_INSTRUCTIONS
+from plane_mcp.instructions import instructions_for
 from plane_mcp.middleware import PlaneLoggingMiddleware
 from plane_mcp.storage import build_token_store
-from plane_mcp.tools import register_tools
+from plane_mcp.tools import register_tools, selected_version
 
 # Baseline redirect URIs shipped with the server. Additional patterns can be
 # supplied at runtime via PLANE_OAUTH_ALLOWED_REDIRECT_URIS (comma-separated) so
@@ -52,7 +52,7 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
     """Build the FastMCP instance for the OAuth HTTP / SSE transports."""
     oauth_mcp = FastMCP(
         "Plane MCP Server",
-        instructions=SERVER_INSTRUCTIONS,
+        instructions=instructions_for(selected_version()),
         icons=[Icon(src="https://plane.so/favicon.ico", alt="Plane MCP Server")],
         website_url="https://plane.so",
         auth=PlaneOAuthProvider(
@@ -75,7 +75,7 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
 def get_header_mcp():
     header_mcp = FastMCP(
         "Plane MCP Server (header-http)",
-        instructions=SERVER_INSTRUCTIONS,
+        instructions=instructions_for(selected_version()),
         auth=PlaneHeaderAuthProvider(
             required_scopes=["read", "write"],
         ),
@@ -88,7 +88,7 @@ def get_header_mcp():
 def get_stdio_mcp():
     stdio_mcp = FastMCP(
         "Plane MCP Server (stdio)",
-        instructions=SERVER_INSTRUCTIONS,
+        instructions=instructions_for(selected_version()),
     )
     stdio_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
     register_tools(stdio_mcp)

@@ -30,12 +30,12 @@ ACTIONS = (
         ("name", "description_html"),
         ("project_id", "access", "color", "is_locked", "external_source", "external_id"),
     ),
-    Action("list_work_item_pages", ("project_id", "work_item_id"), read=True),
-    Action("attach_to_work_item", ("project_id", "work_item_id", "page_id")),
+    Action("list_workitem_pages", ("project_id", "workitem_id"), read=True),
+    Action("attach_to_workitem", ("project_id", "workitem_id", "page_id")),
     Action(
-        "detach_from_work_item",
-        ("project_id", "work_item_id", "work_item_page_id"),
-        note="work_item_page_id is the link id from list_work_item_pages, not the page id",
+        "detach_from_workitem",
+        ("project_id", "workitem_id", "workitem_page_id"),
+        note="workitem_page_id is the link id from list_workitem_pages, not the page id",
         destructive=True,
     ),
 )
@@ -49,9 +49,9 @@ LEGACY = {
     "list_pages": "list",
     "retrieve_page": "retrieve",
     "create_page": "create",
-    "list_work_item_pages": "list_work_item_pages",
-    "attach_page_to_work_item": "attach_to_work_item",
-    "detach_page_from_work_item": "detach_from_work_item",
+    "list_work_item_pages": "list_workitem_pages",
+    "attach_page_to_work_item": "attach_to_workitem",
+    "detach_page_from_work_item": "detach_from_workitem",
 }
 
 
@@ -66,14 +66,14 @@ def register(mcp: FastMCP) -> None:
             "list",
             "retrieve",
             "create",
-            "list_work_item_pages",
-            "attach_to_work_item",
-            "detach_from_work_item",
+            "list_workitem_pages",
+            "attach_to_workitem",
+            "detach_from_workitem",
         ],
         project_id: str = "",
         page_id: str = "",
-        work_item_id: str = "",
-        work_item_page_id: str = "",
+        workitem_id: str = "",
+        workitem_page_id: str = "",
         name: str = "",
         description_html: str = "",
         # Left unset rather than defaulted: 0 is a real access level.
@@ -122,31 +122,31 @@ def register(mcp: FastMCP) -> None:
                 return client.pages.create_project_page(workspace_slug=workspace_slug, project_id=project_id, data=data)
             return client.pages.create_workspace_page(workspace_slug=workspace_slug, data=data)
 
-        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+        if error := needs(action, project_id=project_id, workitem_id=workitem_id):
             return error
 
-        if action == "list_work_item_pages":
+        if action == "list_workitem_pages":
             response = client.work_items.pages.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
             )
             return response.results
 
-        if action == "attach_to_work_item":
+        if action == "attach_to_workitem":
             if not page_id:
                 return missing(action, "page_id")
             return client.work_items.pages.create(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 data=CreateWorkItemPage(page_id=page_id),
             )
 
-        if not work_item_page_id:
-            return missing(action, "work_item_page_id")
+        if not workitem_page_id:
+            return missing(action, "workitem_page_id")
         client.work_items.pages.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            work_item_id=work_item_id,
-            work_item_page_id=work_item_page_id,
+            work_item_id=workitem_id,
+            work_item_page_id=workitem_page_id,
         )
         return None

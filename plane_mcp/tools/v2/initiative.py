@@ -40,9 +40,9 @@ STATES = ("DRAFT", "PLANNED", "ACTIVE", "COMPLETED", "CLOSED")
 
 _WORK_ITEM_FALLBACK = (
     'Initiatives are stored as "Initiative" work items in this workspace. '
-    'Call `work_item_type resolve` with project_id and name="Initiative" to get the type id, '
-    "then `work_item list` with pql='type = \"<type id>\"' to read them, or "
-    "`work_item create` with that type_id to add one. Work items belong to a project -- "
+    'Call `workitem_type resolve` with project_id and name="Initiative" to get the type id, '
+    "then `workitem list` with pql='type = \"<type id>\"' to read them, or "
+    "`workitem create` with that type_id to add one. Work items belong to a project -- "
     "ask which project if none was named."
 )
 _PROJECTS_NEED_NATIVE = (

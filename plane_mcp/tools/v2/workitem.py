@@ -45,7 +45,7 @@ from plane_mcp.toolkit import (
 
 logger = get_logger(__name__)
 
-NAME = "work_item"
+NAME = "workitem"
 TITLE = "Work items"
 
 PRIORITIES = get_args(PriorityEnum)
@@ -81,13 +81,13 @@ ACTIONS = (
     Action("list_archived", ("project_id",), ("pql", *QUERY_FIELDS), read=True),
     Action(
         "retrieve",
-        ("project_id", "work_item_id"),
+        ("project_id", "workitem_id"),
         ("expand", "fields", "external_id", "external_source", "order_by"),
         read=True,
     ),
     Action(
         "retrieve_by_identifier",
-        ("work_item_identifier",),
+        ("workitem_identifier",),
         ("expand", "fields", "external_id", "external_source", "order_by"),
         note="identifier is PROJECT-N, e.g. ENG-42",
         read=True,
@@ -95,24 +95,24 @@ ACTIONS = (
     Action("search", ("query",), ("expand", "fields", "external_id", "external_source", "order_by"), read=True),
     Action("count", optional=("pql", "group_by", "sub_group_by"), read=True),
     Action("create", ("project_id", "name"), WRITE_FIELDS[1:]),
-    Action("update", ("project_id", "work_item_id"), WRITE_FIELDS, note="only the fields you pass are changed"),
-    Action("delete", ("project_id", "work_item_id"), destructive=True),
+    Action("update", ("project_id", "workitem_id"), WRITE_FIELDS, note="only the fields you pass are changed"),
+    Action("delete", ("project_id", "workitem_id"), destructive=True),
     Action(
         "archive",
-        ("project_id", "work_item_id"),
+        ("project_id", "workitem_id"),
         ("archive",),
         note="archive defaults to true; pass archive=false to unarchive. Only completed or "
         "cancelled items can be archived",
     ),
     Action(
         "manage_assignee",
-        ("project_id", "work_item_id"),
+        ("project_id", "workitem_id"),
         ("add_user_id", "remove_user_id"),
         note="mutates one entry without replacing the list; removal is applied before the addition",
     ),
     Action(
         "manage_label",
-        ("project_id", "work_item_id"),
+        ("project_id", "workitem_id"),
         ("add_label_id", "remove_label_id"),
         note="mutates one entry without replacing the list; removal is applied before the addition",
     ),
@@ -178,7 +178,7 @@ def register(mcp: FastMCP) -> None:
         description=build_description("Work items -- issues, tasks and epics.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
-    def work_item(  # noqa: PLR0911, PLR0912 - one branch per action is the point
+    def workitem(  # noqa: PLR0911, PLR0912 - one branch per action is the point
         action: Literal[
             "list",
             "list_archived",
@@ -194,8 +194,8 @@ def register(mcp: FastMCP) -> None:
             "manage_label",
         ],
         project_id: str = "",
-        work_item_id: str = "",
-        work_item_identifier: str = "",
+        workitem_id: str = "",
+        workitem_identifier: str = "",
         query: str = "",
         pql: Annotated[str, Field(description=PQL_FIELD_HINT)] = "",
         group_by: str = "",
@@ -286,7 +286,7 @@ def register(mcp: FastMCP) -> None:
                 else:
                     response = client.work_items.list_workspace(workspace_slug=workspace_slug, params=params)
             except HttpError as exc:
-                failure = pql_failure("work_item", action, pql, exc)
+                failure = pql_failure("workitem", action, pql, exc)
                 if failure:
                     return failure
                 raise
@@ -301,7 +301,7 @@ def register(mcp: FastMCP) -> None:
                     ),
                 )
             except HttpError as exc:
-                failure = pql_failure("work_item", action, pql, exc)
+                failure = pql_failure("workitem", action, pql, exc)
                 if failure:
                     return failure
                 raise
@@ -313,12 +313,12 @@ def register(mcp: FastMCP) -> None:
             return client.work_items.search(workspace_slug=workspace_slug, query=query, params=retrieve_params())
 
         if action == "retrieve_by_identifier":
-            if not work_item_identifier:
-                return missing(action, "work_item_identifier")
-            head, _, sequence = work_item_identifier.rpartition("-")
+            if not workitem_identifier:
+                return missing(action, "workitem_identifier")
+            head, _, sequence = workitem_identifier.rpartition("-")
             if not head or not sequence.isdigit():
                 return (
-                    f"Error: invalid work item identifier {work_item_identifier!r}. "
+                    f"Error: invalid work item identifier {workitem_identifier!r}. "
                     "Expected PROJECT-N, for example ENG-42."
                 )
             return client.work_items.retrieve_by_identifier(
@@ -340,14 +340,14 @@ def register(mcp: FastMCP) -> None:
                 data=CreateWorkItem(**write_payload()),
             )
 
-        if not work_item_id:
-            return missing(action, "work_item_id")
+        if not workitem_id:
+            return missing(action, "workitem_id")
 
         if action == "retrieve":
             return client.work_items.retrieve(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 params=retrieve_params(),
             )
 
@@ -355,17 +355,17 @@ def register(mcp: FastMCP) -> None:
             return client.work_items.update(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 data=UpdateWorkItem(**write_payload()),
             )
 
         if action == "delete":
-            client.work_items.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
+            client.work_items.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id)
             return None
 
         if action == "archive":
             operation = client.work_items.archive if archive else client.work_items.unarchive
-            operation(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
+            operation(workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id)
             return None
 
         # manage_assignee / manage_label: read, mutate one entry, write back.
@@ -377,7 +377,7 @@ def register(mcp: FastMCP) -> None:
         if not add and not remove:
             return missing(action, f"add_{field[:-1]}_id or remove_{field[:-1]}_id")
         current = client.work_items.retrieve(
-            workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
+            workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
         )
         ids = ids_of(getattr(current, field))
         if remove:
@@ -387,6 +387,6 @@ def register(mcp: FastMCP) -> None:
         return client.work_items.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            work_item_id=work_item_id,
+            work_item_id=workitem_id,
             data=UpdateWorkItem(**{field: ids}),
         )

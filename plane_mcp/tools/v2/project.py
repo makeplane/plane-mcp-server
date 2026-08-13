@@ -76,7 +76,7 @@ ACTIONS = (
     Action(
         "update_features",
         ("project_id",),
-        ("modules", "cycles", "views", "pages", "intakes", "work_item_types", "is_time_tracking_enabled"),
+        ("modules", "cycles", "views", "pages", "intakes", "workitem_types", "is_time_tracking_enabled"),
         note="toggles project features on or off",
     ),
 )
@@ -144,7 +144,7 @@ def register(mcp: FastMCP) -> None:
         views: bool | None = None,
         pages: bool | None = None,
         intakes: bool | None = None,
-        work_item_types: bool | None = None,
+        workitem_types: bool | None = None,
         is_time_tracking_enabled: bool | None = None,
         cursor: str = "",
         per_page: int = 0,
@@ -200,7 +200,7 @@ def register(mcp: FastMCP) -> None:
                     timezone=zone,
                     external_source=opt(external_source),
                     external_id=opt(external_id),
-                    is_issue_type_enabled=work_item_types,
+                    is_issue_type_enabled=workitem_types,
                 ),
             )
 
@@ -233,7 +233,7 @@ def register(mcp: FastMCP) -> None:
                     timezone=zone,
                     external_source=opt(external_source),
                     external_id=opt(external_id),
-                    is_issue_type_enabled=work_item_types,
+                    is_issue_type_enabled=workitem_types,
                     is_time_tracking_enabled=is_time_tracking_enabled,
                     default_state=opt(default_state),
                     estimate=opt(estimate),
@@ -267,6 +267,6 @@ def register(mcp: FastMCP) -> None:
                 views=views,
                 pages=pages,
                 intakes=intakes,
-                work_item_types=work_item_types,
+                work_item_types=workitem_types,
             ),
         )

@@ -9,7 +9,7 @@ is exactly the kind of detail that rots.
 Work item types are the only resource governed at both scopes today. The
 resolver lives in the module rather than in a shared abstraction: one caller
 does not justify one, and the two-way split here is not the three-way split
-`work_item_property` needs.
+`workitem_property` needs.
 """
 
 from __future__ import annotations
@@ -18,15 +18,15 @@ import inspect
 
 import pytest
 
-from plane_mcp.tools.v2.work_item_type import _scope_of
+from plane_mcp.tools.v2.workitem_type import _scope_of
 
 PROJECT = "project-1"
 TYPE_ID = "type-1"
 
 
 @pytest.fixture
-def work_item_type(registered, spy):
-    return registered["work_item_type"].fn, spy
+def workitem_type(registered, spy):
+    return registered["workitem_type"].fn, spy
 
 
 @pytest.mark.parametrize(
@@ -34,13 +34,13 @@ def work_item_type(registered, spy):
     [
         ("list", {}, "work_item_types.list", "workspace_work_item_types.list"),
         ("create", {"name": "Epic"}, "work_item_types.create", "workspace_work_item_types.create"),
-        ("retrieve", {"work_item_type_id": TYPE_ID}, "work_item_types.retrieve", "workspace_work_item_types.retrieve"),
-        ("update", {"work_item_type_id": TYPE_ID}, "work_item_types.update", "workspace_work_item_types.update"),
-        ("delete", {"work_item_type_id": TYPE_ID}, "work_item_types.delete", "workspace_work_item_types.delete"),
+        ("retrieve", {"workitem_type_id": TYPE_ID}, "work_item_types.retrieve", "workspace_work_item_types.retrieve"),
+        ("update", {"workitem_type_id": TYPE_ID}, "work_item_types.update", "workspace_work_item_types.update"),
+        ("delete", {"workitem_type_id": TYPE_ID}, "work_item_types.delete", "workspace_work_item_types.delete"),
     ],
 )
-def test_project_id_selects_the_scope(work_item_type, action, extra, project_method, workspace_method):
-    tool, spy = work_item_type
+def test_project_id_selects_the_scope(workitem_type, action, extra, project_method, workspace_method):
+    tool, spy = workitem_type
 
     tool(action=action, project_id=PROJECT, **extra)
     scoped = spy.recorder.only()
@@ -54,15 +54,20 @@ def test_project_id_selects_the_scope(work_item_type, action, extra, project_met
     assert "project_id" not in governed.kwargs
 
 
-def test_each_scope_uses_its_own_id_keyword(work_item_type):
-    """The project endpoint takes work_item_type_id; the workspace one takes type_id."""
-    tool, spy = work_item_type
+def test_each_scope_uses_its_own_id_keyword(workitem_type):
+    """One tool parameter, two SDK spellings.
 
-    tool(action="retrieve", project_id=PROJECT, work_item_type_id=TYPE_ID)
+    The tool takes `workitem_type_id` at both scopes. Underneath, the project
+    endpoint calls it `work_item_type_id` and the workspace one calls it
+    `type_id`, so the assertions below are on the SDK's names, not the tool's.
+    """
+    tool, spy = workitem_type
+
+    tool(action="retrieve", project_id=PROJECT, workitem_type_id=TYPE_ID)
     assert spy.recorder.only().kwargs["work_item_type_id"] == TYPE_ID
 
     spy.recorder.calls.clear()
-    tool(action="retrieve", work_item_type_id=TYPE_ID)
+    tool(action="retrieve", workitem_type_id=TYPE_ID)
     assert spy.recorder.only().kwargs["type_id"] == TYPE_ID
 
 

@@ -71,12 +71,12 @@ ACTIONS = (
     Action("delete", ("release_id",), destructive=True),
     Action("get_changelog", ("release_id",), read=True),
     Action("update_changelog", ("release_id",), ("description_html", "description_stripped")),
-    Action("list_work_items", ("release_id",), ("cursor", "per_page"), read=True),
+    Action("list_workitems", ("release_id",), ("cursor", "per_page"), read=True),
     Action(
-        "manage_work_items",
+        "manage_workitems",
         ("release_id",),
         ("add_ids", "remove_ids"),
-        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_work_items",
+        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_workitems",
     ),
 )
 
@@ -97,12 +97,12 @@ LEGACY = {
     "delete_release": "delete",
     "get_release_changelog": "get_changelog",
     "update_release_changelog": "update_changelog",
-    "list_release_work_items": "list_work_items",
+    "list_release_work_items": "list_workitems",
 }
 
 LEGACY_UNMAPPED = {
     "manage_release_work_items": "took action='add'|'remove', which collides with the dispatch "
-    "key: use manage_work_items with add_ids or remove_ids",
+    "key: use manage_workitems with add_ids or remove_ids",
 }
 
 
@@ -132,8 +132,8 @@ def register(mcp: FastMCP) -> None:
             "delete",
             "get_changelog",
             "update_changelog",
-            "list_work_items",
-            "manage_work_items",
+            "list_workitems",
+            "manage_workitems",
         ],
         release_id: str = "",
         name: str = "",
@@ -227,7 +227,7 @@ def register(mcp: FastMCP) -> None:
 
         work_items = releases.work_items
 
-        if action == "list_work_items":
+        if action == "list_workitems":
             return work_items.list(
                 workspace_slug=workspace_slug, release_id=release_id, params=page_params(cursor, per_page)
             )

@@ -23,19 +23,19 @@ PRIORITIES = ("urgent", "high", "medium", "low", "none")
 
 ACTIONS = (
     Action("list", ("project_id",), ("cursor", "per_page"), read=True),
-    Action("retrieve", ("project_id", "work_item_id"), read=True),
+    Action("retrieve", ("project_id", "workitem_id"), read=True),
     Action("create", ("project_id", "name"), ("description_html", "priority")),
     Action(
         "update",
-        ("project_id", "work_item_id"),
+        ("project_id", "workitem_id"),
         ("status", "snoozed_till", "duplicate_to", "source", "source_email"),
         note="pass status to make a triage decision",
     ),
-    Action("delete", ("project_id", "work_item_id"), destructive=True),
+    Action("delete", ("project_id", "workitem_id"), destructive=True),
 )
 
 FOOTER = (
-    "work_item_id is the `issue` field of an intake record, not the record's own id. "
+    "workitem_id is the `issue` field of an intake record, not the record's own id. "
     "status: -2 pending, -1 declined, 0 snoozed (needs snoozed_till), 1 accepted, "
     "2 duplicate (needs duplicate_to). "
     f"priority is one of: {', '.join(PRIORITIES)}."
@@ -59,7 +59,7 @@ def register(mcp: FastMCP) -> None:
     def intake(
         action: Literal["list", "retrieve", "create", "update", "delete"],
         project_id: str = "",
-        work_item_id: str = "",
+        workitem_id: str = "",
         name: str = "",
         description_html: str = "",
         priority: str = "",
@@ -103,14 +103,14 @@ def register(mcp: FastMCP) -> None:
                 ),
             )
 
-        if not work_item_id:
-            return missing(action, "work_item_id")
+        if not workitem_id:
+            return missing(action, "workitem_id")
 
         if action == "retrieve":
             return client.intake.retrieve(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 params=as_params(RetrieveQueryParams),
             )
 
@@ -133,15 +133,15 @@ def register(mcp: FastMCP) -> None:
                 return client.intake.update_status(
                     workspace_slug=workspace_slug,
                     project_id=project_id,
-                    work_item_id=work_item_id,
+                    work_item_id=workitem_id,
                     data=data,
                 )
             return client.intake.update(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 data=data,
             )
 
-        client.intake.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
+        client.intake.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id)
         return None

@@ -14,10 +14,10 @@ NAME = "work_log"
 TITLE = "Work logs"
 
 ACTIONS = (
-    Action("list", ("project_id", "work_item_id"), ("cursor", "per_page"), read=True),
-    Action("create", ("project_id", "work_item_id", "duration"), ("description",)),
-    Action("update", ("project_id", "work_item_id", "work_log_id"), ("duration", "description")),
-    Action("delete", ("project_id", "work_item_id", "work_log_id"), destructive=True),
+    Action("list", ("project_id", "workitem_id"), ("cursor", "per_page"), read=True),
+    Action("create", ("project_id", "workitem_id", "duration"), ("description",)),
+    Action("update", ("project_id", "workitem_id", "work_log_id"), ("duration", "description")),
+    Action("delete", ("project_id", "workitem_id", "work_log_id"), destructive=True),
 )
 
 FOOTER = (
@@ -41,7 +41,7 @@ def register(mcp: FastMCP) -> None:
     def work_log(
         action: Literal["list", "create", "update", "delete"],
         project_id: str = "",
-        work_item_id: str = "",
+        workitem_id: str = "",
         work_log_id: str = "",
         duration: int = 0,
         description: str = "",
@@ -50,14 +50,14 @@ def register(mcp: FastMCP) -> None:
     ) -> WorkItemWorkLog | list[WorkItemWorkLog] | str | None:
         client, workspace_slug = get_plane_client_context()
 
-        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+        if error := needs(action, project_id=project_id, workitem_id=workitem_id):
             return error
 
         if action == "list":
             return client.work_items.work_logs.list(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 params=page_params(cursor, per_page),
             )
 
@@ -73,7 +73,7 @@ def register(mcp: FastMCP) -> None:
             return client.work_items.work_logs.create(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 data=payload,
             )
 
@@ -84,7 +84,7 @@ def register(mcp: FastMCP) -> None:
             return client.work_items.work_logs.update(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 work_log_id=work_log_id,
                 data=payload,
             )
@@ -92,7 +92,7 @@ def register(mcp: FastMCP) -> None:
         client.work_items.work_logs.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            work_item_id=work_item_id,
+            work_item_id=workitem_id,
             work_log_id=work_log_id,
         )
         return None

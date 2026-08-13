@@ -68,12 +68,12 @@ ACTIONS = (
         note="address by customer_id, or by external_source plus external_id",
         destructive=True,
     ),
-    Action("list_work_items", ("customer_id",), ("customer_request_id", "search"), read=True),
+    Action("list_workitems", ("customer_id",), ("customer_request_id", "search"), read=True),
     Action(
-        "manage_work_items",
+        "manage_workitems",
         ("customer_id",),
         ("link_ids", "unlink_ids", "customer_request_id"),
-        note="pass at least one of link_ids or unlink_ids; returns nothing, read back with list_work_items",
+        note="pass at least one of link_ids or unlink_ids; returns nothing, read back with list_workitems",
     ),
 )
 
@@ -90,12 +90,12 @@ LEGACY = {
     "create_customer": "create",
     "update_customer": "update",
     "delete_customer": "delete",
-    "list_customer_work_items": "list_work_items",
+    "list_customer_work_items": "list_workitems",
 }
 
 LEGACY_UNMAPPED = {
     "manage_customer_work_items": "took action='link'|'unlink', which collides with the dispatch "
-    "key: use manage_work_items with link_ids or unlink_ids",
+    "key: use manage_workitems with link_ids or unlink_ids",
 }
 
 
@@ -112,8 +112,8 @@ def register(mcp: FastMCP) -> None:
             "create",
             "update",
             "delete",
-            "list_work_items",
-            "manage_work_items",
+            "list_workitems",
+            "manage_workitems",
         ],
         customer_id: str = "",
         customer_request_id: str = "",
@@ -199,7 +199,7 @@ def register(mcp: FastMCP) -> None:
 
         work_items = customers.work_items
 
-        if action == "list_work_items":
+        if action == "list_workitems":
             return work_items.list(
                 workspace_slug=workspace_slug,
                 customer_id=customer_id,
@@ -218,13 +218,13 @@ def register(mcp: FastMCP) -> None:
                 data=LinkCustomerWorkItems(work_item_ids=link),
                 customer_request_id=opt(customer_request_id),
             )
-        for work_item_id in unlink or []:
+        for workitem_id in unlink or []:
             # Without a request id this drops every link to the work item,
             # whichever request created it.
             work_items.delete(
                 workspace_slug=workspace_slug,
                 customer_id=customer_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 customer_request_id=opt(customer_request_id),
             )
         return None

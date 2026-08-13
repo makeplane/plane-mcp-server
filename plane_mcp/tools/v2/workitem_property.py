@@ -1,6 +1,6 @@
 """Custom work item properties: their definitions, options, and values.
 
-Scope is chosen by which ids you supply: project_id plus work_item_type_id is
+Scope is chosen by which ids you supply: project_id plus workitem_type_id is
 type-scoped, project_id alone is project-flat, neither is workspace-level. The
 same rule applies to the option actions.
 
@@ -47,7 +47,7 @@ from plane_mcp.toolkit import (
     page_params,
 )
 
-NAME = "work_item_property"
+NAME = "workitem_property"
 TITLE = "Work item properties"
 
 PROPERTY_TYPES = tuple(e.value for e in PropertyType)
@@ -59,17 +59,17 @@ ACTIONS = (
     Action(
         "list",
         (),
-        ("project_id", "work_item_type_id", "cursor", "per_page"),
+        ("project_id", "workitem_type_id", "cursor", "per_page"),
         note="no ids lists every workspace property in one call -- the fast path for PQL",
         read=True,
     ),
-    Action("retrieve", ("work_item_property_id",), ("project_id", "work_item_type_id"), read=True),
+    Action("retrieve", ("workitem_property_id",), ("project_id", "workitem_type_id"), read=True),
     Action(
         "create",
         ("display_name", "property_type"),
         (
             "project_id",
-            "work_item_type_id",
+            "workitem_type_id",
             "description",
             "relation_type",
             "is_required",
@@ -84,10 +84,10 @@ ACTIONS = (
     ),
     Action(
         "update",
-        ("work_item_property_id",),
+        ("workitem_property_id",),
         (
             "project_id",
-            "work_item_type_id",
+            "workitem_type_id",
             "display_name",
             "property_type",
             "description",
@@ -102,10 +102,10 @@ ACTIONS = (
         ),
         note="only the fields you pass are changed",
     ),
-    Action("delete", ("work_item_property_id",), ("project_id", "work_item_type_id"), destructive=True),
+    Action("delete", ("workitem_property_id",), ("project_id", "workitem_type_id"), destructive=True),
     Action(
         "manage_type_properties",
-        ("project_id", "work_item_type_id"),
+        ("project_id", "workitem_type_id"),
         ("attach_ids", "detach_ids"),
         note="detach removes the association only; it does not delete the property",
     ),
@@ -122,14 +122,14 @@ ACTIONS = (
         ("project_id", "name", "description", "color", "is_default", "external_source", "external_id"),
     ),
     Action("delete_option", ("property_id", "option_id"), ("project_id",), destructive=True),
-    Action("get_value", ("project_id", "work_item_id", "property_id"), read=True),
+    Action("get_value", ("project_id", "workitem_id", "property_id"), read=True),
     Action(
         "set_value",
-        ("project_id", "work_item_id", "property_id", "value"),
+        ("project_id", "workitem_id", "property_id", "value"),
         ("external_source", "external_id"),
         note="upsert; for a multi-value property this replaces every existing value",
     ),
-    Action("delete_value", ("project_id", "work_item_id", "property_id"), destructive=True),
+    Action("delete_value", ("project_id", "workitem_id", "property_id"), destructive=True),
 )
 
 FOOTER = (
@@ -139,7 +139,7 @@ FOOTER = (
     'options takes a JSON array of {"name", "color", "is_default"} objects. '
     f"display_format is required by TEXT ({', '.join(TEXT_FORMATS)}) and "
     f"DATETIME ({', '.join(DATE_FORMATS)}) properties. "
-    "list resolves scope in this order: project_id + work_item_type_id is type-scoped (falling "
+    "list resolves scope in this order: project_id + workitem_type_id is type-scoped (falling "
     "back to project-flat then workspace when empty), project_id alone is every property in the "
     "project, and neither is every workspace property. To filter by property name in PQL, call "
     "list with no ids -- one workspace-wide fetch beats iterating types -- then match "
@@ -186,13 +186,13 @@ class _Scope:
         return {**self.kwargs, self.id_kwarg: property_id}
 
 
-def _scope_of(client: Any, project_id: str, work_item_type_id: str) -> _Scope:
-    """project_id with work_item_type_id is type-scoped, project_id alone is
+def _scope_of(client: Any, project_id: str, workitem_type_id: str) -> _Scope:
+    """project_id with workitem_type_id is type-scoped, project_id alone is
     project-flat, neither is the workspace."""
     properties = client.work_item_properties
-    if project_id and work_item_type_id:
-        scope = {"project_id": project_id, "type_id": work_item_type_id}
-        return _Scope(properties, "", scope, "work_item_property_id")
+    if project_id and workitem_type_id:
+        scope = {"project_id": project_id, "type_id": workitem_type_id}
+        return _Scope(properties, "", scope, "workitem_property_id")
     if project_id:
         return _Scope(properties, "_project", {"project_id": project_id}, "property_id")
     return _Scope(client.workspace_work_item_properties, "", {}, "property_id")
@@ -265,7 +265,7 @@ def register(mcp: FastMCP) -> None:
         description=build_description("Custom work item properties and their options.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
-    def work_item_property(
+    def workitem_property(
         action: Literal[
             "list",
             "retrieve",
@@ -283,9 +283,9 @@ def register(mcp: FastMCP) -> None:
             "delete_value",
         ],
         project_id: str = "",
-        work_item_id: str = "",
-        work_item_type_id: str = "",
-        work_item_property_id: str = "",
+        workitem_id: str = "",
+        workitem_type_id: str = "",
+        workitem_property_id: str = "",
         property_id: str = "",
         option_id: str = "",
         display_name: str = "",
@@ -333,16 +333,17 @@ def register(mcp: FastMCP) -> None:
 
         properties = client.work_item_properties
         workspace_properties = client.workspace_work_item_properties
-        scope = _scope_of(client, project_id, work_item_type_id)
+        scope = _scope_of(client, project_id, workitem_type_id)
 
         if action.endswith("_value"):
-            if error := needs(action, project_id=project_id, work_item_id=work_item_id, property_id=property_id):
+            if error := needs(action, project_id=project_id, workitem_id=workitem_id, property_id=property_id):
                 return error
             values = properties.values
             target = {
                 "workspace_slug": workspace_slug,
                 "project_id": project_id,
-                "work_item_id": work_item_id,
+                # SDK kwarg name; splatted straight into the values endpoint.
+                "work_item_id": workitem_id,
                 "property_id": property_id,
             }
             if action == "get_value":
@@ -364,12 +365,12 @@ def register(mcp: FastMCP) -> None:
             return None
 
         if action == "list":
-            if not work_item_type_id and not project_id:
+            if not workitem_type_id and not project_id:
                 return workspace_properties.list(workspace_slug=workspace_slug)
             if not project_id:
-                return _workspace_props_for_type(client, workspace_slug, work_item_type_id)
+                return _workspace_props_for_type(client, workspace_slug, workitem_type_id)
             params = page_params(cursor, per_page)
-            if not work_item_type_id:
+            if not workitem_type_id:
                 try:
                     return properties.list_project(workspace_slug=workspace_slug, project_id=project_id, params=params)
                 except HttpError as exc:
@@ -379,7 +380,7 @@ def register(mcp: FastMCP) -> None:
             scoped = properties.list(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                type_id=work_item_type_id,
+                type_id=workitem_type_id,
                 params=params,
             )
             if scoped:
@@ -393,7 +394,7 @@ def register(mcp: FastMCP) -> None:
             except HttpError as exc:
                 if not _absent(exc):
                     raise
-            return _workspace_props_for_type(client, workspace_slug, work_item_type_id)
+            return _workspace_props_for_type(client, workspace_slug, workitem_type_id)
 
         if action == "create":
             if error := needs(action, display_name=display_name, property_type=property_type):
@@ -421,7 +422,7 @@ def register(mcp: FastMCP) -> None:
         if action == "manage_type_properties":
             attach = coerce_list(attach_ids)
             detach = coerce_list(detach_ids)
-            if error := needs(action, project_id=project_id, work_item_type_id=work_item_type_id):
+            if error := needs(action, project_id=project_id, workitem_type_id=workitem_type_id):
                 return error
             if not attach and not detach:
                 return missing(action, "attach_ids or detach_ids")
@@ -430,23 +431,23 @@ def register(mcp: FastMCP) -> None:
                 attached = properties.attach_to_type(
                     workspace_slug=workspace_slug,
                     project_id=project_id,
-                    type_id=work_item_type_id,
+                    type_id=workitem_type_id,
                     property_ids=attach,
                 )
             for one in detach or []:
                 properties.detach_from_type(
                     workspace_slug=workspace_slug,
                     project_id=project_id,
-                    type_id=work_item_type_id,
+                    type_id=workitem_type_id,
                     property_id=one,
                 )
             return attached
 
         if action in ("retrieve", "update", "delete"):
-            if not work_item_property_id:
-                return missing(action, "work_item_property_id")
+            if not workitem_property_id:
+                return missing(action, "workitem_property_id")
 
-            target = scope.target(work_item_property_id)
+            target = scope.target(workitem_property_id)
 
             if action == "retrieve":
                 return scope.call("retrieve")(workspace_slug=workspace_slug, **target)

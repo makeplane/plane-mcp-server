@@ -25,14 +25,14 @@ from plane_mcp.toolkit import (
     page_params,
 )
 
-NAME = "work_item_type"
+NAME = "workitem_type"
 TITLE = "Work item types"
 
 ACTIONS = (
     Action(
         "list", (), ("project_id", "cursor", "per_page"), note="workspace scope when project_id is omitted", read=True
     ),
-    Action("retrieve", ("work_item_type_id",), ("project_id",), read=True),
+    Action("retrieve", ("workitem_type_id",), ("project_id",), read=True),
     Action(
         "resolve",
         ("project_id", "name"),
@@ -45,17 +45,17 @@ ACTIONS = (
     ),
     Action(
         "update",
-        ("work_item_type_id",),
+        ("workitem_type_id",),
         ("project_id", "name", "description", "project_ids", "is_active", "external_source", "external_id"),
         note="only the fields you pass are changed",
     ),
-    Action("delete", ("work_item_type_id",), ("project_id",), destructive=True),
-    Action("import_to_project", ("project_id", "work_item_type_ids"), note="links workspace types to a project"),
+    Action("delete", ("workitem_type_id",), ("project_id",), destructive=True),
+    Action("import_to_project", ("project_id", "workitem_type_ids"), note="links workspace types to a project"),
 )
 
 FOOTER = (
-    "Omit project_id to work at workspace scope. A type's id is the type_id for `work_item create` "
-    "and the work_item_type_id for `work_item_property list`. "
+    "Omit project_id to work at workspace scope. A type's id is the type_id for `workitem create` "
+    "and the workitem_type_id for `workitem_property list`. "
     "Prefer resolve over create when you just need a usable type such as Epic or Initiative: it "
     "handles both modes, matches exactly (case-sensitive, whitespace-stripped) and never "
     "duplicates. Where the workspace owns the vocabulary, creating a type on a project is "
@@ -74,7 +74,11 @@ LEGACY = {
 
 
 def _scope_of(client: Any, project_id: str) -> tuple[Any, dict[str, Any], str]:
-    """The namespace, scope kwargs and id keyword that project_id selects."""
+    """The namespace, scope kwargs and id keyword that project_id selects.
+
+    The id keyword is the SDK's spelling, not this surface's: the tool takes
+    `workitem_type_id`, the project endpoint still calls it `work_item_type_id`.
+    """
     if project_id:
         return client.work_item_types, {"project_id": project_id}, "work_item_type_id"
     return client.workspace_work_item_types, {}, "type_id"
@@ -89,7 +93,7 @@ def _resolve(client, workspace_slug: str, project_id: str, name: str) -> WorkIte
     target = name.strip()
     features = client.workspaces.get_features(workspace_slug=workspace_slug)
 
-    if features.model_dump().get("work_item_types"):
+    if features.model_dump().get("workitem_types"):
         # Workspace owns the vocabulary: find in project, else find or create at
         # workspace scope and import.
         in_project = _named(client.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id), target)
@@ -107,7 +111,7 @@ def _resolve(client, workspace_slug: str, project_id: str, name: str) -> WorkIte
 
     # Types are per-project: turn the feature on if needed, then find or create.
     project_features = client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
-    if not project_features.model_dump().get("work_item_types"):
+    if not project_features.model_dump().get("workitem_types"):
         client.projects.update_features(
             workspace_slug=workspace_slug, project_id=project_id, data=ProjectFeature(work_item_types=True)
         )
@@ -125,11 +129,11 @@ def register(mcp: FastMCP) -> None:
         description=build_description("Work item types, at project or workspace scope.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
-    def work_item_type(
+    def workitem_type(
         action: Literal["list", "retrieve", "resolve", "create", "update", "delete", "import_to_project"],
         project_id: str = "",
-        work_item_type_id: str = "",
-        work_item_type_ids: str = "",
+        workitem_type_id: str = "",
+        workitem_type_ids: str = "",
         name: str = "",
         description: str = "",
         project_ids: str = "",
@@ -153,8 +157,8 @@ def register(mcp: FastMCP) -> None:
             return _resolve(client, workspace_slug, project_id, name)
 
         if action == "import_to_project":
-            ids = coerce_list(work_item_type_ids)
-            if error := needs(action, project_id=project_id, work_item_type_ids=work_item_type_ids):
+            ids = coerce_list(workitem_type_ids)
+            if error := needs(action, project_id=project_id, workitem_type_ids=workitem_type_ids):
                 return error
             client.work_item_types.import_to_project(
                 workspace_slug=workspace_slug, project_id=project_id, work_item_type_ids=ids
@@ -177,10 +181,10 @@ def register(mcp: FastMCP) -> None:
                 ),
             )
 
-        if not work_item_type_id:
-            return missing(action, "work_item_type_id")
+        if not workitem_type_id:
+            return missing(action, "workitem_type_id")
 
-        target = {**scope, id_kwarg: work_item_type_id}
+        target = {**scope, id_kwarg: workitem_type_id}
 
         if action == "retrieve":
             return types.retrieve(workspace_slug=workspace_slug, **target)

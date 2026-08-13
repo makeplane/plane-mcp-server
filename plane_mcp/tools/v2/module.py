@@ -25,7 +25,7 @@ from plane_mcp.toolkit import (
     missing,
     one_of,
     opt,
-    work_item_page,
+    workitem_page,
 )
 
 NAME = "module"
@@ -59,16 +59,16 @@ ACTIONS = (
     ),
     Action("delete", ("project_id", "module_id"), destructive=True),
     Action(
-        "list_work_items",
+        "list_workitems",
         ("project_id", "module_id"),
         ("pql", "order_by", "cursor", "per_page", "expand", "fields"),
         read=True,
     ),
     Action(
-        "manage_work_items",
+        "manage_workitems",
         ("project_id", "module_id"),
         ("add_ids", "remove_ids"),
-        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_work_items",
+        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_workitems",
     ),
     Action("archive", ("project_id", "module_id")),
     Action("unarchive", ("project_id", "module_id")),
@@ -85,8 +85,8 @@ LEGACY = {
     "create_module": "create",
     "update_module": "update",
     "delete_module": "delete",
-    "list_module_work_items": "list_work_items",
-    "manage_module_work_items": "manage_work_items",
+    "list_module_work_items": "list_workitems",
+    "manage_module_work_items": "manage_workitems",
 }
 
 LEGACY_UNMAPPED = {
@@ -107,8 +107,8 @@ def register(mcp: FastMCP) -> None:
             "create",
             "update",
             "delete",
-            "list_work_items",
-            "manage_work_items",
+            "list_workitems",
+            "manage_workitems",
             "archive",
             "unarchive",
         ],
@@ -198,8 +198,8 @@ def register(mcp: FastMCP) -> None:
             client.modules.delete(workspace_slug=workspace_slug, project_id=project_id, module_id=module_id)
             return None
 
-        if action == "list_work_items":
-            return work_item_page(
+        if action == "list_workitems":
+            return workitem_page(
                 NAME,
                 action,
                 client.modules.list_work_items,
@@ -214,7 +214,7 @@ def register(mcp: FastMCP) -> None:
                 module_id=module_id,
             )
 
-        if action == "manage_work_items":
+        if action == "manage_workitems":
             add = coerce_list(add_ids)
             remove = coerce_list(remove_ids)
             if not add and not remove:
@@ -223,12 +223,12 @@ def register(mcp: FastMCP) -> None:
                 client.modules.add_work_items(
                     workspace_slug=workspace_slug, project_id=project_id, module_id=module_id, issue_ids=add
                 )
-            for work_item_id in remove or []:
+            for workitem_id in remove or []:
                 client.modules.remove_work_item(
                     workspace_slug=workspace_slug,
                     project_id=project_id,
                     module_id=module_id,
-                    work_item_id=work_item_id,
+                    work_item_id=workitem_id,
                 )
             return None
 

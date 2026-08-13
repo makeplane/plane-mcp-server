@@ -1,6 +1,6 @@
 """Pagination envelopes and PQL failure handling for Plane list endpoints.
 
-Several resources list work items -- work_item, cycle and module -- and all of
+Several resources list work items -- workitem, cycle and module -- and all of
 them must return the same envelope shape and handle an invalid PQL filter the
 same way. Keeping that here is what makes them consistent.
 
@@ -76,7 +76,7 @@ def envelope(response: Any, fields: str | None = None) -> dict[str, Any]:
     }
 
 
-def work_item_page(
+def workitem_page(
     tool: str,
     action: str,
     method: Any,

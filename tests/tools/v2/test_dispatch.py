@@ -29,27 +29,27 @@ SAMPLES: dict[str, object] = {
     "access": 1,
     "network": 2,
     "timezone": "UTC",
-    "work_item_identifier": "ENG-42",
+    "workitem_identifier": "ENG-42",
 }
 
 # Actions that require *one of* several optional parameters -- a condition the
 # declaration cannot express, so the case is spelled out here.
 CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
-    ("cycle", "manage_work_items"): {"add_ids": "id-1"},
-    ("module", "manage_work_items"): {"add_ids": "id-1"},
-    ("milestone", "manage_work_items"): {"add_ids": "id-1"},
-    ("work_item", "manage_assignee"): {"add_user_id": "id-1"},
-    ("work_item", "manage_label"): {"add_label_id": "id-1"},
-    ("work_item", "count"): {"pql": "state__group = 'started'"},
+    ("cycle", "manage_workitems"): {"add_ids": "id-1"},
+    ("module", "manage_workitems"): {"add_ids": "id-1"},
+    ("milestone", "manage_workitems"): {"add_ids": "id-1"},
+    ("workitem", "manage_assignee"): {"add_user_id": "id-1"},
+    ("workitem", "manage_label"): {"add_label_id": "id-1"},
+    ("workitem", "count"): {"pql": "state__group = 'started'"},
     ("intake", "update"): {"status": 1},
-    ("work_item_relation", "create"): {"relation_type": "blocked_by"},
-    ("work_item_property", "manage_type_properties"): {"attach_ids": "id-1"},
+    ("workitem_relation", "create"): {"relation_type": "blocked_by"},
+    ("workitem_property", "manage_type_properties"): {"attach_ids": "id-1"},
     ("project_estimate", "create_points"): {"points": '[{"value": "1", "key": 0}]'},
     ("customer", "delete"): {"customer_id": "id-1"},
-    ("customer", "manage_work_items"): {"link_ids": "id-1"},
+    ("customer", "manage_workitems"): {"link_ids": "id-1"},
     ("customer_property", "set_values"): {"values": '{"prop-1": ["Enterprise"]}'},
     ("release", "update_changelog"): {"description_html": "<p>notes</p>"},
-    ("release", "manage_work_items"): {"add_ids": "id-1"},
+    ("release", "manage_workitems"): {"add_ids": "id-1"},
     ("release_label", "list"): {},
 }
 
@@ -61,9 +61,9 @@ NO_CALL_EXPECTED: set[tuple[str, str]] = {
 # Actions that need populated remote state or an outbound HTTP fetch to get past
 # their own preconditions. Covered by tests/tools/v2/test_attachments.py.
 NEEDS_FIXTURE: set[tuple[str, str]] = {
-    ("work_item_attachment", "read"),
-    ("work_item_attachment", "download_url"),
-    ("work_item_attachment", "upload_from_url"),
+    ("workitem_attachment", "read"),
+    ("workitem_attachment", "download_url"),
+    ("workitem_attachment", "upload_from_url"),
 }
 
 
@@ -164,13 +164,13 @@ def test_a_zero_that_means_something_reaches_the_sdk(tool_name, args, field, reg
 
 
 MEMBERSHIP_MUTATIONS = {
-    ("cycle", "manage_work_items"),
-    ("customer", "manage_work_items"),
+    ("cycle", "manage_workitems"),
+    ("customer", "manage_workitems"),
     ("initiative", "add_projects"),
     ("initiative", "remove_projects"),
-    ("milestone", "manage_work_items"),
-    ("module", "manage_work_items"),
-    ("release", "manage_work_items"),
+    ("milestone", "manage_workitems"),
+    ("module", "manage_workitems"),
+    ("release", "manage_workitems"),
     ("release_label", "attach"),
     ("release_label", "detach"),
 }

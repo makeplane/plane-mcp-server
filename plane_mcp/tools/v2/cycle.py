@@ -29,7 +29,7 @@ from plane_mcp.toolkit import (
     needs,
     one_of,
     opt,
-    work_item_page,
+    workitem_page,
 )
 
 NAME = "cycle"
@@ -53,18 +53,18 @@ ACTIONS = (
     ),
     Action("delete", ("project_id", "cycle_id"), destructive=True),
     Action(
-        "list_work_items",
+        "list_workitems",
         ("project_id", "cycle_id"),
         ("pql", "order_by", "cursor", "per_page", "expand", "fields"),
         read=True,
     ),
     Action(
-        "manage_work_items",
+        "manage_workitems",
         ("project_id", "cycle_id"),
         ("add_ids", "remove_ids"),
-        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_work_items",
+        note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_workitems",
     ),
-    Action("transfer_work_items", ("project_id", "cycle_id", "new_cycle_id"), note="moves everything to new_cycle_id"),
+    Action("transfer_workitems", ("project_id", "cycle_id", "new_cycle_id"), note="moves everything to new_cycle_id"),
     Action("complete", ("project_id", "cycle_id"), note="sets end_date to today"),
     Action("archive", ("project_id", "cycle_id"), note="ends the cycle first if it is still running"),
     Action("unarchive", ("project_id", "cycle_id")),
@@ -81,9 +81,9 @@ LEGACY = {
     "create_cycle": "create",
     "update_cycle": "update",
     "delete_cycle": "delete",
-    "list_cycle_work_items": "list_work_items",
-    "manage_cycle_work_items": "manage_work_items",
-    "transfer_cycle_work_items": "transfer_work_items",
+    "list_cycle_work_items": "list_workitems",
+    "manage_cycle_work_items": "manage_workitems",
+    "transfer_cycle_work_items": "transfer_workitems",
     "complete_cycle": "complete",
 }
 
@@ -105,9 +105,9 @@ def register(mcp: FastMCP) -> None:
             "create",
             "update",
             "delete",
-            "list_work_items",
-            "manage_work_items",
-            "transfer_work_items",
+            "list_workitems",
+            "manage_workitems",
+            "transfer_workitems",
             "complete",
             "archive",
             "unarchive",
@@ -206,8 +206,8 @@ def register(mcp: FastMCP) -> None:
             client.cycles.delete(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
             return None
 
-        if action == "list_work_items":
-            return work_item_page(
+        if action == "list_workitems":
+            return workitem_page(
                 NAME,
                 action,
                 client.cycles.list_work_items,
@@ -222,7 +222,7 @@ def register(mcp: FastMCP) -> None:
                 cycle_id=cycle_id,
             )
 
-        if action == "manage_work_items":
+        if action == "manage_workitems":
             add = coerce_list(add_ids)
             remove = coerce_list(remove_ids)
             if not add and not remove:
@@ -231,16 +231,16 @@ def register(mcp: FastMCP) -> None:
                 client.cycles.add_work_items(
                     workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id, issue_ids=add
                 )
-            for work_item_id in remove or []:
+            for workitem_id in remove or []:
                 client.cycles.remove_work_item(
                     workspace_slug=workspace_slug,
                     project_id=project_id,
                     cycle_id=cycle_id,
-                    work_item_id=work_item_id,
+                    work_item_id=workitem_id,
                 )
             return None
 
-        if action == "transfer_work_items":
+        if action == "transfer_workitems":
             if not new_cycle_id:
                 return missing(action, "new_cycle_id")
             client.cycles.transfer_work_items(

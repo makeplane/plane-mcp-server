@@ -158,8 +158,8 @@ export LOG_USER_INFO="true"
 The server advertises **28 tools**, one per Plane resource, each taking an `action` parameter that selects the operation:
 
 ```
-work_item(action="create", project_id=..., name="Fix login")
-work_item(action="list", project_id=..., pql='state__group = "started"')
+workitem(action="create", project_id=..., name="Fix login")
+workitem(action="list", project_id=..., pql='state__group = "started"')
 cycle(action="archive", project_id=..., cycle_id=...)
 ```
 

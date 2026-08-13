@@ -10,15 +10,15 @@ from plane.models.work_items import CreateWorkItemLink, UpdateWorkItemLink, Work
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, page_params
 
-NAME = "work_item_link"
+NAME = "workitem_link"
 TITLE = "Work item links"
 
 ACTIONS = (
-    Action("list", ("project_id", "work_item_id"), ("cursor", "per_page"), read=True),
-    Action("retrieve", ("project_id", "work_item_id", "link_id"), read=True),
-    Action("create", ("project_id", "work_item_id", "url")),
-    Action("update", ("project_id", "work_item_id", "link_id", "url")),
-    Action("delete", ("project_id", "work_item_id", "link_id"), destructive=True),
+    Action("list", ("project_id", "workitem_id"), ("cursor", "per_page"), read=True),
+    Action("retrieve", ("project_id", "workitem_id", "link_id"), read=True),
+    Action("create", ("project_id", "workitem_id", "url")),
+    Action("update", ("project_id", "workitem_id", "link_id", "url")),
+    Action("delete", ("project_id", "workitem_id", "link_id"), destructive=True),
 )
 
 LEGACY = {
@@ -36,10 +36,10 @@ def register(mcp: FastMCP) -> None:
         description=build_description("External links attached to a work item.", ACTIONS),
         annotations=build_annotations(TITLE, ACTIONS),
     )
-    def work_item_link(
+    def workitem_link(
         action: Literal["list", "retrieve", "create", "update", "delete"],
         project_id: str = "",
-        work_item_id: str = "",
+        workitem_id: str = "",
         link_id: str = "",
         url: str = "",
         cursor: str = "",
@@ -47,14 +47,14 @@ def register(mcp: FastMCP) -> None:
     ) -> WorkItemLink | list[WorkItemLink] | str | None:
         client, workspace_slug = get_plane_client_context()
 
-        if error := needs(action, project_id=project_id, work_item_id=work_item_id):
+        if error := needs(action, project_id=project_id, workitem_id=workitem_id):
             return error
 
         if action == "list":
             return client.work_items.links.list(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 params=page_params(cursor, per_page),
             )
 
@@ -64,7 +64,7 @@ def register(mcp: FastMCP) -> None:
             return client.work_items.links.create(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 data=CreateWorkItemLink(url=url),
             )
 
@@ -75,7 +75,7 @@ def register(mcp: FastMCP) -> None:
             return client.work_items.links.retrieve(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 link_id=link_id,
             )
 
@@ -85,7 +85,7 @@ def register(mcp: FastMCP) -> None:
             return client.work_items.links.update(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
+                work_item_id=workitem_id,
                 link_id=link_id,
                 data=UpdateWorkItemLink(url=url),
             )
@@ -93,7 +93,7 @@ def register(mcp: FastMCP) -> None:
         client.work_items.links.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
-            work_item_id=work_item_id,
+            work_item_id=workitem_id,
             link_id=link_id,
         )
         return None
