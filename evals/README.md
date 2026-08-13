@@ -144,6 +144,14 @@ denominators, as are rows with recorded errors. Result-token columns use `~` for
 `*` for mixed measured/estimated values, and `?` for legacy values whose provenance was not
 recorded.
 
+With `--reps N`, each `(task, rep)` is independently seeded, run, verified, and torn down.
+Multi-rep reports show each task's pass count, Wilson interval, and whether its pass/fail
+answer changed across completed repetitions. The measured noise-floor line converts those
+flips into task-count units: if `U` tasks were unstable, surface differences of `U` tasks or
+fewer should be treated as within observed run-to-run variance, making `U + 1` the minimum
+meaningful difference from that sample. This is an empirical guardrail, not proof that larger
+differences are statistically significant.
+
 Every result row carries a `battery` fingerprint derived from the selected catalog's prompts
 and tool metadata. Compare rows only when their fingerprints match: a table that mixes
 fingerprints is comparing different questions, even when task IDs are the same. In particular,

@@ -188,10 +188,77 @@ def test_summarize_aggregate_wilson_and_call_variance():
     assert s["R1"]["calls_min"] == 2.0
     assert s["R1"]["calls_max"] == 6.0
     assert s["R1"]["med_calls"] == 4.0
+    assert s["R1"]["unstable"] is True
+    assert s["R2"]["unstable"] is False
     meta = s["_meta"]
     assert meta["aggregate_k"] == 3
     assert meta["aggregate_n"] == 4
+    assert meta["multi_rep"] is True
+    assert meta["unstable_task_ids"] == ["R1"]
+    assert meta["unstable_tasks"] == 1
     assert 0.0 <= meta["aggregate_wilson_lo"] <= meta["aggregate_wilson_hi"] <= 1.0
+
+
+def test_multi_rep_synthetic_file_reports_wilson_unstable_and_noise_floor(tmp_path: Path, capsys):
+    path = tmp_path / "multi.jsonl"
+    outcomes = {
+        "R1": [True, True, True],
+        "R2": [True, False, True],
+        "R3": [False, False, False],
+    }
+    rows = [
+        {
+            "task_id": task_id,
+            "rep": rep,
+            "surface": "full",
+            "success": success,
+            "num_calls": rep + 1,
+            "calls": [],
+        }
+        for task_id, task_outcomes in outcomes.items()
+        for rep, success in enumerate(task_outcomes)
+    ]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    loaded = load_rows(path)
+    summary = summarize(loaded)
+
+    assert len(loaded) == 9  # distinct rep keys are not deduped away
+    assert summary["R1"]["success"] == "3/3"
+    assert summary["R1"]["unstable"] is False
+    assert summary["R2"]["success"] == "2/3"
+    assert summary["R2"]["wilson_lo"] == pytest.approx(0.2077, abs=1e-4)
+    assert summary["R2"]["wilson_hi"] == pytest.approx(0.9385, abs=1e-4)
+    assert summary["R2"]["unstable"] is True
+    assert summary["R3"]["success"] == "0/3"
+    assert summary["R3"]["unstable"] is False
+    assert summary["_meta"]["unstable_task_ids"] == ["R2"]
+
+    report_mod.print_table(summary, "Summary: multi.jsonl")
+    output = capsys.readouterr().out
+    assert "unstable" in output
+    r2_line = next(line for line in output.splitlines() if line.startswith("R2"))
+    assert "2/3" in r2_line
+    assert "[0.21,0.94]" in r2_line
+    assert "YES" in r2_line
+    assert "measured noise floor: 1 task flipped at least once" in output
+    assert "minimum meaningful difference: 2 tasks" in output
+
+
+def test_single_rep_summary_rendering_is_unchanged(capsys):
+    rows = [{"task_id": "R1", "rep": 0, "surface": "full", "success": True, "num_calls": 2, "calls": []}]
+
+    report_mod.print_table(summarize(rows), "Summary: sample.jsonl")
+
+    assert capsys.readouterr().out == (
+        "Summary: sample.jsonl\n"
+        "aggregate success: 1/1 (100.0%) Wilson95 [0.21,1.00]\n"
+        "task     n  success         wilson95 med_calls  opt         IQR  mispick  err capped h_err i_err  "
+        "med_rtok  p95_rtok med_cum_in\n"
+        "-------------------------------------------------------------------------------------------------------------------------------\n"
+        "R1       1      1/1      [0.21,1.00]       2.0    1     2.0-2.0    0.0%    0      0     0     0         "
+        "-         -          0\n"
+    )
 
 
 def test_report_marks_entirely_estimated_result_token_columns(capsys):
@@ -272,6 +339,26 @@ def test_ab_compare_paired_deltas_and_sign_test():
     assert cmp["success_b"]["k"] == 3 and cmp["success_b"]["n"] == 3
 
 
+def test_ab_compare_multi_rep_uses_median_successful_call_counts():
+    rows_a = [
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 1, "calls": []},
+        {"task_id": "R1", "rep": 1, "success": False, "num_calls": 9, "calls": []},
+        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 5, "calls": []},
+    ]
+    rows_b = [
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": []},
+        {"task_id": "R1", "rep": 1, "success": True, "num_calls": 4, "calls": []},
+        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 6, "calls": []},
+    ]
+
+    cmp = ab_compare(rows_a, rows_b)
+
+    assert cmp["multi_rep"] is True
+    assert cmp["unstable_a"] == 1
+    assert cmp["unstable_b"] == 0
+    assert cmp["paired_tasks"] == [{"task_id": "R1", "calls_a": 3.0, "calls_b": 4.0, "delta": 1.0}]
+
+
 # ---------------------------------------------------------------------------
 # Multi-surface table
 # ---------------------------------------------------------------------------
@@ -280,6 +367,7 @@ def test_ab_compare_paired_deltas_and_sign_test():
 def _synth_row(
     tid: str,
     *,
+    rep: int = 0,
     success: bool = True,
     num_calls: int = 2,
     alt: int | None = 0,
@@ -292,7 +380,7 @@ def _synth_row(
 ) -> dict[str, Any]:
     return {
         "task_id": tid,
-        "rep": 0,
+        "rep": rep,
         "surface": surface,
         "success": success,
         "num_calls": num_calls,
@@ -357,6 +445,43 @@ def test_multi_surface_table_snapshot_with_external():
     assert table["footer"]["akhil"]["mispicks"] is None
     assert table["footer"]["full"]["mispicks"] == 1
     assert table["footer"]["akhil"]["infra_errors"] == 1
+
+
+def test_multi_surface_table_aggregates_reps_and_flags_unstable():
+    rows = [
+        _synth_row("R1", rep=0, success=True, num_calls=2, surface="full"),
+        _synth_row("R1", rep=1, success=True, num_calls=3, surface="full"),
+        _synth_row("R1", rep=2, success=True, num_calls=2, surface="full"),
+        _synth_row("R2", rep=0, success=True, num_calls=1, surface="full"),
+        _synth_row("R2", rep=1, success=False, num_calls=4, surface="full"),
+        _synth_row("R2", rep=2, success=True, num_calls=2, surface="full"),
+    ]
+
+    table = build_multi_surface_table([("full", rows)])
+
+    assert table["multi_rep"] is True
+    assert table["cells"]["R1"]["full"] == "✅ 3/3 [0.44,1.00] 2-3c"
+    assert table["cells"]["R2"]["full"] == "⚠ UNSTABLE 2/3 [0.21,0.94] 1-4c"
+    assert table["footer"]["full"]["success"] == 5
+    assert table["footer"]["full"]["n"] == 6
+    assert table["footer"]["full"]["unstable_tasks"] == 1
+    rendered = render_multi_surface_table(table)
+    assert "measured noise floor: 1 task flipped at least once" in rendered
+    assert "minimum meaningful difference: 2 tasks" in rendered
+
+
+def test_single_rep_multi_surface_rendering_is_unchanged():
+    rows = [_synth_row("R1", surface="full", success=True, num_calls=2)]
+
+    rendered = render_multi_surface_table(build_multi_surface_table([("full", rows)]))
+
+    assert rendered == (
+        "task  what                               full          \n"
+        "-------------------------------------------------------\n"
+        "R1    In project P, what is the curren…  ✅ 2c\n"
+        "-------------------------------------------------------\n"
+        "full         success 1/1 (100%)  total calls 2  mispicks 0  infra 0\n"
+    )
 
 
 def test_report_main_table_cli(tmp_path: Path, capsys):

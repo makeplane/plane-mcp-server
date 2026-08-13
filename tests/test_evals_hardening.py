@@ -18,7 +18,7 @@ from evals import runner as runner_mod
 from evals import seed as seed_mod
 from evals.drivers import AgentRun, ClaudeCliDriver, parse_claude_json_result
 from evals.report import is_infra_error_row, load_rows, summarize
-from evals.results import RESULT_SCHEMA_VERSION
+from evals.results import RESULT_SCHEMA_VERSION, TaskResult
 from evals.run import (
     is_infra_cli_stop_reason,
     load_resume_skip_keys,
@@ -198,6 +198,11 @@ def test_parse_args_resume_and_canary():
     assert a.resume == "evals/results/x.jsonl"
     b = run_mod.parse_args(["--canary", "--tasks", "R1"])
     assert b.canary is True
+
+
+def test_live_run_rejects_non_positive_reps(capsys):
+    assert run_mod.main(["--tasks", "R1", "--reps", "0"]) == 2
+    assert "--reps must be at least 1" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -905,6 +910,62 @@ def test_canary_exits_1_when_all_tasks_skipped(monkeypatch):
 # ---------------------------------------------------------------------------
 # End-to-end resume
 # ---------------------------------------------------------------------------
+
+
+def test_run_live_multi_rep_uses_fresh_seed_and_teardown_per_rep(tmp_path: Path, monkeypatch):
+    out = tmp_path / "multi.jsonl"
+    fake_plane = MagicMock()
+    monkeypatch.setattr(runner_mod, "make_plane_client", lambda: (fake_plane, "test-ws"))
+    seed_ids: list[str] = []
+    teardown_projects: list[str] = []
+
+    def fresh_seed(plane, run_id, needs, ctx):
+        seed_ids.append(run_id)
+        ctx.update({"project_name": f"EVAL {run_id[:8]}", "project_id": run_id})
+
+    def record_teardown(plane, ctx):
+        teardown_projects.append(ctx["project_id"])
+
+    async def fake_agent(**kwargs):
+        return TaskResult(final_text="done", stop_reason="end_turn")
+
+    monkeypatch.setattr(runner_mod, "seed", fresh_seed)
+    monkeypatch.setattr(runner_mod, "teardown", record_teardown)
+    monkeypatch.setattr(runner_mod, "get_driver", lambda name, **kwargs: object())
+    monkeypatch.setattr(runner_mod, "run_agent_task_via_driver", fake_agent)
+
+    async def verify_ok(plane, ctx, run):
+        return True, "ok"
+
+    task = {
+        "id": "R1",
+        "prompt": "do {project}",
+        "tags": set(),
+        "optimal_tools": {"list_work_items"},
+        "alternate_tools": set(),
+        "optimal_calls": 1,
+        "needs": set(),
+        "verify": verify_ok,
+    }
+
+    rc = asyncio.run(
+        run_live(
+            [task],
+            model_alias="sonnet",
+            reps=3,
+            surface="full",
+            out_path=out,
+            driver_name="claude-cli",
+        )
+    )
+
+    assert rc == 0
+    assert len(seed_ids) == 3
+    assert len(set(seed_ids)) == 3
+    assert teardown_projects == seed_ids
+    rows = _data_rows(out)
+    assert [row["rep"] for row in rows] == [0, 1, 2]
+    assert all(row["success"] is True for row in rows)
 
 
 def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypatch):

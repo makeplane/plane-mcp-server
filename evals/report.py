@@ -202,12 +202,14 @@ def summarize(rows: list[ResultRow]) -> dict[str, dict[str, Any]]:
     by_task: dict[str, list[TaskResult]] = defaultdict(list)
     harness_err_by_task: dict[str, int] = defaultdict(int)
     infra_err_by_task: dict[str, int] = defaultdict(int)
+    reps_by_task: dict[str, set[int]] = defaultdict(set)
     infra_errors = 0
     for raw_row in rows:
         r = _task_result(raw_row)
         if is_meta_row(r):
             continue
         tid = r.task_id
+        reps_by_task[tid].add(r.rep)
         if is_infra_error_row(r):
             infra_errors += 1
             infra_err_by_task[tid] += 1
@@ -229,6 +231,7 @@ def summarize(rows: list[ResultRow]) -> dict[str, dict[str, Any]]:
         trs = by_task.get(task_id, [])
         n = len(trs)
         k = sum(1 for r in trs if r.success)
+        unstable = n > 1 and 0 < k < n
         total_k += k
         total_n += n
         lo, hi = wilson_interval(k, n) if n else (0.0, 0.0)
@@ -256,6 +259,7 @@ def summarize(rows: list[ResultRow]) -> dict[str, dict[str, Any]]:
             "n": n,
             "k": k,
             "success": f"{k}/{n}" if n else "0/0",
+            "unstable": unstable,
             "wilson_lo": lo,
             "wilson_hi": hi,
             "med_calls": med_calls,
@@ -275,12 +279,16 @@ def summarize(rows: list[ResultRow]) -> dict[str, dict[str, Any]]:
             "med_cum_input": _median(cum_inputs),
         }
     agg_lo, agg_hi = wilson_interval(total_k, total_n) if total_n else (0.0, 0.0)
+    unstable_task_ids = sorted(task_id for task_id, values in out.items() if values.get("unstable"))
     out["_meta"] = {
         "infra_errors": infra_errors,
         "aggregate_k": total_k,
         "aggregate_n": total_n,
         "aggregate_wilson_lo": agg_lo,
         "aggregate_wilson_hi": agg_hi,
+        "multi_rep": any(len(reps) > 1 for reps in reps_by_task.values()),
+        "unstable_task_ids": unstable_task_ids,
+        "unstable_tasks": len(unstable_task_ids),
         "result_tokens_mode": result_tokens_mode([r for trs in by_task.values() for r in trs]),
     }
     return out
@@ -303,6 +311,25 @@ def _fmt_result_tokens(x: float | None, mode: str) -> str:
     return f"{_result_tokens_marker(mode)}{value}"
 
 
+def noise_floor_statement(unstable_tasks: int) -> str:
+    """Describe observed pass/fail variance in task-count comparison units."""
+    count = max(0, int(unstable_tasks))
+    if count == 0:
+        return (
+            "measured noise floor: 0 tasks flipped at least once; no non-zero "
+            "run-to-run variance was observed (minimum meaningful difference "
+            "from observed flips: 1 task)"
+        )
+    noun = "task" if count == 1 else "tasks"
+    threshold = count + 1
+    threshold_noun = "task" if threshold == 1 else "tasks"
+    return (
+        f"measured noise floor: {count} {noun} flipped at least once; surface "
+        f"differences of {count} {noun} or fewer are within observed run-to-run "
+        f"variance (minimum meaningful difference: {threshold} {threshold_noun})"
+    )
+
+
 def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
     meta = summary.get("_meta") or {}
     print(title)
@@ -322,14 +349,20 @@ def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
         ahi = float(meta.get("aggregate_wilson_hi") or 0.0)
         rate = agg_k / agg_n if agg_n else 0.0
         print(f"aggregate success: {agg_k}/{agg_n} ({rate:.1%}) Wilson95 [{alo:.2f},{ahi:.2f}]")
-    # Show min/med/max call columns when any task has n>1.
-    show_var = any(s.get("n", 0) > 1 for tid, s in summary.items() if tid != "_meta")
+    multi_rep = bool(meta.get("multi_rep"))
+    if multi_rep:
+        print(noise_floor_statement(int(meta.get("unstable_tasks") or 0)))
+    # Multi-rep files keep the repetition-aware layout even when errors leave
+    # only one completed result in every task's success-rate denominator.
+    show_var = multi_rep or any(s.get("n", 0) > 1 for tid, s in summary.items() if tid != "_meta")
     token_marker = _result_tokens_marker(token_mode)
     med_rtok_header = f"med_rtok{token_marker}"
     p95_rtok_header = f"p95_rtok{token_marker}"
     if show_var:
+        unstable_header = f"{'unstable':>8} " if multi_rep else ""
         header = (
             f"{'task':<6} {'n':>3} {'success':>8} {'wilson95':>16} "
+            f"{unstable_header}"
             f"{'calls_min':>9} {'med_calls':>9} {'calls_max':>9} {'opt':>4} "
             f"{'IQR':>11} {'mispick':>8} {'err':>4} "
             f"{'capped':>6} {'h_err':>5} {'i_err':>5} {med_rtok_header:>9} {p95_rtok_header:>9} "
@@ -352,8 +385,11 @@ def print_table(summary: dict[str, dict[str, Any]], title: str) -> None:
         opt = s["optimal_calls"] if s["optimal_calls"] is not None else "-"
         task_token_mode = str(s.get("result_tokens_mode") or "unavailable")
         if show_var:
+            unstable = ("YES" if s.get("unstable") else "no") if multi_rep else ""
+            unstable_cell = f"{unstable:>8} " if multi_rep else ""
             print(
                 f"{task_id:<6} {s['n']:>3} {s['success']:>8} {wilson:>16} "
+                f"{unstable_cell}"
                 f"{_fmt(s.get('calls_min')):>9} {_fmt(s['med_calls']):>9} {_fmt(s.get('calls_max')):>9} "
                 f"{opt!s:>4} {iqr:>11} {s['mispick_rate']:>7.1%} "
                 f"{s['errored_calls']:>4} {s['capped']:>6} {s['harness_err']:>5} "
@@ -385,33 +421,32 @@ def ab_compare(
 ) -> dict[str, Any]:
     """Compare two result sets: paired call-count deltas + success rates.
 
-    Paired call deltas only include tasks that are present and successful in
-    both A and B. When multiple success rows exist for a task, the **last** one
-    wins (matches load-time ``dedupe="latest"`` semantics).
+    Paired call deltas only include tasks with at least one successful repetition
+    in both A and B. Calls are the median across successful repetitions; this is
+    identical to the historical behavior for single-rep files.
     """
     sum_a = summarize(rows_a)
     sum_b = summarize(rows_b)
 
-    def _success_rows_by_task(rows: list[ResultRow]) -> dict[str, TaskResult]:
-        out: dict[str, TaskResult] = {}
+    def _success_calls_by_task(rows: list[ResultRow]) -> dict[str, list[float]]:
+        out: dict[str, list[float]] = defaultdict(list)
         for raw_row in rows:
             r = _task_result(raw_row)
             if is_meta_row(r) or is_infra_error_row(r) or r.error or r.skipped:
                 continue
             if not r.success:
                 continue
-            tid = r.task_id
-            out[tid] = r  # last wins (dedupe already applied)
-        return out
+            out[r.task_id].append(float(r.num_calls))
+        return dict(out)
 
-    sa = _success_rows_by_task(rows_a)
-    sb = _success_rows_by_task(rows_b)
+    sa = _success_calls_by_task(rows_a)
+    sb = _success_calls_by_task(rows_b)
     shared = sorted(set(sa) & set(sb))
     deltas: list[float] = []
     per_task: list[dict[str, Any]] = []
     for tid in shared:
-        ca = float(sa[tid].num_calls)
-        cb = float(sb[tid].num_calls)
+        ca = float(_median(sa[tid]) or 0.0)
+        cb = float(_median(sb[tid]) or 0.0)
         d = cb - ca  # B − A (negative = B fewer calls = better if lower is better)
         deltas.append(d)
         per_task.append({"task_id": tid, "calls_a": ca, "calls_b": cb, "delta": d})
@@ -425,6 +460,9 @@ def ab_compare(
         "median_delta": _median(deltas),
         "sign_test_p": sign_test_pvalue(deltas),
         "n_paired": len(deltas),
+        "multi_rep": bool(meta_a.get("multi_rep") or meta_b.get("multi_rep")),
+        "unstable_a": int(meta_a.get("unstable_tasks") or 0),
+        "unstable_b": int(meta_b.get("unstable_tasks") or 0),
         "success_a": {
             "k": int(meta_a.get("aggregate_k") or 0),
             "n": int(meta_a.get("aggregate_n") or 0),
@@ -456,12 +494,19 @@ def print_ab_report(cmp: dict[str, Any], path_a: Path, path_b: Path) -> None:
     print(f"  median call delta (B−A): {_fmt(cmp['median_delta'])}")
     p = cmp["sign_test_p"]
     print(f"  sign-test p-value (two-sided): {p if p is not None else 'n/a'}")
+    multi_rep = bool(cmp.get("multi_rep"))
+    if multi_rep:
+        print(f"  A {noise_floor_statement(int(cmp.get('unstable_a') or 0))}")
+        print(f"  B {noise_floor_statement(int(cmp.get('unstable_b') or 0))}")
     if cmp["paired_tasks"]:
         print()
         print(f"{'task':<6} {'calls_A':>8} {'calls_B':>8} {'delta':>8}")
         print("-" * 34)
         for row in cmp["paired_tasks"]:
-            print(f"{row['task_id']:<6} {row['calls_a']:>8.0f} {row['calls_b']:>8.0f} {row['delta']:>+8.0f}")
+            if multi_rep:
+                print(f"{row['task_id']:<6} {_fmt(row['calls_a']):>8} {_fmt(row['calls_b']):>8} {row['delta']:>+8.1f}")
+            else:
+                print(f"{row['task_id']:<6} {row['calls_a']:>8.0f} {row['calls_b']:>8.0f} {row['delta']:>+8.0f}")
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +543,30 @@ def format_surface_cell(row: ResultRow | None) -> str:
     return f"{ok} {n_calls_s}c"
 
 
+def format_multi_rep_surface_cell(rows: list[ResultRow]) -> str:
+    """Aggregate distinct repetitions into one task/surface cell."""
+    results = [_task_result(row) for row in rows]
+    completed = [row for row in results if not is_infra_error_row(row) and not row.error and not row.skipped]
+    if completed:
+        n = len(completed)
+        k = sum(1 for row in completed if row.success)
+        lo, hi = wilson_interval(k, n)
+        if 0 < k < n:
+            marker = "⚠ UNSTABLE"
+        elif k == n:
+            marker = "✅"
+        else:
+            marker = "❌"
+        calls = [row.num_calls for row in completed]
+        call_span = f"{min(calls)}c" if min(calls) == max(calls) else f"{min(calls)}-{max(calls)}c"
+        return f"{marker} {k}/{n} [{lo:.2f},{hi:.2f}] {call_span}"
+    if any(row.error or is_infra_error_row(row) for row in results):
+        return "ERR"
+    if any(row.skipped for row in results):
+        return "skip"
+    return "—"
+
+
 def build_multi_surface_table(
     file_rows: list[tuple[str, list[ResultRow]]],
 ) -> dict[str, Any]:
@@ -505,31 +574,39 @@ def build_multi_surface_table(
 
     ``file_rows`` is a list of ``(column_label, rows)``. Column labels default
     to each file's dominant ``surface`` field when the caller passes that label.
-    For each column, the latest row per task_id is used (rep-agnostic: last wins).
+    Rows are grouped by task and repetition. Single-rep columns retain the
+    historical one-cell rendering; multi-rep columns aggregate all repetitions.
     """
     columns: list[str] = []
-    by_col: dict[str, dict[str, TaskResult]] = {}
+    by_col: dict[str, dict[str, list[TaskResult]]] = {}
+    multi_rep_by_col: dict[str, bool] = {}
     for label, rows in file_rows:
         columns.append(label)
-        col_map: dict[str, TaskResult] = {}
+        col_map: dict[str, list[TaskResult]] = defaultdict(list)
         for raw_row in rows:
             if is_meta_row(raw_row):
                 continue
             r = _task_result(raw_row)
             tid = r.task_id
-            col_map[tid] = r  # last wins
-        by_col[label] = col_map
+            col_map[tid].append(r)
+        by_col[label] = dict(col_map)
+        multi_rep_by_col[label] = any(len({row.rep for row in task_rows}) > 1 for task_rows in col_map.values())
+
+    multi_rep = any(multi_rep_by_col.values())
 
     all_tasks = sorted({t for m in by_col.values() for t in m}, key=_task_sort_key)
     cells: dict[str, dict[str, str]] = {}
-    raw: dict[str, dict[str, TaskResult | None]] = {}
+    raw: dict[str, dict[str, list[TaskResult]]] = {}
     for tid in all_tasks:
         cells[tid] = {}
         raw[tid] = {}
         for col in columns:
-            r = by_col[col].get(tid)
-            raw[tid][col] = r
-            cells[tid][col] = format_surface_cell(r)
+            task_rows = by_col[col].get(tid, [])
+            raw[tid][col] = task_rows
+            if multi_rep:
+                cells[tid][col] = format_multi_rep_surface_cell(task_rows)
+            else:
+                cells[tid][col] = format_surface_cell(task_rows[-1] if task_rows else None)
 
     # Aggregate footer per column.
     footer: dict[str, dict[str, Any]] = {}
@@ -537,34 +614,51 @@ def build_multi_surface_table(
         succ = run = calls = mispicks = 0
         mispick_comparable = True
         infra = 0
-        for _tid, r in by_col[col].items():
-            if is_infra_error_row(r):
-                infra += 1
-                continue
-            if r.error:
-                continue
-            if r.skipped:
-                continue
-            run += 1
-            if r.success:
-                succ += 1
-            calls += r.num_calls
-            if r.classification == "external":
-                mispick_comparable = False
-            else:
-                alt, oos = r.alternate_calls, r.out_of_set_calls
-                if alt is None and oos is None:
+        unstable_tasks = 0
+        for _tid, task_rows in by_col[col].items():
+            completed: list[TaskResult] = []
+            for r in task_rows:
+                if is_infra_error_row(r):
+                    infra += 1
+                    continue
+                if r.error:
+                    continue
+                if r.skipped:
+                    continue
+                completed.append(r)
+                run += 1
+                if r.success:
+                    succ += 1
+                calls += r.num_calls
+                if r.classification == "external":
                     mispick_comparable = False
                 else:
-                    mispicks += int(alt or 0) + int(oos or 0)
+                    alt, oos = r.alternate_calls, r.out_of_set_calls
+                    if alt is None and oos is None:
+                        mispick_comparable = False
+                    else:
+                        mispicks += int(alt or 0) + int(oos or 0)
+            task_k = sum(1 for r in completed if r.success)
+            if len(completed) > 1 and 0 < task_k < len(completed):
+                unstable_tasks += 1
         footer[col] = {
             "success": succ,
             "n": run,
             "calls": calls,
             "mispicks": mispicks if mispick_comparable else None,
             "infra_errors": infra,
+            "multi_rep": multi_rep_by_col[col],
+            "unstable_tasks": unstable_tasks,
         }
-    return {"columns": columns, "task_ids": all_tasks, "cells": cells, "raw": raw, "footer": footer}
+    return {
+        "columns": columns,
+        "task_ids": all_tasks,
+        "cells": cells,
+        "raw": raw,
+        "footer": footer,
+        "multi_rep": multi_rep,
+        "multi_rep_by_col": multi_rep_by_col,
+    }
 
 
 def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False) -> str:
@@ -573,6 +667,7 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
     task_ids: list[str] = table["task_ids"]
     cells: dict[str, dict[str, str]] = table["cells"]
     footer: dict[str, dict[str, Any]] = table["footer"]
+    multi_rep = bool(table.get("multi_rep"))
     lines: list[str] = []
 
     def _prompt_snip(tid: str) -> str:
@@ -595,9 +690,19 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
             mp = f", {f['mispicks']}mp" if f["mispicks"] is not None else ""
             foot_parts.append(f"{rate} ({f['calls']}c{mp}, i={f['infra_errors']})")
         lines.append("| **agg** | | " + " | ".join(foot_parts) + " |")
+        if multi_rep:
+            noise_parts = [
+                noise_floor_statement(int(footer[c].get("unstable_tasks") or 0))
+                if footer[c].get("multi_rep")
+                else "single repetition"
+                for c in cols
+            ]
+            lines.append("| **noise floor** | | " + " | ".join(noise_parts) + " |")
         return "\n".join(lines) + "\n"
 
     col_w = max(14, max((len(c) for c in cols), default=14))
+    if multi_rep:
+        col_w = max(col_w, max((len(value) for task in cells.values() for value in task.values()), default=14))
     head = f"{'task':5} {'what':34} " + " ".join(f"{c:{col_w}}" for c in cols)
     lines.append(head)
     lines.append("-" * len(head))
@@ -613,6 +718,10 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
         pct = f" ({100 * f['success'] / f['n']:.0f}%)" if f["n"] else ""
         mp = f"  mispicks {f['mispicks']}" if f["mispicks"] is not None else "  mispicks n/a"
         lines.append(f"{c:12} success {rate}{pct}  total calls {f['calls']}{mp}  infra {f['infra_errors']}")
+    if multi_rep:
+        for c in cols:
+            if footer[c].get("multi_rep"):
+                lines.append(f"{c:12} {noise_floor_statement(int(footer[c].get('unstable_tasks') or 0))}")
     return "\n".join(lines) + "\n"
 
 

@@ -233,6 +233,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         return cmd_dry_run(tasks)
 
+    if args.reps < 1:
+        print("error: --reps must be at least 1", file=sys.stderr)
+        return 2
+
     surface = (args.surface or "full").strip().lower()
     server_cmd: list[str] | None = None
     if args.server_cmd:
