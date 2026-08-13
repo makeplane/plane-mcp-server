@@ -157,6 +157,224 @@ def _make_task_row(
     )
 
 
+def _seed_fixtures(
+    plane: Any,
+    task: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    row: TaskResult,
+    repetition: int,
+) -> bool:
+    """Seed one task and record fixture skips or infrastructure failures."""
+    task_needs = set(task.get("needs") or set())
+    # Seed wrap: TaskSkipped → skip; other failures → infra_seed.
+    try:
+        seed(plane, run_id=uuid.uuid4().hex, needs=task_needs, ctx=context)
+    except TaskSkipped as skip:
+        row.skipped = skip.reason
+        row.verify_note = skip.reason
+        print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}")
+        return False
+    except Exception as exc:
+        row.success = False
+        row.error = f"{type(exc).__name__}: {exc}"
+        row.error_class = "infra_seed"
+        row.verify_note = ""
+        print(
+            f"  {task['id']} rep={repetition} ERROR[infra_seed]: {exc}",
+            file=sys.stderr,
+        )
+        if context.get("project_name"):
+            print(
+                f"  orphaned project may remain: {context['project_name']}",
+                file=sys.stderr,
+            )
+        return False
+    if "bug_type" in task_needs and not context.get("bug_type"):
+        reason = context.get("bug_type_skip_reason") or "bug_type unavailable"
+        row.skipped = reason
+        row.verify_note = reason
+        print(f"  {task['id']} rep={repetition} SKIPPED: {reason}")
+        return False
+    return True
+
+
+async def _drive_agent(
+    *,
+    driver: Any,
+    model_id: str | None,
+    task: dict[str, Any],
+    context: dict[str, Any],
+    workspace_slug: str,
+    server_env: dict[str, str] | None,
+    row: TaskResult,
+    repetition: int,
+    is_api_driver: bool,
+) -> TaskResult | None:
+    """Run the agent and classify launch or prompt failures."""
+    # Agent wrap: API failures and CLI failures are infrastructure.
+    # Contained CLI stops (timeout / error subtypes) return AgentRun.
+    try:
+        return await run_agent_task_via_driver(
+            driver=driver,
+            model_id=model_id,
+            task=task,
+            ctx=context,
+            workspace_slug=workspace_slug,
+            optimal_tools=set(task["optimal_tools"]),
+            alternate_tools=set(task["alternate_tools"]),
+            server_env=server_env,
+        )
+    except PromptBindError as exc:
+        # Empty/missing seed IDs in the prompt — not an agent failure.
+        row.success = False
+        row.error = f"{type(exc).__name__}: {exc}"
+        row.error_class = "infra_seed"
+        row.verify_note = ""
+        print(
+            f"  {task['id']} rep={repetition} ERROR[infra_seed]: {exc}",
+            file=sys.stderr,
+        )
+        return None
+    except Exception as exc:
+        if is_api_driver:
+            agent_error_class = "infra_api"
+        else:
+            agent_error_class = "infra_cli"
+        row.success = False
+        row.error = f"{type(exc).__name__}: {exc}"
+        row.error_class = agent_error_class
+        row.verify_note = ""
+        print(
+            f"  {task['id']} rep={repetition} ERROR[{agent_error_class}]: {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+
+def _apply_agent_run(
+    row: TaskResult,
+    agent: TaskResult,
+    *,
+    model_alias: str,
+    requested_tier: str | None,
+    model_id: str | None,
+    external: bool,
+) -> None:
+    """Copy agent metrics and restore the run-level model and server identity."""
+    row.apply_agent_result(agent)
+    # Driver-level requested_model is the resolved ID.
+    # Restore run-level intent and retain both identities.
+    row.requested_model = model_alias
+    row.requested_tier = requested_tier
+    row.resolved_model = model_id
+    if external:
+        # Foreign tool names are not comparable to our catalog.
+        row.alternate_calls = None
+        row.out_of_set_calls = None
+
+
+def _record_cli_infra_stop(
+    row: TaskResult,
+    agent: TaskResult,
+    *,
+    task: dict[str, Any],
+    repetition: int,
+    driver_name: str,
+) -> bool:
+    """Record contained CLI infrastructure stops and block verification."""
+    # CLI infra stops: timeout + error subtypes except error_max_turns.
+    stop_reason = agent.stop_reason
+    if not driver_name.endswith("-cli") or not is_infra_cli_stop_reason(
+        str(stop_reason) if stop_reason is not None else None
+    ):
+        return False
+    row.success = False
+    row.error_class = "infra_cli"
+    if stop_reason == "timeout":
+        row.error = _timeout_error_message(agent)
+    else:
+        notes = [note for note in agent.driver_notes if isinstance(note, str)]
+        detail = "; ".join(notes) if notes else str(stop_reason)
+        row.error = detail
+    row.verify_note = ""
+    print(
+        f"  {task['id']} rep={repetition} ERROR[infra_cli]: {row.error}",
+        file=sys.stderr,
+    )
+    return True
+
+
+async def _verify_task(
+    plane: Any,
+    task: dict[str, Any],
+    context: dict[str, Any],
+    agent: TaskResult,
+    *,
+    row: TaskResult,
+    repetition: int,
+) -> None:
+    """Run one verifier and record task outcomes or verifier failures."""
+    verify = task["verify"]
+    try:
+        agent_row = agent.to_row()
+        ok, note = await verify(
+            plane,
+            context,
+            {
+                "final_text": agent.final_text,
+                "calls": agent_row["calls"],
+            },
+        )
+        row.success = bool(ok)
+        row.verify_note = note
+        print(f"  {task['id']} rep={repetition} success={ok} calls={agent.num_calls} note={note!r}")
+    except TaskSkipped as skip:
+        row.skipped = skip.reason
+        row.verify_note = skip.reason
+        print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}")
+    except Exception as exc:
+        row.success = False
+        row.error = f"{type(exc).__name__}: {exc}"
+        row.error_class = "task"
+        row.verify_note = ""
+        print(
+            f"  {task['id']} rep={repetition} ERROR[task]: {exc}",
+            file=sys.stderr,
+        )
+
+
+def _record_unexpected(
+    row: TaskResult,
+    exc: Exception,
+    *,
+    task: dict[str, Any],
+    repetition: int,
+    context: dict[str, Any],
+) -> None:
+    """Record failures outside the seed, driver, and verifier boundaries."""
+    row.success = False
+    row.error = f"{type(exc).__name__}: {exc}"
+    row.error_class = "task"
+    row.verify_note = ""
+    print(f"  {task['id']} rep={repetition} ERROR[task]: {exc}", file=sys.stderr)
+    if context.get("project_name"):
+        print(
+            f"  orphaned project may remain: {context['project_name']}",
+            file=sys.stderr,
+        )
+
+
+def _remove_fixtures(plane: Any, context: dict[str, Any]) -> None:
+    """Remove task fixtures and retain the historical teardown diagnostics."""
+    try:
+        teardown(plane, context)
+    except Exception as exc:
+        print(f"  teardown error: {exc}", file=sys.stderr)
+        if context.get("project_name"):
+            print(f"  orphaned project: {context['project_name']}", file=sys.stderr)
+
+
 async def _run_task_repetition(
     *,
     plane: Any,
@@ -194,150 +412,40 @@ async def _run_task_repetition(
         server="external" if external else "local",
     )
     try:
-        task_needs = set(task.get("needs") or set())
-        # Seed wrap: TaskSkipped → skip; other failures → infra_seed.
-        try:
-            seed(plane, run_id=uuid.uuid4().hex, needs=task_needs, ctx=context)
-        except TaskSkipped as skip:
-            row.skipped = skip.reason
-            row.verify_note = skip.reason
-            print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}")
-        except Exception as exc:
-            row.success = False
-            row.error = f"{type(exc).__name__}: {exc}"
-            row.error_class = "infra_seed"
-            row.verify_note = ""
-            print(
-                f"  {task['id']} rep={repetition} ERROR[infra_seed]: {exc}",
-                file=sys.stderr,
+        if _seed_fixtures(plane, task, context, row=row, repetition=repetition):
+            agent = await _drive_agent(
+                driver=driver,
+                model_id=model_id,
+                task=task,
+                context=context,
+                workspace_slug=workspace_slug,
+                server_env=server_env,
+                row=row,
+                repetition=repetition,
+                is_api_driver=is_api_driver,
             )
-            if context.get("project_name"):
-                print(
-                    f"  orphaned project may remain: {context['project_name']}",
-                    file=sys.stderr,
+            if agent is not None:
+                _apply_agent_run(
+                    row,
+                    agent,
+                    model_alias=model_alias,
+                    requested_tier=requested_tier,
+                    model_id=model_id,
+                    external=external,
                 )
-        else:
-            if "bug_type" in task_needs and not context.get("bug_type"):
-                reason = context.get("bug_type_skip_reason") or "bug_type unavailable"
-                row.skipped = reason
-                row.verify_note = reason
-                print(f"  {task['id']} rep={repetition} SKIPPED: {reason}")
-            else:
-                agent: TaskResult | None = None
-                # Agent wrap: API failures and CLI failures are infrastructure.
-                # Contained CLI stops (timeout / error subtypes) return AgentRun.
-                try:
-                    agent = await run_agent_task_via_driver(
-                        driver=driver,
-                        model_id=model_id,
-                        task=task,
-                        ctx=context,
-                        workspace_slug=workspace_slug,
-                        optimal_tools=set(task["optimal_tools"]),
-                        alternate_tools=set(task["alternate_tools"]),
-                        server_env=server_env,
-                    )
-                except PromptBindError as exc:
-                    # Empty/missing seed IDs in the prompt — not an agent failure.
-                    row.success = False
-                    row.error = f"{type(exc).__name__}: {exc}"
-                    row.error_class = "infra_seed"
-                    row.verify_note = ""
-                    print(
-                        f"  {task['id']} rep={repetition} ERROR[infra_seed]: {exc}",
-                        file=sys.stderr,
-                    )
-                    agent = None
-                except Exception as exc:
-                    if is_api_driver:
-                        agent_error_class = "infra_api"
-                    else:
-                        agent_error_class = "infra_cli"
-                    row.success = False
-                    row.error = f"{type(exc).__name__}: {exc}"
-                    row.error_class = agent_error_class
-                    row.verify_note = ""
-                    print(
-                        f"  {task['id']} rep={repetition} ERROR[{agent_error_class}]: {exc}",
-                        file=sys.stderr,
-                    )
-                    agent = None
-                if agent is not None:
-                    row.apply_agent_result(agent)
-                    # Driver-level requested_model is the resolved ID.
-                    # Restore run-level intent and retain both identities.
-                    row.requested_model = model_alias
-                    row.requested_tier = requested_tier
-                    row.resolved_model = model_id
-                    if external:
-                        # Foreign tool names are not comparable to our catalog.
-                        row.alternate_calls = None
-                        row.out_of_set_calls = None
-                    # CLI infra stops: timeout + error subtypes except error_max_turns.
-                    stop_reason = agent.stop_reason
-                    if driver_name.endswith("-cli") and is_infra_cli_stop_reason(
-                        str(stop_reason) if stop_reason is not None else None
-                    ):
-                        row.success = False
-                        row.error_class = "infra_cli"
-                        if stop_reason == "timeout":
-                            row.error = _timeout_error_message(agent)
-                        else:
-                            notes = [note for note in agent.driver_notes if isinstance(note, str)]
-                            detail = "; ".join(notes) if notes else str(stop_reason)
-                            row.error = detail
-                        row.verify_note = ""
-                        print(
-                            f"  {task['id']} rep={repetition} ERROR[infra_cli]: {row.error}",
-                            file=sys.stderr,
-                        )
-                    else:
-                        verify = task["verify"]
-                        try:
-                            agent_row = agent.to_row()
-                            ok, note = await verify(
-                                plane,
-                                context,
-                                {
-                                    "final_text": agent.final_text,
-                                    "calls": agent_row["calls"],
-                                },
-                            )
-                            row.success = bool(ok)
-                            row.verify_note = note
-                            print(f"  {task['id']} rep={repetition} success={ok} calls={agent.num_calls} note={note!r}")
-                        except TaskSkipped as skip:
-                            row.skipped = skip.reason
-                            row.verify_note = skip.reason
-                            print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}")
-                        except Exception as exc:
-                            row.success = False
-                            row.error = f"{type(exc).__name__}: {exc}"
-                            row.error_class = "task"
-                            row.verify_note = ""
-                            print(
-                                f"  {task['id']} rep={repetition} ERROR[task]: {exc}",
-                                file=sys.stderr,
-                            )
+                if not _record_cli_infra_stop(
+                    row,
+                    agent,
+                    task=task,
+                    repetition=repetition,
+                    driver_name=driver_name,
+                ):
+                    await _verify_task(plane, task, context, agent, row=row, repetition=repetition)
     except Exception as exc:
         # Anything outside seed/driver/verify wraps.
-        row.success = False
-        row.error = f"{type(exc).__name__}: {exc}"
-        row.error_class = "task"
-        row.verify_note = ""
-        print(f"  {task['id']} rep={repetition} ERROR[task]: {exc}", file=sys.stderr)
-        if context.get("project_name"):
-            print(
-                f"  orphaned project may remain: {context['project_name']}",
-                file=sys.stderr,
-            )
+        _record_unexpected(row, exc, task=task, repetition=repetition, context=context)
     finally:
-        try:
-            teardown(plane, context)
-        except Exception as exc:
-            print(f"  teardown error: {exc}", file=sys.stderr)
-            if context.get("project_name"):
-                print(f"  orphaned project: {context['project_name']}", file=sys.stderr)
+        _remove_fixtures(plane, context)
     return row
 
 

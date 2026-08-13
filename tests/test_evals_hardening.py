@@ -223,10 +223,31 @@ def test_live_run_rejects_non_positive_reps(capsys):
 # ---------------------------------------------------------------------------
 
 
+def _taxonomy_task(
+    task_id: str,
+    verify: Any,
+    *,
+    prompt: str = "do {project}",
+    needs: set[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": task_id,
+        "prompt": prompt,
+        "tags": set(),
+        "optimal_tools": {"list_work_items"},
+        "alternate_tools": {"search_work_items"},
+        "optimal_calls": 1,
+        "needs": set(needs or set()),
+        "verify": verify,
+    }
+
+
 def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
     out = tmp_path / "rows.jsonl"
 
     fake_plane = MagicMock()
+    driver = MagicMock()
+    torn: list[dict[str, Any]] = []
     monkeypatch.setattr(runner_live, "make_plane_client", lambda: (fake_plane, "test-ws"))
 
     def boom_seed(plane, run_id, needs, ctx):
@@ -234,7 +255,8 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
         raise HttpError("identifier already taken", 409)
 
     monkeypatch.setattr(runner_live, "seed", boom_seed)
-    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: None)
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: torn.append(dict(ctx)))
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
 
     task = {
         "id": "T1",
@@ -265,6 +287,7 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
     assert row["schema_version"] == RESULT_SCHEMA_VERSION
     assert row["error_class"] == "infra_seed"
     assert row["success"] is False
+    assert row["verify_note"] == ""
     assert "HttpError" in (row["error"] or "")
     assert "identifier" in (row["error"] or "").lower()
     assert row["battery"]  # fingerprint written
@@ -276,6 +299,121 @@ def test_run_live_seed_failure_is_infra_seed(tmp_path: Path, monkeypatch):
     assert meta["schema_version"] == RESULT_SCHEMA_VERSION
     assert meta["requested_tier"] == "standard"
     assert meta["resolved_model"] == "sonnet"
+    driver.run_task.assert_not_called()
+    assert torn == [{"project_name": "EVAL deadbeef"}]
+
+
+def test_run_live_missing_bug_type_uses_context_skip_reason(tmp_path: Path, monkeypatch):
+    out = tmp_path / "rows.jsonl"
+    driver = MagicMock()
+    torn: list[dict[str, Any]] = []
+
+    def seed_without_bug_type(plane, run_id, needs, ctx):
+        ctx.update(
+            {
+                "project_name": "EVAL no bug type",
+                "project_id": "p1",
+                "bug_type_skip_reason": "plan:work-item-types-disabled",
+            }
+        )
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "test-ws"))
+    monkeypatch.setattr(runner_live, "seed", seed_without_bug_type)
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: torn.append(dict(ctx)))
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
+
+    task = _taxonomy_task(
+        "BUGTYPE",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("verify must not run")),
+        needs={"bug_type"},
+    )
+    rc = asyncio.run(run_live([task], model_alias="standard", reps=1, label="local", out_path=out))
+
+    assert rc == 0
+    row = _data_rows(out)[0]
+    assert row["skipped"] == "plan:work-item-types-disabled"
+    assert row["verify_note"] == "plan:work-item-types-disabled"
+    assert row["error"] is None
+    assert row["error_class"] is None
+    driver.run_task.assert_not_called()
+    assert torn == [
+        {
+            "project_name": "EVAL no bug type",
+            "project_id": "p1",
+            "bug_type_skip_reason": "plan:work-item-types-disabled",
+        }
+    ]
+
+
+def test_run_live_prompt_bind_failure_is_infra_seed(tmp_path: Path, monkeypatch):
+    out = tmp_path / "rows.jsonl"
+    driver = MagicMock()
+    torn: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "test-ws"))
+    monkeypatch.setattr(
+        runner_live,
+        "seed",
+        lambda *a, **k: k["ctx"].update({"project_name": "EVAL prompt", "project_id": "p1"}),
+    )
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: torn.append(dict(ctx)))
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
+
+    task = _taxonomy_task(
+        "PROMPT",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("verify must not run")),
+        prompt="use {missing_seed_id} in {project}",
+    )
+    rc = asyncio.run(run_live([task], model_alias="standard", reps=1, label="local", out_path=out))
+
+    assert rc == 0
+    row = _data_rows(out)[0]
+    assert row["error_class"] == "infra_seed"
+    assert row["verify_note"] == ""
+    assert row["error"].startswith("PromptBindError: missing prompt field {missing_seed_id}")
+    driver.run_task.assert_not_called()
+    assert torn == [{"project_name": "EVAL prompt", "project_id": "p1"}]
+
+
+def test_run_live_api_driver_exception_is_infra_api(tmp_path: Path, monkeypatch):
+    out = tmp_path / "rows.jsonl"
+    driver = MagicMock()
+    driver.run_task.side_effect = RuntimeError("provider unavailable")
+    torn: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "test-ws"))
+    monkeypatch.setattr(
+        runner_live,
+        "seed",
+        lambda *a, **k: k["ctx"].update({"project_name": "EVAL api", "project_id": "p1"}),
+    )
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: torn.append(dict(ctx)))
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
+
+    task = _taxonomy_task(
+        "APIERR",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("verify must not run")),
+    )
+    rc = asyncio.run(
+        run_live(
+            [task],
+            model_alias="standard",
+            reps=1,
+            label="local",
+            out_path=out,
+            driver_name="api",
+            resolved_model_id="provider-model-id",
+        )
+    )
+
+    assert rc == 0
+    row = _data_rows(out)[0]
+    assert row["error_class"] == "infra_api"
+    assert row["verify_note"] == ""
+    assert row["success"] is False
+    assert row["error"] == "RuntimeError: provider unavailable"
+    driver.run_task.assert_called_once()
+    assert torn == [{"project_name": "EVAL api", "project_id": "p1"}]
 
 
 def test_run_live_driver_exception_is_infra_cli(tmp_path: Path, monkeypatch):
@@ -502,6 +640,175 @@ def test_run_live_error_max_turns_is_task_path(tmp_path: Path, monkeypatch):
     assert row["stop_reason"] == "error_max_turns"
     assert row["success"] is False
     assert verify_calls == [1]
+
+
+def test_run_live_verifier_skip_is_not_a_failure(tmp_path: Path, monkeypatch):
+    out = tmp_path / "rows.jsonl"
+    driver = MagicMock()
+    driver.run_task.return_value = AgentRun(
+        calls=[],
+        final_text="done",
+        usage=None,
+        stopped_reason="end_turn",
+    )
+    torn: list[dict[str, Any]] = []
+
+    async def skip_verify(plane, ctx, run):
+        raise TaskSkipped("env:verification-unavailable")
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "test-ws"))
+    monkeypatch.setattr(
+        runner_live,
+        "seed",
+        lambda *a, **k: k["ctx"].update({"project_name": "EVAL skip", "project_id": "p1"}),
+    )
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: torn.append(dict(ctx)))
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
+
+    rc = asyncio.run(
+        run_live(
+            [_taxonomy_task("VERIFYSKIP", skip_verify)],
+            model_alias="standard",
+            reps=1,
+            label="local",
+            out_path=out,
+        )
+    )
+
+    assert rc == 0
+    row = _data_rows(out)[0]
+    assert row["skipped"] == "env:verification-unavailable"
+    assert row["verify_note"] == "env:verification-unavailable"
+    assert row["success"] is False
+    assert row["error"] is None
+    assert row["error_class"] is None
+    assert torn == [{"project_name": "EVAL skip", "project_id": "p1"}]
+
+
+def test_run_live_verifier_exception_is_task_error(tmp_path: Path, monkeypatch):
+    out = tmp_path / "rows.jsonl"
+    driver = MagicMock()
+    driver.run_task.return_value = AgentRun(
+        calls=[],
+        final_text="done",
+        usage=None,
+        stopped_reason="end_turn",
+    )
+    torn: list[dict[str, Any]] = []
+
+    async def broken_verify(plane, ctx, run):
+        raise ValueError("verifier broke")
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "test-ws"))
+    monkeypatch.setattr(
+        runner_live,
+        "seed",
+        lambda *a, **k: k["ctx"].update({"project_name": "EVAL verify", "project_id": "p1"}),
+    )
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: torn.append(dict(ctx)))
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
+
+    rc = asyncio.run(
+        run_live(
+            [_taxonomy_task("VERIFYERR", broken_verify)],
+            model_alias="standard",
+            reps=1,
+            label="local",
+            out_path=out,
+        )
+    )
+
+    assert rc == 0
+    row = _data_rows(out)[0]
+    assert row["success"] is False
+    assert row["error_class"] == "task"
+    assert row["error"] == "ValueError: verifier broke"
+    assert row["verify_note"] == ""
+    assert row["skipped"] is None
+    assert torn == [{"project_name": "EVAL verify", "project_id": "p1"}]
+
+
+def test_run_live_external_server_nulls_catalog_mispicks(tmp_path: Path, monkeypatch):
+    out = tmp_path / "rows.jsonl"
+    driver = MagicMock()
+    driver.run_task.return_value = AgentRun(
+        calls=[{"tool": "search_work_items", "args": {}}],
+        final_text="done",
+        usage=None,
+        stopped_reason="end_turn",
+    )
+
+    async def verify_ok(plane, ctx, run):
+        return True, "external ok"
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "test-ws"))
+    monkeypatch.setattr(
+        runner_live,
+        "seed",
+        lambda *a, **k: k["ctx"].update({"project_name": "EVAL external", "project_id": "p1"}),
+    )
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: None)
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
+
+    rc = asyncio.run(
+        run_live(
+            [_taxonomy_task("EXTERNAL", verify_ok)],
+            model_alias="standard",
+            reps=1,
+            label="local",
+            out_path=out,
+            server_cmd=["/bin/foreign", "stdio"],
+        )
+    )
+
+    assert rc == 0
+    row = _data_rows(out)[0]
+    assert row["success"] is True
+    assert row["server"] == "external"
+    assert row["alternate_calls"] is None
+    assert row["out_of_set_calls"] is None
+
+
+def test_run_live_success_keeps_requested_and_resolved_models(tmp_path: Path, monkeypatch):
+    out = tmp_path / "rows.jsonl"
+    driver = MagicMock()
+    driver.run_task.return_value = AgentRun(
+        calls=[{"tool": "list_work_items", "args": {}}],
+        final_text="done",
+        usage=None,
+        stopped_reason="end_turn",
+    )
+
+    async def verify_ok(plane, ctx, run):
+        return True, "local ok"
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "test-ws"))
+    monkeypatch.setattr(
+        runner_live,
+        "seed",
+        lambda *a, **k: k["ctx"].update({"project_name": "EVAL local", "project_id": "p1"}),
+    )
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: None)
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
+
+    rc = asyncio.run(
+        run_live(
+            [_taxonomy_task("SUCCESS", verify_ok)],
+            model_alias="standard",
+            resolved_model_id="provider-model-id",
+            reps=1,
+            label="local",
+            out_path=out,
+        )
+    )
+
+    assert rc == 0
+    row = _data_rows(out)[0]
+    assert row["success"] is True
+    assert row["requested_model"] == "standard"
+    assert row["requested_tier"] == "standard"
+    assert row["resolved_model"] == "provider-model-id"
+    assert row["server"] == "local"
 
 
 def test_is_infra_cli_stop_reason_matrix():
@@ -1071,6 +1378,7 @@ def test_task_skipped_from_seed_records_a_skip_row(tmp_path: Path, monkeypatch):
     out = tmp_path / "out.jsonl"
     driven: list[str] = []
     torn: list[Any] = []
+    driver = MagicMock()
 
     def skip_seed(*_args: Any, **_kwargs: Any) -> None:
         raise TaskSkipped("env:no-activity-worker")
@@ -1081,7 +1389,7 @@ def test_task_skipped_from_seed_records_a_skip_row(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         runner_live,
         "get_driver",
-        lambda *a, **k: driven.append("ran") or MagicMock(),
+        lambda *a, **k: driven.append("ran") or driver,
     )
 
     tasks = [
@@ -1106,6 +1414,7 @@ def test_task_skipped_from_seed_records_a_skip_row(tmp_path: Path, monkeypatch):
     assert row["error_class"] is None
     assert row["label"] == "local"
     assert torn == [1]  # teardown still runs
+    driver.run_task.assert_not_called()
 
     # `skipped` is the discriminator, not `success` — a skip must leave the
     # success denominator empty rather than counting as a failed task.
