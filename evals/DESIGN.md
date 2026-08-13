@@ -209,21 +209,21 @@ evals/
     debias.py            I1-I5 and L1-L5 tasks and verifiers
   drivers/
     __init__.py          public exports and driver registry
-    protocol.py          AgentDriver, AgentRun, normalization, and common row mapping
-    token_counting.py    tool-result token sizing
+    driver.py            AgentDriver seam, the API loop, and the CLI template
     api/
       backend.py         neutral backend protocol and turn/tool dataclasses
-      driver.py          provider-neutral MCP/model loop
       anthropic.py       Anthropic Messages translation
       openai.py          OpenAI Chat Completions translation
     cli/
-      template.py        shared CLI driver template
       process.py         subprocess lifecycle
       sidecar.py         recording-proxy command and sidecar handling
       claude.py          Claude Code CLI driver
       codex.py           Codex CLI driver
       antigravity.py     Antigravity CLI driver
       opencode.py        OpenCode CLI driver
+  results.py             run/task result types and common row mapping
+  tool_names.py          whose MCP tool a call is, and what to call it
+  token_counting.py      tool-result token sizing
   proxy.py               stdlib-only JSON-RPC recording relay
   seed/                  Plane fixture creation and teardown
   report/                summaries, A/B comparison, and multi-surface tables

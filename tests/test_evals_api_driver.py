@@ -10,11 +10,10 @@ from typing import Any
 
 import pytest
 
-from evals.drivers import agent_run_to_harness_dict
+from evals.drivers import ApiDriver
 from evals.drivers.api import (
     KNOWN_API_PROVIDERS,
     AnthropicBackend,
-    ApiDriver,
     OpenAIBackend,
     StopReason,
     ToolCall,
@@ -27,7 +26,8 @@ from evals.drivers.api import (
     resolve_backend_model,
     unregister_backend,
 )
-from evals.drivers.token_counting import estimate_result_tokens
+from evals.results import agent_run_to_harness_dict
+from evals.token_counting import estimate_result_tokens
 
 
 class FakeBackend:
@@ -678,3 +678,61 @@ def test_openai_backend_normalizes_refusal_for_driver_guard():
     assert turn.provider_stop_reason == "content_filter"
     assert turn.text == "declined"
     assert turn.tool_calls == [ToolCall("danger", "write", {})]
+
+
+# ---------------------------------------------------------------------------
+# MCP translation helpers
+# ---------------------------------------------------------------------------
+
+
+def test_tool_spec_from_mcp_reads_dict_and_object_entries():
+    from evals.drivers.driver import tool_spec_from_mcp
+
+    as_dict = tool_spec_from_mcp(
+        {"name": "list_work_items", "description": "List them", "inputSchema": {"type": "object", "x": 1}}
+    )
+    assert (as_dict.name, as_dict.description) == ("list_work_items", "List them")
+    assert as_dict.input_schema == {"type": "object", "x": 1}
+
+    as_object = tool_spec_from_mcp(SimpleNamespace(name="create_cycle", description="", input_schema=None))
+    assert as_object.name == "create_cycle"
+    # A missing or non-dict schema must still yield a usable object schema.
+    assert as_object.input_schema == {"type": "object"}
+    assert tool_spec_from_mcp({"name": "x", "inputSchema": "not-a-schema"}).input_schema == {"type": "object"}
+
+
+def test_tool_result_from_mcp_text_only_joins_blocks():
+    from evals.drivers.driver import tool_result_from_mcp
+
+    result = tool_result_from_mcp(
+        "call_1",
+        {"content": [{"type": "text", "text": "first"}, {"type": "text", "text": "second"}]},
+    )
+    assert (result.call_id, result.text, result.kind, result.is_error) == ("call_1", "first\nsecond", "text", False)
+
+
+def test_tool_result_from_mcp_serializes_non_text_blocks():
+    """A tool returning an image must not be counted as if it returned nothing.
+
+    This path serializes the whole content list, so it is the only one that
+    needs ``json`` at run time — a missing import here fails no other test.
+    """
+    from evals.drivers.driver import tool_result_from_mcp
+
+    mixed = tool_result_from_mcp(
+        "call_2",
+        {"content": [{"type": "text", "text": "chart:"}, {"type": "image", "data": "AAAA"}]},
+    )
+    assert mixed.kind == "mixed"
+    assert '"image"' in mixed.text and "chart:" in mixed.text
+
+    image_only = tool_result_from_mcp("call_3", {"content": [{"type": "image", "data": "AAAA"}]})
+    assert image_only.kind == "image"
+    assert '"data":"AAAA"' in image_only.text
+
+
+def test_tool_result_from_mcp_propagates_error_flag_in_both_spellings():
+    from evals.drivers.driver import tool_result_from_mcp
+
+    assert tool_result_from_mcp("c", {"content": "boom", "isError": True}).is_error is True
+    assert tool_result_from_mcp("c", SimpleNamespace(content="boom", is_error=True)).is_error is True

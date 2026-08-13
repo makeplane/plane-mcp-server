@@ -15,9 +15,9 @@ from plane.errors.errors import HttpError
 from evals import cli as run_mod
 from evals import report as report_mod
 from evals import seed as seed_mod
-from evals.drivers import AgentRun, ClaudeCliDriver, parse_claude_json_result
+from evals.drivers import ClaudeCliDriver, parse_claude_json_result
 from evals.report import is_infra_error_row, load_rows, summarize
-from evals.results import RESULT_SCHEMA_VERSION, TaskResult
+from evals.results import RESULT_SCHEMA_VERSION, AgentRun, TaskResult
 from evals.runner import canary as runner_canary
 from evals.runner import (
     is_infra_cli_stop_reason,
@@ -325,7 +325,7 @@ def test_run_live_driver_exception_is_infra_cli(tmp_path: Path, monkeypatch):
 
 def test_run_live_timeout_agent_is_infra_cli(tmp_path: Path, monkeypatch):
     """Driver returns stopped_reason=timeout → row error_class=infra_cli, battery continues."""
-    from evals.drivers import agent_run_to_harness_dict
+    from evals.results import agent_run_to_harness_dict
 
     out = tmp_path / "rows.jsonl"
     fake_plane = MagicMock()

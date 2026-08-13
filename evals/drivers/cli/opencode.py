@@ -7,7 +7,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from evals.drivers.cli.template import CliDriver, CliLaunch, CliOutput
+from evals.drivers.driver import CliDriver, CliLaunch, CliOutput
 
 # OpenCode CLI — proxy-first
 # ---------------------------------------------------------------------------

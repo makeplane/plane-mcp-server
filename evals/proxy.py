@@ -33,7 +33,10 @@ from typing import Any
 SHUTDOWN_DEADLINE_S = 10.0
 READ_CHUNK = 65536
 
-# Repo root for PYTHONPATH scrubbing (parent of evals/).
+# Repo root for PYTHONPATH scrubbing (parent of evals/). Deliberately computed
+# here rather than imported from ``evals``: this module runs inside the MCP
+# server's process tree with the repo scrubbed off PYTHONPATH, so it cannot
+# import its own package.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

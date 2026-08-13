@@ -18,7 +18,6 @@ from evals.drivers import (
     ClaudeCliDriver,
     CodexCliDriver,
     OpencodeCliDriver,
-    agent_run_to_harness_dict,
     apply_proxy_sidecar,
     ensure_proxy_pythonpath,
     get_driver,
@@ -31,8 +30,7 @@ from evals.drivers import (
     write_antigravity_mcp_config,
     write_opencode_mcp_config,
 )
-from evals.drivers.cli.template import CliDriver, CliLaunch, CliOutput
-from evals.drivers.token_counting import estimate_result_tokens
+from evals.drivers.driver import CliDriver, CliLaunch, CliOutput
 from evals.proxy import (
     SHUTDOWN_DEADLINE_S,
     SidecarRecorder,
@@ -43,6 +41,8 @@ from evals.proxy import (
     write_all_fd,
 )
 from evals.proxy import main as proxy_main
+from evals.results import AgentRun, agent_run_to_harness_dict
+from evals.token_counting import estimate_result_tokens
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -539,8 +539,6 @@ def test_claude_driver_proxy_disabled_no_wrap(tmp_path: Path):
 
 
 def test_agent_run_to_harness_propagates_proxy_fields():
-    from evals.drivers import AgentRun
-
     run = AgentRun(
         calls=[
             {
@@ -580,7 +578,7 @@ def test_agent_run_to_harness_propagates_proxy_fields():
 
 def test_cli_driver_template_inherits_proxy_first_and_timeout_harvest(tmp_path: Path, monkeypatch):
     clock = {"now": 0.0}
-    monkeypatch.setattr("evals.drivers.cli.template.time.perf_counter", lambda: clock["now"])
+    monkeypatch.setattr("evals.drivers.driver.time.perf_counter", lambda: clock["now"])
 
     class MinimalCliDriver(CliDriver):
         name = "minimal-cli"
@@ -1842,8 +1840,6 @@ def test_run_live_passes_server_cmd_to_non_claude(monkeypatch, tmp_path: Path):
 
         class Dummy:
             def run_task(self, *a, **k):
-                from evals.drivers import AgentRun
-
                 return AgentRun(
                     calls=[],
                     final_text="",

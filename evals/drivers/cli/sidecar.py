@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from evals.drivers.protocol import REPO_ROOT
+from evals import REPO_ROOT
 
 
 def proxy_wrap_server_command(

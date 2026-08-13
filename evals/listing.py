@@ -20,12 +20,9 @@ import os
 import shlex
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from evals.runner.live import stdio_server_env
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @dataclass

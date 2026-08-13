@@ -24,7 +24,6 @@ from evals.drivers.api.backend import (
     resolve_backend_model,
     unregister_backend,
 )
-from evals.drivers.api.driver import ApiDriver
 from evals.drivers.api.openai import OpenAIBackend
 
 __all__ = [
@@ -32,7 +31,6 @@ __all__ = [
     "KNOWN_API_PROVIDERS",
     "MODEL_TIERS",
     "AnthropicBackend",
-    "ApiDriver",
     "BackendFactory",
     "BackendRegistration",
     "BackendRegistry",

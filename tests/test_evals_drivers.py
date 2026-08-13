@@ -16,25 +16,26 @@ import pytest
 from evals.cli import parse_args
 from evals.drivers import (
     KNOWN_DRIVERS,
-    AgentRun,
     ApiDriver,
     ClaudeCliDriver,
     CodexCliDriver,
-    agent_run_to_harness_dict,
     get_driver,
-    is_plane_mcp_tool,
     normalize_claude_usage,
-    normalize_tool_call,
     parse_claude_json_result,
     parse_claude_transcript_calls,
     parse_codex_jsonl_events,
     run_cli_subprocess,
-    split_plane_and_client_calls,
-    strip_mcp_prefix,
     write_claude_mcp_config,
 )
-from evals.drivers.token_counting import estimate_result_tokens
+from evals.results import AgentRun, agent_run_to_harness_dict
 from evals.runner.live import classify_call, stdio_server_env
+from evals.token_counting import estimate_result_tokens
+from evals.tool_names import (
+    is_plane_mcp_tool,
+    normalize_tool_call,
+    split_plane_and_client_calls,
+    strip_mcp_prefix,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures (constructed — never captured from live CLIs)

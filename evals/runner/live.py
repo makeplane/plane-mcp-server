@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from evals.drivers import KNOWN_DRIVERS, agent_run_to_task_result, get_driver
+from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api import MODEL_TIERS
-from evals.results import TaskResult
+from evals.results import TaskResult, agent_run_to_task_result
 from evals.seed import make_plane_client, seed, teardown
 from evals.tasks import (
     PromptBindError,
@@ -100,7 +100,7 @@ async def run_agent_task_via_driver(
     alternate_tools: set[str] | None = None,
     server_env: dict[str, str] | None = None,
 ) -> TaskResult:
-    """Run one task through the selected AgentDriver."""
+    """Run one task through the selected driver."""
     project_name = ctx["project_name"]
     system = _system_preamble(workspace_slug, project_name)
     prompt = format_task_prompt(task, ctx, strict=True)
@@ -109,7 +109,7 @@ async def run_agent_task_via_driver(
     assert optimal.isdisjoint(alternate), f"{task['id']}: optimal/alternate overlap"
 
     mcp_env = stdio_server_env(extra=server_env)
-    # AgentDriver is sync (CLI subprocess or API loop); keep it off this loop.
+    # Drivers are sync (CLI subprocess or API loop); keep them off this loop.
     agent_run = await asyncio.to_thread(
         driver.run_task,
         prompt,

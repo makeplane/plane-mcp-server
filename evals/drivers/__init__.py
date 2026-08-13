@@ -29,57 +29,50 @@ Codex (``codex exec``):
     ``response_item`` / ``function_call`` payloads (name + arguments JSON string)
   - Marked **experimental**; live runs are opt-in (metered quota).
 
-This package splits that surface into focused modules (protocol types, subprocess
-lifecycle, recording-proxy glue, and per-vendor drivers). Import from
-``evals.drivers`` as before — public names are re-exported here.
+This package splits that surface into focused modules (driver protocol, subprocess
+lifecycle, recording-proxy glue, and per-vendor drivers). Driver names and their
+public parse/configuration helpers are re-exported here.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from evals.drivers.api import ApiDriver
-from evals.drivers.cli import (
+from evals.drivers.cli.antigravity import (
     AntigravityCliDriver,
+    prepare_antigravity_fake_home,
+    write_antigravity_mcp_config,
+)
+from evals.drivers.cli.claude import (
     ClaudeCliDriver,
-    CliDriver,
-    CodexCliDriver,
-    OpencodeCliDriver,
-    apply_proxy_sidecar,
-    ensure_proxy_pythonpath,
     find_claude_transcript,
-    find_codex_rollout,
-    harvest_proxy_after_cli_timeout,
-    kill_process_group,
-    load_proxy_sidecar,
-    load_proxy_sidecar_calls,
     normalize_claude_usage,
-    note_timeout_kill,
     parse_claude_json_result,
     parse_claude_transcript_calls,
+    write_claude_mcp_config,
+)
+from evals.drivers.cli.codex import (
+    CodexCliDriver,
+    find_codex_rollout,
     parse_codex_jsonl_events,
     parse_codex_rollout_calls,
-    prepare_antigravity_fake_home,
-    proxy_wrap_server_command,
-    run_cli_subprocess,
-    wait_for_proxy_meta,
-    write_antigravity_mcp_config,
-    write_claude_mcp_config,
     write_codex_mcp_override_args,
+)
+from evals.drivers.cli.opencode import (
+    OpencodeCliDriver,
     write_opencode_mcp_config,
 )
-from evals.drivers.protocol import (
-    REPO_ROOT,
-    AgentDriver,
-    AgentRun,
-    agent_run_to_harness_dict,
-    agent_run_to_task_result,
-    is_plane_mcp_tool,
-    normalize_tool_call,
-    split_plane_and_client_calls,
-    strip_mcp_prefix,
+from evals.drivers.cli.process import kill_process_group, note_timeout_kill, run_cli_subprocess
+from evals.drivers.cli.sidecar import (
+    apply_proxy_sidecar,
+    ensure_proxy_pythonpath,
+    harvest_proxy_after_cli_timeout,
+    load_proxy_sidecar,
+    load_proxy_sidecar_calls,
+    proxy_wrap_server_command,
+    wait_for_proxy_meta,
 )
-from evals.results import CallRecord, TaskResult
+from evals.drivers.driver import ApiDriver, CliDriver
 
 # Registry
 # ---------------------------------------------------------------------------
@@ -87,7 +80,7 @@ from evals.results import CallRecord, TaskResult
 KNOWN_DRIVERS = frozenset({"api", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"})
 
 
-def get_driver(name: str, **kwargs: Any) -> AgentDriver:
+def get_driver(name: str, **kwargs: Any) -> ApiDriver | CliDriver:
     """Return a driver instance."""
     key = (name or "api").strip().lower()
     if key == "api":
@@ -105,31 +98,22 @@ def get_driver(name: str, **kwargs: Any) -> AgentDriver:
 
 __all__ = [
     "KNOWN_DRIVERS",
-    "AgentDriver",
-    "AgentRun",
     "AntigravityCliDriver",
     "ApiDriver",
     "ClaudeCliDriver",
-    "CallRecord",
     "CliDriver",
     "CodexCliDriver",
     "OpencodeCliDriver",
-    "REPO_ROOT",
-    "TaskResult",
-    "agent_run_to_harness_dict",
-    "agent_run_to_task_result",
     "apply_proxy_sidecar",
     "ensure_proxy_pythonpath",
     "find_claude_transcript",
     "find_codex_rollout",
     "get_driver",
     "harvest_proxy_after_cli_timeout",
-    "is_plane_mcp_tool",
     "kill_process_group",
     "load_proxy_sidecar",
     "load_proxy_sidecar_calls",
     "normalize_claude_usage",
-    "normalize_tool_call",
     "note_timeout_kill",
     "parse_claude_json_result",
     "parse_claude_transcript_calls",
@@ -138,8 +122,6 @@ __all__ = [
     "prepare_antigravity_fake_home",
     "proxy_wrap_server_command",
     "run_cli_subprocess",
-    "split_plane_and_client_calls",
-    "strip_mcp_prefix",
     "wait_for_proxy_meta",
     "write_antigravity_mcp_config",
     "write_claude_mcp_config",
