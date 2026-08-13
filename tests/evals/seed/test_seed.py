@@ -1,146 +1,64 @@
-"""Offline tests for the full eval task catalog + seed plan + verifiers."""
+"""Offline eval tests for seed."""
 
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+from plane.errors.errors import HttpError
 
+from evals import cleanup as cleanup_mod
 from evals import seed as seed_mod
-from evals import tasks as tasks_mod
-from evals.cli import cmd_dry_run, cmd_list, parse_args
-from evals.seed import seed_plan
-from evals.tasks.catalog import TASKS, TASKS_BY_ID, get_tasks
-
-# DESIGN.md catalog ids (stable) + extras added for uncovered tool families.
-DESIGN_IDS = {
-    "R1",
-    "R2",
-    "R3",
-    "R4",
-    "R5",
-    "R6",
-    "W1",
-    "W2",
-    "W3",
-    "W4",
-    "W5",
-    "W6",
-    "W7",
-    "W8",
-    "S1",
-    "S2",
-    "S3",
-    "S4",
-    "C1",
-    "C2",
-}
-EXTRA_IDS = {"W9", "W10", "R7", "S5"}  # bulk, pages, transitions, features
-# WS3 de-biasing classes
-ID_IN_HAND_IDS = {"I1", "I2", "I3", "I4", "I5"}
-LONG_TAIL_IDS = {"L1", "L2", "L3", "L4", "L5"}
-# Workspace-scoped prompts that omit {project}
-NO_PROJECT_PROMPT_IDS = {"C2", "L3", "L4"}
-CATALOG_ID_ORDER = (
-    "R1",
-    "R2",
-    "R3",
-    "R4",
-    "R5",
-    "R6",
-    "W1",
-    "W2",
-    "W3",
-    "W4",
-    "W5",
-    "W6",
-    "W7",
-    "W8",
-    "W9",
-    "W10",
-    "S1",
-    "S2",
-    "S3",
-    "S4",
-    "S5",
-    "C1",
-    "C2",
-    "R7",
-    "I1",
-    "I2",
-    "I3",
-    "I4",
-    "I5",
-    "L1",
-    "L2",
-    "L3",
-    "L4",
-    "L5",
+from evals.seed import (
+    create_project_with_identifier_retry,
+    is_identifier_collision,
+    seed_plan,
+)
+from evals.tasks.debias import (
+    L3_TAG_VERSION,
+    L4_PROP_DISPLAY,
 )
 
 
-@pytest.fixture(autouse=True)
-def _eval_creds(monkeypatch):
-    monkeypatch.setenv("EVAL_PLANE_API_KEY", "test-key")
-    monkeypatch.setenv("EVAL_PLANE_WORKSPACE_SLUG", "test-ws")
-    monkeypatch.delenv("EVAL_PLANE_BASE_URL", raising=False)
-    monkeypatch.delenv("REDIS_HOST", raising=False)
-    monkeypatch.delenv("REDIS_PORT", raising=False)
+class _Page:
+    def __init__(self, results: list[Any] | None = None):
+        self.results = results or []
+        self.next_page_results = False
+        self.next_cursor = None
 
 
-def test_catalog_includes_design_and_extras():
-    ids = {t["id"] for t in TASKS}
-    assert DESIGN_IDS.issubset(ids), f"missing DESIGN ids: {DESIGN_IDS - ids}"
-    assert EXTRA_IDS.issubset(ids), f"missing extra ids: {EXTRA_IDS - ids}"
-    assert ID_IN_HAND_IDS.issubset(ids), f"missing I-class: {ID_IN_HAND_IDS - ids}"
-    assert LONG_TAIL_IDS.issubset(ids), f"missing L-class: {LONG_TAIL_IDS - ids}"
-    assert len(TASKS) >= 20
-
-
-def test_catalog_id_order_is_pinned():
-    assert tuple(task["id"] for task in TASKS) == CATALOG_ID_ORDER
-
-
-def test_get_tasks_all_and_filter():
-    all_t = get_tasks(None)
-    assert len(all_t) == len(TASKS)
-    subset = get_tasks(["R1", "W9", "C2"])
-    assert [t["id"] for t in subset] == ["R1", "W9", "C2"]
-
-
-def test_get_tasks_unknown_exits():
-    with pytest.raises(SystemExit):
-        get_tasks(["NOPE"])
-
-
-def test_task_schema_invariants():
-    for t in TASKS:
-        assert t["id"]
-        assert isinstance(t["tags"], set)
-        assert "{project}" in t["prompt"] or t["id"] in NO_PROJECT_PROMPT_IDS
-        assert isinstance(t["optimal_tools"], set) and t["optimal_tools"]
-        assert isinstance(t["alternate_tools"], set)
-        assert t["optimal_tools"].isdisjoint(t["alternate_tools"]), t["id"]
-        assert callable(t["verify"])
-        assert isinstance(t.get("needs"), set)
-
-
-def test_debias_tasks_author():
-    from evals.tasks.catalog import task_author
-
-    for tid in ID_IN_HAND_IDS | LONG_TAIL_IDS:
-        t = TASKS_BY_ID[tid]
-        assert task_author(t) == "post-hoc-debias"
-
-
-def test_w6_seeds_an_open_cycle():
-    """W6 asks the agent to close Sprint 12, so the seed must leave it open.
-
-    Plane rejects every edit to an ended cycle, so a pre-closed fixture makes the
-    task unachievable by design.
-    """
-    assert "cycles_open_past" in TASKS_BY_ID["W6"]["needs"]
-    assert "cycles" in TASKS_BY_ID["W6"]["needs"]
+class _TeardownPlane:
+    def __init__(self):
+        self.deleted: list[tuple[str, str]] = []
+        self.releases = SimpleNamespace(
+            tags=SimpleNamespace(
+                list=lambda **kw: _Page([SimpleNamespace(id="tag-1", version=L3_TAG_VERSION)]),
+                delete=lambda **kw: self.deleted.append(("release_tag", kw["tag_id"])),
+            ),
+            delete=lambda **kw: self.deleted.append(("release", kw.get("release_id"))),
+        )
+        self.customers = SimpleNamespace(
+            properties=SimpleNamespace(
+                list=lambda **kw: _Page(
+                    [
+                        SimpleNamespace(
+                            id="prop-1",
+                            display_name=L4_PROP_DISPLAY,
+                            name="eval-industry",
+                        )
+                    ]
+                ),
+                delete=lambda **kw: self.deleted.append(("customer_property", kw["property_id"])),
+            ),
+            list=lambda **kw: _Page([]),
+            delete=lambda **kw: None,
+        )
+        self.projects = SimpleNamespace(delete=lambda **kw: None)
+        self.workspace_work_item_types = SimpleNamespace(delete=lambda **kw: None)
+        self.workspace_work_item_properties = SimpleNamespace(delete=lambda **kw: None)
 
 
 def test_seed_plan_covers_all_groups():
@@ -174,53 +92,6 @@ def test_seed_plan_empty_needs_only_project():
     # project line + default workspace customers enable note
     assert any("customers" in line for line in lines)
     assert len(lines) == 2
-
-
-def test_verifiers_are_async_and_importable():
-    modules = {
-        "R": "read",
-        "W": "write",
-        "S": "schema",
-        "C": "cross",
-        "I": "debias",
-        "L": "debias",
-    }
-    for t in TASKS:
-        fn = t["verify"]
-        assert inspect.iscoroutinefunction(fn), t["id"]
-        # Callables resolve without NameError
-        assert fn.__module__ == f"evals.tasks.{modules[t['id'][0]]}"
-
-
-def test_cmd_list_prints_all_task_ids(capsys):
-    rc = cmd_list()
-    assert rc == 0
-    out = capsys.readouterr().out
-    for tid in DESIGN_IDS | EXTRA_IDS:
-        assert tid in out
-
-
-def test_cmd_dry_run_all_tasks(capsys):
-    rc = cmd_dry_run(list(TASKS))
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "Seed plan:" in out
-    for tid in ("R1", "W9", "S4", "C2", "R7"):
-        assert f"=== {tid} ===" in out
-
-
-def test_parse_args_list():
-    a = parse_args(["--list", "--label", "candidate-build"])
-    assert a.list is True
-    assert a.label == "candidate-build"
-    assert parse_args(["--list"]).label == "local"
-
-
-def test_tasks_module_has_no_hardcoded_uuids():
-    """Regression: verifiers must resolve expected values at verify time."""
-    src = inspect.getsource(tasks_mod)
-    # Crude: no UUID-shaped literals in tasks module.
-    assert not any(len(part) == 36 and part.count("-") == 4 for part in src.replace('"', " ").replace("'", " ").split())
 
 
 def test_seed_module_ast_has_all_group_handlers():
@@ -556,3 +427,304 @@ def test_seed_enables_features_on_second_project_too(monkeypatch):
     assert ("features", creates[0]) in enables
     assert ("update", creates[1]) in enables
     assert ("features", creates[1]) in enables
+
+
+def test_teardown_deletes_release_tag_and_customer_property():
+    from evals.seed import teardown
+
+    plane = _TeardownPlane()
+    ctx = {
+        "workspace_slug": "ws",
+        "project_id": "p1",
+        "project_name": "EVAL x",
+        "workspace_objects": [
+            {"kind": "release_tag", "id": "tag-tracked"},
+            {"kind": "customer_property", "id": "prop-tracked"},
+        ],
+    }
+    teardown(plane, ctx)
+    kinds = {k for k, _ in plane.deleted}
+    assert "release_tag" in kinds
+    assert "customer_property" in kinds
+    # Tracked ids deleted
+    assert ("release_tag", "tag-tracked") in plane.deleted
+    assert ("customer_property", "prop-tracked") in plane.deleted
+
+
+def test_preclean_removes_stale_tag_and_property():
+    from evals.seed import _preclean_ws3_workspace_artifacts
+
+    deleted: list[tuple[str, str]] = []
+
+    class Plane:
+        releases = SimpleNamespace(
+            tags=SimpleNamespace(
+                list=lambda **kw: _Page([SimpleNamespace(id="t-old", version=L3_TAG_VERSION)]),
+                delete=lambda **kw: deleted.append(("tag", kw["tag_id"])),
+            )
+        )
+        customers = SimpleNamespace(
+            properties=SimpleNamespace(
+                list=lambda **kw: _Page([SimpleNamespace(id="p-old", display_name=L4_PROP_DISPLAY, name="x")]),
+                delete=lambda **kw: deleted.append(("prop", kw["property_id"])),
+            )
+        )
+
+    _preclean_ws3_workspace_artifacts(Plane(), "ws")
+    assert ("tag", "t-old") in deleted
+    assert ("prop", "p-old") in deleted
+
+
+def test_preclean_delete_failure_raises_for_infra_seed():
+    """Found artifact that cannot be deleted must raise (harness → infra_seed)."""
+    from evals.seed import _preclean_ws3_workspace_artifacts
+
+    class Plane:
+        releases = SimpleNamespace(
+            tags=SimpleNamespace(
+                list=lambda **kw: _Page([SimpleNamespace(id="t-stuck", version=L3_TAG_VERSION)]),
+                delete=lambda **kw: (_ for _ in ()).throw(RuntimeError("403 forbidden")),
+            )
+        )
+        customers = SimpleNamespace(
+            properties=SimpleNamespace(
+                list=lambda **kw: _Page([]),
+                delete=lambda **kw: None,
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="preclean|failed to delete|eval-rc1|release tag"):
+        _preclean_ws3_workspace_artifacts(Plane(), "ws")
+
+
+def test_preclean_empty_list_is_silent():
+    from evals.seed import _preclean_ws3_workspace_artifacts
+
+    class Plane:
+        releases = SimpleNamespace(tags=SimpleNamespace(list=lambda **kw: _Page([]), delete=lambda **kw: None))
+        customers = SimpleNamespace(properties=SimpleNamespace(list=lambda **kw: _Page([]), delete=lambda **kw: None))
+
+    _preclean_ws3_workspace_artifacts(Plane(), "ws")  # no raise
+
+
+def test_l2_activity_gate_raises_when_empty():
+    """Empty activities list after comments → TaskSkipped env:no-activity-worker."""
+    from types import SimpleNamespace
+
+    from evals.seed import R5_TITLE, _gate_activity_worker
+    from evals.tasks.skip import TaskSkipped
+
+    class Plane:
+        work_items = SimpleNamespace(activities=SimpleNamespace(list=lambda **kw: SimpleNamespace(results=[])))
+
+    ctx = {"project_id": "p1", "items": {R5_TITLE: "wi-r5"}}
+    with pytest.raises(TaskSkipped, match="env:no-activity-worker"):
+        _gate_activity_worker(Plane(), "ws", ctx)
+
+
+def test_l2_activity_gate_proceeds_when_nonempty():
+    from types import SimpleNamespace
+
+    from evals.seed import R5_TITLE, _gate_activity_worker
+
+    class Plane:
+        work_items = SimpleNamespace(
+            activities=SimpleNamespace(list=lambda **kw: SimpleNamespace(results=[SimpleNamespace(id="a1")]))
+        )
+
+    ctx = {"project_id": "p1", "items": {R5_TITLE: "wi-r5"}}
+    _gate_activity_worker(Plane(), "ws", ctx)  # no raise
+
+
+def test_create_project_retries_409_then_succeeds(monkeypatch):
+    attempts: list[str] = []
+
+    class FakeProjects:
+        def create(self, *, workspace_slug, data):
+            ident = data.identifier
+            attempts.append(ident)
+            if len(attempts) < 3:
+                raise HttpError("Project identifier already taken", 409)
+            return MagicMock(id="proj-ok", identifier=ident)
+
+    plane = MagicMock()
+    plane.projects = FakeProjects()
+
+    # Force deterministic retries after first collision.
+    suffixes = iter(["AAAA", "BBBB"])
+    monkeypatch.setattr(seed_mod.secrets, "token_hex", lambda n: next(suffixes))
+
+    project = create_project_with_identifier_retry(
+        plane,
+        "ws",
+        name="EVAL abcd",
+        identifier_prefix="EV",
+        initial_suffix="DEAD",
+    )
+    assert project.id == "proj-ok"
+    assert attempts[0] == "EVDEAD"
+    assert len(attempts) == 3
+    assert attempts[1] != attempts[0]
+    assert attempts[2] != attempts[1]
+    assert attempts[1] == "EVAAAA"
+    assert attempts[2] == "EVBBBB"
+
+
+def test_create_project_raises_after_max_409s(monkeypatch):
+    attempts: list[str] = []
+
+    class Always409:
+        def create(self, *, workspace_slug, data):
+            attempts.append(data.identifier)
+            raise HttpError("identifier already taken", 409)
+
+    plane = MagicMock()
+    plane.projects = Always409()
+    suffixes = iter(["1111", "2222", "3333", "should-not-use"])
+    monkeypatch.setattr(seed_mod.secrets, "token_hex", lambda n: next(suffixes))
+
+    with pytest.raises(HttpError) as ei:
+        create_project_with_identifier_retry(
+            plane,
+            "ws",
+            name="EVAL x",
+            identifier_prefix="EV",
+            initial_suffix="0000",
+        )
+    assert ei.value.status_code == 409
+    assert len(attempts) == 3
+    assert attempts[0] == "EV0000"
+    assert attempts[1] != attempts[0]
+    assert attempts[1] == "EV1111"
+    assert attempts[2] == "EV2222"
+
+
+def test_create_project_non_collision_error_does_not_retry():
+    class Fail500:
+        def create(self, *, workspace_slug, data):
+            raise HttpError("server error", 500)
+
+    plane = MagicMock()
+    plane.projects = Fail500()
+    with pytest.raises(HttpError) as ei:
+        create_project_with_identifier_retry(
+            plane,
+            "ws",
+            name="EVAL x",
+            identifier_prefix="EV",
+            initial_suffix="0000",
+        )
+    assert ei.value.status_code == 500
+
+
+def test_identifier_collision_requires_status_and_language():
+    assert is_identifier_collision(HttpError("identifier already taken", 409)) is True
+    assert is_identifier_collision(HttpError("project exists", 400)) is True
+    # Validation-shaped: mentions identifier but not collision language → no retry
+    assert is_identifier_collision(HttpError("identifier is required", 400)) is False
+    assert is_identifier_collision(HttpError("identifier already taken", 500)) is False
+
+
+def test_cleanup_dry_run_never_calls_delete(monkeypatch, capsys):
+    projects = [
+        SimpleNamespace(id="p1", name="EVAL deadbeef", identifier="EVDEAD"),
+        SimpleNamespace(id="p2", name="EVAL cafe", identifier="EVCAFE"),
+        SimpleNamespace(id="p3", name="Production", identifier="PROD"),
+    ]
+    delete_calls: list[Any] = []
+
+    class FakeProjects:
+        def list(self, workspace_slug=None, params=None):
+            return SimpleNamespace(results=projects, next_page_results=False, next_cursor="100:0:0")
+
+        def delete(self, **kwargs):
+            delete_calls.append(kwargs)
+
+    plane = MagicMock()
+    plane.projects = FakeProjects()
+    monkeypatch.setattr("evals.seed.make_plane_client", lambda: (plane, "test-ws"))
+
+    rc = cleanup_mod.main([])  # dry-run
+    assert rc == 0
+    assert delete_calls == []
+    out = capsys.readouterr().out
+    assert "EVAL deadbeef" in out
+    assert "dry-run" in out
+    assert "Production" not in out  # prefix filter
+
+
+def test_cleanup_yes_deletes(monkeypatch, capsys):
+    projects = [SimpleNamespace(id="p1", name="EVAL x", identifier="EVX")]
+    delete_calls: list[Any] = []
+
+    class FakeProjects:
+        def list(self, workspace_slug=None, params=None):
+            return SimpleNamespace(results=projects, next_page_results=False, next_cursor="100:0:0")
+
+        def delete(self, **kwargs):
+            delete_calls.append(kwargs)
+
+    plane = MagicMock()
+    plane.projects = FakeProjects()
+    monkeypatch.setattr("evals.seed.make_plane_client", lambda: (plane, "test-ws"))
+    rc = cleanup_mod.main(["--yes"])
+    assert rc == 0
+    assert len(delete_calls) == 1
+    assert delete_calls[0]["project_id"] == "p1"
+
+
+def test_list_projects_with_prefix_filters():
+    projects = [
+        SimpleNamespace(id="1", name="EVAL a"),
+        SimpleNamespace(id="2", name="Other"),
+        SimpleNamespace(id="3", name="EVAL b"),
+        SimpleNamespace(id="4", name="EVALUATION"),  # must NOT match "EVAL "
+    ]
+    calls: list[Any] = []
+
+    class FakeProjects:
+        def list(self, workspace_slug=None, params=None):
+            calls.append({"workspace_slug": workspace_slug, "params": params})
+            assert params is not None
+            assert params.per_page == 100
+            # SDK always populates next_cursor even on last page.
+            return SimpleNamespace(
+                results=projects,
+                next_page_results=False,
+                next_cursor="100:0:0",
+            )
+
+    plane = MagicMock()
+    plane.projects = FakeProjects()
+    got = cleanup_mod.list_projects_with_prefix(plane, "ws", "EVAL ")
+    assert [p.id for p in got] == ["1", "3"]
+    assert len(calls) == 1  # one page only — no infinite loop on next_cursor
+    assert calls[0]["params"].cursor is None
+
+
+def test_list_projects_two_page_pagination():
+    page1 = [SimpleNamespace(id="1", name="EVAL one")]
+    page2 = [SimpleNamespace(id="2", name="EVAL two")]
+    seen_cursors: list[Any] = []
+
+    class FakeProjects:
+        def list(self, workspace_slug=None, params=None):
+            seen_cursors.append(getattr(params, "cursor", None))
+            if params.cursor is None:
+                return SimpleNamespace(
+                    results=page1,
+                    next_page_results=True,
+                    next_cursor="100:0:0",
+                )
+            assert params.cursor == "100:0:0"
+            return SimpleNamespace(
+                results=page2,
+                next_page_results=False,
+                next_cursor="200:0:0",
+            )
+
+    plane = MagicMock()
+    plane.projects = FakeProjects()
+    got = cleanup_mod.list_projects_with_prefix(plane, "ws", "EVAL ")
+    assert [p.id for p in got] == ["1", "2"]
+    assert seen_cursors == [None, "100:0:0"]

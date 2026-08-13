@@ -1,48 +1,36 @@
-"""Offline tests for eval agent drivers (no real CLI invocations)."""
+"""Offline eval tests for vendors."""
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-import textwrap
-import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from evals.cli import parse_args
 from evals.drivers import (
     KNOWN_DRIVERS,
+    AntigravityCliDriver,
     ApiDriver,
     ClaudeCliDriver,
     CodexCliDriver,
+    OpencodeCliDriver,
     get_driver,
     normalize_claude_usage,
     parse_claude_json_result,
     parse_claude_transcript_calls,
     parse_codex_jsonl_events,
-    run_cli_subprocess,
+    prepare_antigravity_fake_home,
+    write_antigravity_mcp_config,
     write_claude_mcp_config,
+    write_opencode_mcp_config,
 )
-from evals.results import AgentRun, agent_run_to_harness_dict
-from evals.runner.live import classify_call, stdio_server_env
-from evals.token_counting import estimate_result_tokens
 from evals.tool_names import (
-    is_plane_mcp_tool,
-    normalize_tool_call,
     split_plane_and_client_calls,
-    strip_mcp_prefix,
 )
 
-# ---------------------------------------------------------------------------
-# Fixtures (constructed — never captured from live CLIs)
-# ---------------------------------------------------------------------------
-
-# Mirrors real claude -p --output-format json (probed): input_tokens is uncached-only;
-# mass lives in cache_* + modelUsage.
 CLAUDE_JSON_RESULT = {
     "type": "result",
     "subtype": "success",
@@ -80,7 +68,6 @@ CLAUDE_JSON_RESULT = {
     },
 }
 
-# JSON result that already embeds tool_calls (rare path)
 CLAUDE_JSON_WITH_CALLS = {
     **CLAUDE_JSON_RESULT,
     "tool_calls": [
@@ -100,7 +87,6 @@ CLAUDE_JSON_WITH_CALLS = {
 }
 
 
-# Transcript rows (assistant + tool_use) — Claude project JSONL shape
 def _transcript_lines(*, include_tool_search: bool = False) -> str:
     content_blocks: list[dict] = []
     if include_tool_search:
@@ -220,26 +206,37 @@ CODEX_JSONL = "\n".join(
     ]
 )
 
+CODEX_V0147_JSONL = "\n".join(
+    [
+        json.dumps(
+            {
+                "type": "thread.started",
+                "thread_id": "019ff6af-69df-7022-b353-322ffe1ececb",
+            }
+        ),
+        json.dumps({"type": "turn.started"}),
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "item_0", "type": "agent_message", "text": "PING"},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "turn.completed",
+                "usage": {
+                    "input_tokens": 16050,
+                    "cached_input_tokens": 15104,
+                    "cache_write_input_tokens": 0,
+                    "output_tokens": 5,
+                    "reasoning_output_tokens": 0,
+                },
+            }
+        ),
+    ]
+)
 
-# ---------------------------------------------------------------------------
-# strip / parse unit tests
-# ---------------------------------------------------------------------------
-
-
-def test_strip_mcp_prefix():
-    assert strip_mcp_prefix("mcp__plane__list_work_items") == "list_work_items"
-    assert strip_mcp_prefix("mcp__plane-mcp-server__find_work_items") == "find_work_items"
-    assert strip_mcp_prefix("list_work_items") == "list_work_items"
-    assert strip_mcp_prefix("Bash") == "Bash"
-
-
-def test_is_plane_mcp_tool():
-    assert is_plane_mcp_tool("mcp__plane__find_work_items")
-    assert is_plane_mcp_tool("mcp__plane-foo__x")
-    assert not is_plane_mcp_tool("ToolSearch")
-    assert not is_plane_mcp_tool("Bash")
-    assert not is_plane_mcp_tool("mcp__other__tool")
-    assert not is_plane_mcp_tool("find_work_items")
+REPO = Path(__file__).resolve().parents[3]
 
 
 def test_normalize_claude_usage_real_shape():
@@ -299,38 +296,6 @@ def test_parse_codex_jsonl_events():
     assert tools == ["find_work_items"]
     assert [c["tool"] for c in out["client_tool_calls"]] == ["exec_command"]
     assert out["stopped_reason"] == "end_turn"
-
-
-# Live-captured codex v0.147.0 `codex exec --json` shape (exact four lines).
-CODEX_V0147_JSONL = "\n".join(
-    [
-        json.dumps(
-            {
-                "type": "thread.started",
-                "thread_id": "019ff6af-69df-7022-b353-322ffe1ececb",
-            }
-        ),
-        json.dumps({"type": "turn.started"}),
-        json.dumps(
-            {
-                "type": "item.completed",
-                "item": {"id": "item_0", "type": "agent_message", "text": "PING"},
-            }
-        ),
-        json.dumps(
-            {
-                "type": "turn.completed",
-                "usage": {
-                    "input_tokens": 16050,
-                    "cached_input_tokens": 15104,
-                    "cache_write_input_tokens": 0,
-                    "output_tokens": 5,
-                    "reasoning_output_tokens": 0,
-                },
-            }
-        ),
-    ]
-)
 
 
 def test_parse_codex_jsonl_events_v0147_schema():
@@ -612,26 +577,6 @@ def test_claude_driver_server_command_override(tmp_path: Path):
     assert server["env"]["PLANE_FOREIGN_MODE"] == "candidate"
 
 
-def test_agent_run_dict_keeps_action_arg():
-    run = AgentRun(
-        calls=[
-            {"tool": "work_item", "args": {"action": "create", "name": "x"}, "origin": "plane"},
-            {"tool": "get_pql_reference", "args": {}, "origin": "plane"},
-        ],
-        final_text="done",
-        usage=None,
-        stopped_reason="end_turn",
-    )
-    d = agent_run_to_harness_dict(
-        run,
-        optimal=set(),
-        alternate=set(),
-        classify=lambda t, o, a: "out_of_set",
-    )
-    assert d["calls"][0]["action"] == "create"
-    assert "action" not in d["calls"][1]
-
-
 def test_codex_driver_parses_fake_stdout_no_live():
     def fake_run(cmd, **kwargs):
         assert cmd[0] == "codex"
@@ -662,196 +607,6 @@ def test_codex_driver_refuses_live_by_default():
         driver.run_task("x", mcp_env={}, model=None, max_turns=1)
 
 
-def test_agent_run_to_harness_dict_excludes_toolsearch_from_mispicks():
-    """F1: ToolSearch must not inflate out_of_set or num_calls."""
-    run = AgentRun(
-        calls=[
-            normalize_tool_call("mcp__plane__find_work_items", {"project": "A"}),
-        ],
-        client_tool_calls=[
-            normalize_tool_call("ToolSearch", {"query": "work items"}),
-        ],
-        final_text="done",
-        usage={
-            "input_tokens": 10,
-            "output_tokens": 865,
-            "cache_read_input_tokens": 250433,
-            "cache_creation_input_tokens": 33838,
-            "total_cost_usd": 0.29,
-            "modelUsage": {
-                "claude-sonnet": {
-                    "inputTokens": 10,
-                    "outputTokens": 865,
-                    "cacheReadInputTokens": 250433,
-                    "cacheCreationInputTokens": 33838,
-                    "costUSD": 0.29,
-                }
-            },
-        },
-        usage_total={
-            "input_tokens": 10,
-            "output_tokens": 865,
-            "cache_read_input_tokens": 250433,
-            "cache_creation_input_tokens": 33838,
-            "total_input_tokens_including_cache": 10 + 250433 + 33838,
-            "total_cost_usd": 0.29,
-            "source": "modelUsage",
-        },
-        stopped_reason="end_turn",
-        usage_scope="run",
-        call_source="transcript",
-        hit_max_turns=False,
-        wall_time_s=1.5,
-    )
-    out = agent_run_to_harness_dict(
-        run,
-        optimal={"find_work_items"},
-        alternate={"get_work_item"},
-        classify=classify_call,
-    )
-    assert out["num_calls"] == 1
-    assert out["out_of_set_calls"] == 0
-    assert out["calls"][0]["class"] == "optimal"
-    assert out["client_tool_call_count"] == 1
-    assert out["client_tool_calls"][0]["tool"] == "ToolSearch"
-    # F2: cum_input_tokens null — not the misleading uncached-only 10
-    assert out["cum_input_tokens"] is None
-    assert out["cum_input_tokens_reason"]
-    assert out["usage_total"]["total_input_tokens_including_cache"] == 10 + 250433 + 33838
-    assert out["usage_per_iteration"] == []
-    assert out["calls"][0]["result_tokens"] == 0
-    assert out["calls"][0]["result_tokens_estimated"] is True
-    assert out["result_tokens_estimated"] is True
-    assert "result_tokens_skipped_reason" not in out
-
-
-def test_agent_run_hit_max_maps_to_hit_max_iterations():
-    run = AgentRun(
-        calls=[],
-        final_text="",
-        usage=None,
-        stopped_reason="end_turn",
-        hit_max_turns=True,
-        call_source="json",
-    )
-    out = agent_run_to_harness_dict(run, optimal=set(), alternate=set(), classify=classify_call)
-    assert out["hit_max_iterations"] is True
-    assert out["stop_reason"] == "max_turns"
-
-
-def test_agent_run_to_harness_dict_does_not_guess_usage_total():
-    """Generic row mapping must not invent usage_total from a vendor usage dict.
-
-    Drivers own normalization (ClaudeCliDriver via normalize_claude_usage,
-    CodexCliDriver builds its own). Missing usage_total stays None.
-    """
-    run = AgentRun(
-        calls=[],
-        final_text="ok",
-        usage={
-            "input_tokens": 5000,
-            "output_tokens": 200,
-            # Codex-ish shape — not Claude modelUsage. A Claude rebuild would
-            # silently produce a wrong / empty total if reintroduced.
-            "total_token_usage": {"input_tokens": 5000, "output_tokens": 200},
-        },
-        usage_total=None,
-        stopped_reason="completed",
-        usage_scope="run",
-        call_source="stream",
-    )
-    out = agent_run_to_harness_dict(
-        run,
-        optimal=set(),
-        alternate=set(),
-        classify=classify_call,
-    )
-    assert out["usage"] == run.usage
-    assert out["usage_total"] is None
-
-
-def test_agent_run_payload_uses_importable_tokenizer(monkeypatch):
-    class FakeEncoding:
-        def encode(self, text):
-            assert text == "serialized workspace result"
-            return [10, 20, 30]
-
-    class FakeTiktoken:
-        @staticmethod
-        def get_encoding(name):
-            assert name == "cl100k_base"
-            return FakeEncoding()
-
-    monkeypatch.setitem(sys.modules, "tiktoken", FakeTiktoken)
-    run = AgentRun(
-        calls=[
-            {
-                "tool": "find_work_items",
-                "args": {},
-                "origin": "plane",
-                "result_chars": len("serialized workspace result"),
-                "result_text": "serialized workspace result",
-            }
-        ],
-        final_text="ok",
-        usage=None,
-        stopped_reason="completed",
-        usage_scope="run",
-        call_source="proxy",
-    )
-
-    out = agent_run_to_harness_dict(
-        run,
-        optimal={"find_work_items"},
-        alternate=set(),
-        classify=classify_call,
-    )
-
-    assert out["calls"][0]["result_tokens"] == 3
-    assert out["calls"][0]["result_tokens_estimated"] is False
-    assert out["calls"][0]["result_token_count_method"] == "tiktoken:cl100k_base"
-    assert out["result_tokens_estimated"] is False
-    assert out["result_tokens_mode"] == "measured"
-    assert "result_text" not in out["calls"][0]
-
-
-def test_agent_run_payload_falls_back_to_shared_estimator_without_tokenizer(monkeypatch):
-    monkeypatch.setitem(sys.modules, "tiktoken", None)
-    text = "payload without a tokenizer"
-    run = AgentRun(
-        calls=[
-            {
-                "tool": "find_work_items",
-                "args": {},
-                "origin": "plane",
-                "result_chars": len(text),
-                "result_text": text,
-            }
-        ],
-        final_text="ok",
-        usage=None,
-        stopped_reason="completed",
-        usage_scope="run",
-        call_source="proxy",
-    )
-
-    out = agent_run_to_harness_dict(
-        run,
-        optimal={"find_work_items"},
-        alternate=set(),
-        classify=classify_call,
-    )
-
-    assert out["calls"][0]["result_tokens"] == estimate_result_tokens(len(text))
-    assert out["calls"][0]["result_tokens_estimated"] is True
-    assert out["result_tokens_estimated"] is True
-
-
-# ---------------------------------------------------------------------------
-# Plumbing
-# ---------------------------------------------------------------------------
-
-
 def test_known_drivers():
     assert KNOWN_DRIVERS == {"api", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"}
 
@@ -862,259 +617,336 @@ def test_get_driver_api():
     assert isinstance(get_driver("codex-cli"), CodexCliDriver)
 
 
-def test_parse_args_accepts_driver():
-    a = parse_args(["--driver", "claude-cli", "--dry-run"])
-    assert a.driver == "claude-cli"
-    b = parse_args(["--dry-run"])
-    assert b.driver == "api"
-    assert b.model == "standard"
-    assert b.provider == "anthropic"
-    assert b.record_result_payloads is False
-    c = parse_args(["--driver", "claude-cli", "--record-result-payloads", "--dry-run"])
-    assert c.record_result_payloads is True
-
-
-def test_stdio_env_still_works_for_cli_drivers(monkeypatch):
-    monkeypatch.setenv("EVAL_PLANE_API_KEY", "k")
-    monkeypatch.setenv("EVAL_PLANE_WORKSPACE_SLUG", "ws")
-    monkeypatch.delenv("EVAL_PLANE_BASE_URL", raising=False)
-    env = stdio_server_env()
-    assert env["PLANE_API_KEY"] == "k"
-    assert "ANTHROPIC_API_KEY" not in env
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # exists but not owned by us
-    return True
-
-
-def test_run_cli_subprocess_kills_process_group_on_timeout(tmp_path: Path):
-    """Timeout kills the whole process group, not just the parent (codex node→native case).
-
-    Sticky CLI: parent spawns a grandchild in the same group that would keep
-    stdout open if only the parent were killed. Assert the runner returns
-    quickly and both PIDs are dead.
-    """
-    pidfile = tmp_path / "pids.txt"
-    script = tmp_path / "sticky_cli.py"
-    script.write_text(
-        textwrap.dedent(
-            f"""
-            import os, subprocess, sys, time
-            from pathlib import Path
-            pidfile = Path({str(pidfile)!r})
-            # Grandchild stays in the same process group (no start_new_session).
-            child = subprocess.Popen(
-                [sys.executable, "-c", "import time; time.sleep(9999)"],
-            )
-            pidfile.write_text(f"{{os.getpid()}}\\n{{child.pid}}\\n")
-            # Hold our stdout open forever (simulates grandchild pipe hold).
-            time.sleep(9999)
-            """
-        ),
-        encoding="utf-8",
+def test_parse_claude_json_preserves_error_subtype():
+    out = parse_claude_json_result(
+        {
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": True,
+            "result": "x",
+            "session_id": "s",
+            "num_turns": 1,
+        }
     )
-
-    t0 = time.monotonic()
-    with pytest.raises(subprocess.TimeoutExpired) as ei:
-        run_cli_subprocess(
-            [sys.executable, str(script)],
-            timeout=1.0,
-            capture_output=True,
-            text=True,
-        )
-    elapsed = time.monotonic() - t0
-    assert elapsed < 6.0, f"timeout path took {elapsed:.1f}s (unbounded communicate hang?)"
-    assert getattr(ei.value, "killed_process_group", False) is True
-
-    # Wait briefly for reaping
-    deadline = time.monotonic() + 3.0
-    pids: list[int] = []
-    while time.monotonic() < deadline:
-        if pidfile.is_file():
-            pids = [int(x) for x in pidfile.read_text().splitlines() if x.strip()]
-            if len(pids) == 2 and not any(_pid_alive(p) for p in pids):
-                break
-        time.sleep(0.05)
-    assert len(pids) == 2, f"pidfile incomplete: {pidfile} {pids}"
-    alive = [p for p in pids if _pid_alive(p)]
-    assert not alive, f"process group members still alive: {alive}"
+    assert out["stopped_reason"] == "error_during_execution"
 
 
-def test_killpg_reaps_grandchild_when_leader_already_dead(tmp_path: Path):
-    """killpg(leader_pid) works after the leader is reaped (no getpgid / no proc.kill fallback).
+def test_claude_driver_timeout_returns_agent_run_not_raise():
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout") or 120)
 
-    Simulates: leader already gone, only grandchild remains in the process group.
-    """
-    import signal
-    from types import SimpleNamespace
-
-    from evals.drivers import kill_process_group
-
-    pidfile = tmp_path / "pids.txt"
-    script = tmp_path / "sticky_leader.py"
-    script.write_text(
-        textwrap.dedent(
-            f"""
-            import os, subprocess, sys, time
-            from pathlib import Path
-            pidfile = Path({str(pidfile)!r})
-            child = subprocess.Popen(
-                [sys.executable, "-c", "import time; time.sleep(9999)"],
-            )
-            pidfile.write_text(f"{{os.getpid()}}\\n{{child.pid}}\\n")
-            time.sleep(9999)
-            """
-        ),
-        encoding="utf-8",
-    )
-    leader = subprocess.Popen(
-        [sys.executable, str(script)],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        deadline = time.monotonic() + 3.0
-        pids: list[int] = []
-        while time.monotonic() < deadline:
-            if pidfile.is_file():
-                pids = [int(x) for x in pidfile.read_text().splitlines() if x.strip()]
-                if len(pids) == 2:
-                    break
-            time.sleep(0.02)
-        assert len(pids) == 2, pids
-        leader_pid, child_pid = pids
-
-        # Kill ONLY the leader (not the group) — grandchild survives in the group.
-        os.kill(leader_pid, signal.SIGKILL)
-        try:
-            leader.wait(timeout=2.0)
-        except subprocess.TimeoutExpired:
-            pass
-        assert not _pid_alive(leader_pid)
-        assert _pid_alive(child_pid), "precondition: grandchild must still be alive"
-
-        t0 = time.monotonic()
-        # Direct killpg(leader_pid) — pgid == original leader pid under start_new_session.
-        ok = kill_process_group(SimpleNamespace(pid=leader_pid))
-        assert ok is True
-        assert time.monotonic() - t0 < 3.0
-
-        deadline = time.monotonic() + 3.0
-        while time.monotonic() < deadline and _pid_alive(child_pid):
-            time.sleep(0.05)
-        assert not _pid_alive(child_pid), "grandchild survived killpg after leader death"
-    finally:
-        if leader.poll() is None:
-            try:
-                os.killpg(leader.pid, signal.SIGKILL)
-            except Exception:
-                leader.kill()
-            try:
-                leader.wait(timeout=2.0)
-            except Exception:
-                pass
-
-
-def test_run_cli_subprocess_baseexception_kills_group(tmp_path: Path, monkeypatch):
-    """Non-TimeoutExpired exceptions mid-communicate must still kill the process group."""
-    import evals.drivers as drivers_mod
-
-    pidfile = tmp_path / "pids.txt"
-    script = tmp_path / "sticky.py"
-    script.write_text(
-        textwrap.dedent(
-            f"""
-            import os, subprocess, sys, time
-            from pathlib import Path
-            pidfile = Path({str(pidfile)!r})
-            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(9999)"])
-            pidfile.write_text(f"{{os.getpid()}}\\n{{child.pid}}\\n")
-            time.sleep(9999)
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    real_comm = subprocess.Popen.communicate
-    calls = {"n": 0}
-
-    def boom_communicate(self, *a, **k):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            # Wait until pidfile is written so we can assert both die.
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline:
-                if pidfile.is_file() and len(pidfile.read_text().splitlines()) >= 2:
-                    break
-                time.sleep(0.02)
-            raise KeyboardInterrupt("injected mid-communicate")
-        return real_comm(self, *a, **k)
-
-    monkeypatch.setattr(subprocess.Popen, "communicate", boom_communicate)
-
-    t0 = time.monotonic()
-    with pytest.raises(KeyboardInterrupt):
-        run_cli_subprocess(
-            [sys.executable, str(script)],
-            timeout=30.0,
-            capture_output=True,
-            text=True,
-        )
-    assert time.monotonic() - t0 < 6.0
-
-    deadline = time.monotonic() + 3.0
-    pids: list[int] = []
-    while time.monotonic() < deadline:
-        if pidfile.is_file():
-            pids = [int(x) for x in pidfile.read_text().splitlines() if x.strip()]
-            if len(pids) == 2 and not any(_pid_alive(p) for p in pids):
-                break
-        time.sleep(0.05)
-    assert len(pids) == 2
-    alive = [p for p in pids if _pid_alive(p)]
-    assert not alive, f"group survived BaseException path: {alive}"
-    # silence unused import lint if any
-    assert drivers_mod.run_cli_subprocess is run_cli_subprocess
-
-
-def test_cli_driver_timeout_notes_process_group_kill(tmp_path: Path):
-    """ClaudeCliDriver timeout path records timeout_killed_process_group note."""
-    script = tmp_path / "slow.py"
-    script.write_text(
-        textwrap.dedent(
-            """
-            import time
-            time.sleep(9999)
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    # Use real run_cli_subprocess with a tiny timeout via fake that wraps it.
-    from evals.drivers import run_cli_subprocess as real_runner
-
-    def short_timeout_runner(cmd, **kwargs):
-        kwargs = dict(kwargs)
-        kwargs["timeout"] = 0.5
-        # Replace the CLI binary with our sticky sleeper
-        return real_runner([sys.executable, str(script)], **kwargs)
-
-    driver = ClaudeCliDriver(runner=short_timeout_runner, use_proxy=False)
-    t0 = time.monotonic()
+    driver = ClaudeCliDriver(runner=fake_run)
     run = driver.run_task(
+        "hello",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="sonnet",
+        max_turns=2,
+        cwd=Path("/tmp"),
+    )
+    assert run.stopped_reason == "timeout"
+    assert run.calls == []
+    assert any("timeout after" in n for n in run.notes)
+
+
+def test_claude_driver_json_parse_failure_raises_for_infra_cli():
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="not-json", stderr="boom")
+
+    driver = ClaudeCliDriver(runner=fake_run)
+    with pytest.raises(RuntimeError, match="claude cli failed"):
+        driver.run_task(
+            "hello",
+            mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+            model=None,
+            max_turns=1,
+            cwd=Path("/tmp"),
+        )
+
+
+def test_claude_driver_uses_proxy_in_mcp_config(tmp_path: Path):
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        cfg = Path(cmd[cmd.index("--mcp-config") + 1])
+        seen["mcp"] = json.loads(cfg.read_text())
+        # Leave empty sidecar (proxy not really run under fake runner).
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "done",
+                    "session_id": "s",
+                    "num_turns": 1,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }
+            ),
+            stderr="",
+        )
+
+    driver = ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin="/venv/bin/python")
+    run = driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="sonnet",
+        max_turns=3,
+        cwd=tmp_path,
+    )
+    server = seen["mcp"]["mcpServers"]["plane"]
+    assert server["command"] == "/venv/bin/python"
+    assert server["args"][0:3] == ["-m", "evals.proxy", "--log"]
+    assert "--" in server["args"]
+    assert "plane_mcp" in server["args"]
+    assert "proxy_sidecar_empty" in run.notes
+
+
+def test_claude_driver_proxy_disabled_no_wrap(tmp_path: Path):
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        cfg = Path(cmd[cmd.index("--mcp-config") + 1])
+        seen["mcp"] = json.loads(cfg.read_text())
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "ok",
+                    "session_id": "s",
+                    "num_turns": 1,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }
+            ),
+            stderr="",
+        )
+
+    driver = ClaudeCliDriver(runner=fake_run, use_proxy=False, python_bin="/venv/bin/python")
+    driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model=None,
+        max_turns=1,
+        cwd=tmp_path,
+    )
+    server = seen["mcp"]["mcpServers"]["plane"]
+    assert server["args"] == ["-m", "plane_mcp", "stdio"]
+
+
+def test_antigravity_driver_writes_mcp_config_under_isolated_home(tmp_path: Path):
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        env = kwargs.get("env") or {}
+        seen["env"] = env
+        home = env.get("HOME")
+        if home:
+            cfg = Path(home) / ".gemini" / "config" / "mcp_config.json"
+            seen["mcp_cfg"] = json.loads(cfg.read_text()) if cfg.is_file() else None
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"result":"hi"}', stderr="")
+
+    driver = AntigravityCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
+    run = driver.run_task(
+        "do it",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws", "PATH": "/bin"},
+        model="gemini-2.5",
+        max_turns=5,
+        cwd=tmp_path,
+    )
+    assert seen["cmd"][0] == "agy"
+    assert "-p" in seen["cmd"]
+    assert "--output-format" in seen["cmd"]
+    assert "json" in seen["cmd"]
+    assert "--model" in seen["cmd"] and "gemini-2.5" in seen["cmd"]
+    assert "no_turn_cap" in run.notes
+    assert seen.get("mcp_cfg") is not None
+    assert "mcpServers" in seen["mcp_cfg"]
+    assert "evals.proxy" in " ".join(seen["mcp_cfg"]["mcpServers"]["plane"]["args"])
+
+
+def test_write_antigravity_mcp_config_shape(tmp_path: Path):
+    p = tmp_path / "mcp_config.json"
+    write_antigravity_mcp_config(p, command="python", args=["-m", "x"], env={"A": "1"})
+    data = json.loads(p.read_text())
+    assert data["mcpServers"]["plane"]["command"] == "python"
+    assert data["mcpServers"]["plane"]["env"]["A"] == "1"
+
+
+def test_opencode_driver_writes_project_config(tmp_path: Path):
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        cwd = kwargs.get("cwd")
+        seen["cwd"] = cwd
+        cfg = Path(cwd) / "opencode.json" if cwd else None
+        seen["opencode_cfg"] = json.loads(cfg.read_text()) if cfg and cfg.is_file() else None
+        return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+    driver = OpencodeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
+    run = driver.run_task(
+        "hello",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="openai/gpt-test",
+        max_turns=4,
+        cwd=tmp_path,
+    )
+    assert seen["cmd"][0] == "opencode"
+    assert "run" in seen["cmd"]
+    assert "--format" in seen["cmd"] and "json" in seen["cmd"]
+    assert "-m" in seen["cmd"] and "openai/gpt-test" in seen["cmd"]
+    assert "no_turn_cap" in run.notes
+    data = seen["opencode_cfg"]
+    assert data is not None
+    assert data["mcp"]["plane"]["type"] == "local"
+    assert "evals.proxy" in " ".join(data["mcp"]["plane"]["command"])
+
+
+def test_write_opencode_mcp_config_shape(tmp_path: Path):
+    p = tmp_path / "opencode.json"
+    write_opencode_mcp_config(p, command=["py", "-m", "plane_mcp", "stdio"], env={"K": "V"})
+    data = json.loads(p.read_text())
+    assert data["mcp"]["plane"]["command"][0] == "py"
+    assert data["mcp"]["plane"]["environment"]["K"] == "V"
+
+
+def test_known_drivers_and_get_driver():
+    assert "antigravity-cli" in KNOWN_DRIVERS
+    assert "opencode-cli" in KNOWN_DRIVERS
+    assert isinstance(get_driver("antigravity-cli"), AntigravityCliDriver)
+    assert isinstance(get_driver("opencode-cli"), OpencodeCliDriver)
+
+
+def test_prepare_antigravity_fake_home_dual_write_and_auth_only(tmp_path: Path):
+    real_home = tmp_path / "real"
+    cli = real_home / ".gemini" / "antigravity-cli"
+    cli.mkdir(parents=True)
+    token_path = cli / "antigravity-oauth-token"
+    token_path.write_text("secret", encoding="utf-8")
+    # Snapshot real home before setup — must be byte-identical after.
+    before = {p.relative_to(real_home): p.read_bytes() for p in real_home.rglob("*") if p.is_file()}
+
+    fake = tmp_path / "fake"
+    prepare_antigravity_fake_home(
+        fake,
+        command="python",
+        args=["-m", "evals.proxy", "--log", "s", "--", "x"],
+        env={"PLANE_API_KEY": "k"},
+        real_home=real_home,
+    )
+    p1 = fake / ".gemini" / "config" / "mcp_config.json"
+    p2 = fake / ".gemini" / "antigravity-cli" / "mcp_config.json"
+    assert p1.is_file() and p2.is_file()
+    fake_cli = fake / ".gemini" / "antigravity-cli"
+    assert fake_cli.is_dir() and not fake_cli.is_symlink()
+    # Auth artifact is a plain COPY — never a symlink (no write-through path).
+    token = fake_cli / "antigravity-oauth-token"
+    assert token.is_file() and not token.is_symlink()
+    assert token.read_text(encoding="utf-8") == "secret"
+    # Writing the fake token must not mutate the real one.
+    token.write_text("mutated", encoding="utf-8")
+    assert token_path.read_text(encoding="utf-8") == "secret"
+    # mcp_config is a real file in the fake tree, not inside real home.
+    assert not (cli / "mcp_config.json").exists()
+    data = json.loads(p1.read_text())
+    assert data["mcpServers"]["plane"]["command"] == "python"
+    # Real home byte-for-byte untouched (including oauth token).
+    after = {p.relative_to(real_home): p.read_bytes() for p in real_home.rglob("*") if p.is_file()}
+    assert after == before
+
+
+def test_antigravity_fallback_runner_timeout_harvests(tmp_path: Path):
+    """TypeError fallback path's TimeoutExpired must still harvest via wait-for-meta."""
+    call_row = {
+        "tool": "g_tool",
+        "args": {},
+        "is_error": False,
+        "result_chars": 1,
+        "duration_ms": 1,
+        "seq": 1,
+    }
+    meta = {
+        "row_type": "proxy_meta",
+        "relayed_lines": 1,
+        "unparsed_lines": 0,
+        "unmatched_responses": 0,
+        "notifications": 0,
+        "pending_left": 0,
+        "child_killed": False,
+    }
+
+    def fake_run(cmd, **kwargs):
+        run_env = kwargs.get("env") or {}
+        home = run_env.get("HOME")
+        if home:
+            # First attempt includes env= — plant sidecar from dual-written mcp config,
+            # then reject env so the driver retries without it.
+            for rel in (
+                Path(home) / ".gemini" / "config" / "mcp_config.json",
+                Path(home) / ".gemini" / "antigravity-cli" / "mcp_config.json",
+            ):
+                if rel.is_file():
+                    cfg = json.loads(rel.read_text())
+                    args = cfg["mcpServers"]["plane"]["args"]
+                    side = Path(args[args.index("--log") + 1])
+                    side.write_text(
+                        "\n".join(json.dumps(r) for r in (call_row, meta)) + "\n",
+                        encoding="utf-8",
+                    )
+                    break
+            raise TypeError("runner does not accept env=")
+        # Fallback call (no env) times out — outer except must still harvest.
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+
+    driver = AntigravityCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
+    run = driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model=None,
+        max_turns=1,
+        cwd=tmp_path,
+    )
+    assert run.stopped_reason == "timeout"
+    assert run.call_source == "proxy"
+    assert len(run.calls) == 1
+    assert run.calls[0]["tool"] == "g_tool"
+
+
+def test_claude_mcp_env_has_pythonpath_when_proxied(tmp_path: Path):
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        cfg = Path(cmd[cmd.index("--mcp-config") + 1])
+        seen["env"] = json.loads(cfg.read_text())["mcpServers"]["plane"]["env"]
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "ok",
+                    "session_id": "s",
+                    "num_turns": 1,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }
+            ),
+            stderr="",
+        )
+
+    ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable).run_task(
         "hi",
         mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
         model="sonnet",
         max_turns=1,
         cwd=tmp_path,
     )
-    assert time.monotonic() - t0 < 6.0
-    assert run.stopped_reason == "timeout"
-    assert "timeout_killed_process_group" in run.notes
+    assert str(REPO) in seen["env"].get("PYTHONPATH", "")

@@ -1,9 +1,4 @@
-"""Adversarial offline tests for eval verifiers (false-PASS / false-FAIL regressions).
-
-Each test constructs a minimal fake plane client + ctx that embodies the bug
-scenario and asserts the fixed verifier now returns the correct outcome.
-No network; no live Plane.
-"""
+"""Offline eval tests for R, W, S, and C verifiers."""
 
 from __future__ import annotations
 
@@ -12,7 +7,6 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
 from plane.errors.errors import HttpError
 
 from evals.seed import (
@@ -30,10 +24,6 @@ from evals.tasks.cross import verify_c1
 from evals.tasks.read import verify_r3
 from evals.tasks.schema import verify_s3, verify_s5
 from evals.tasks.write import verify_w3, verify_w4, verify_w5, verify_w6, verify_w7, verify_w8
-
-# ---------------------------------------------------------------------------
-# Tiny helpers
-# ---------------------------------------------------------------------------
 
 
 class _Page:
@@ -53,17 +43,6 @@ def _item(id: str, name: str, **kw: Any) -> SimpleNamespace:
 
 def _run() -> dict[str, Any]:
     return {"final_text": "", "calls": []}
-
-
-@pytest.fixture(autouse=True)
-def _no_redis(monkeypatch):
-    monkeypatch.delenv("REDIS_HOST", raising=False)
-    monkeypatch.delenv("REDIS_PORT", raising=False)
-
-
-# ---------------------------------------------------------------------------
-# F1 W7 — reverse blocked_by must NOT pass
-# ---------------------------------------------------------------------------
 
 
 class _DepsDump:
@@ -584,11 +563,6 @@ def test_f8_seed_r3_due_date_function_matches():
     assert due == sun
 
 
-# ---------------------------------------------------------------------------
-# Minor W8 — exactly 120, not >= 120
-# ---------------------------------------------------------------------------
-
-
 class _W8Plane:
     def __init__(self, durations: list[int]):
         self.work_items = SimpleNamespace(
@@ -650,11 +624,6 @@ def test_minor_r3_exact_item_contract_passes_in_any_order():
         assert ok is True, note
 
     return asyncio.run(_go())
-
-
-# ---------------------------------------------------------------------------
-# S5 — both cycle_view and is_time_tracking_enabled required
-# ---------------------------------------------------------------------------
 
 
 class _S5Plane:

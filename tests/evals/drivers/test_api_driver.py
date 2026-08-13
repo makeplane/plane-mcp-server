@@ -1,4 +1,4 @@
-"""Offline tests for the provider-generic API eval driver."""
+"""Offline eval tests for api driver."""
 
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from evals.drivers.api import (
     resolve_backend_model,
     unregister_backend,
 )
-from evals.results import agent_run_to_harness_dict
 from evals.token_counting import estimate_result_tokens
 
 
@@ -106,6 +105,26 @@ def run_driver(driver: ApiDriver, *, max_turns: int = 5):
         max_turns,
         system="system",
     )
+
+
+class FakeAnthropicMessages:
+    def __init__(self, responses: list[dict[str, Any]]) -> None:
+        self.responses = deque(responses)
+        self.requests: list[dict[str, Any]] = []
+
+    def create(self, **kwargs):
+        self.requests.append(copy.deepcopy(kwargs))
+        return self.responses.popleft()
+
+
+class FakeOpenAICompletions:
+    def __init__(self, responses: list[dict[str, Any]]) -> None:
+        self.responses = deque(responses)
+        self.requests: list[dict[str, Any]] = []
+
+    def create(self, **kwargs):
+        self.requests.append(copy.deepcopy(kwargs))
+        return self.responses.popleft()
 
 
 def test_registered_third_party_backend_runs_without_driver_changes():
@@ -353,80 +372,6 @@ def test_api_driver_uses_optional_backend_token_counter():
     assert run.token_count_failures == 0
 
 
-def test_api_driver_maps_every_legacy_row_field():
-    backend = FakeBackend(
-        [
-            Turn(
-                text="",
-                tool_calls=[ToolCall("a", "lookup", {"q": "a"})],
-                usage=Usage(4, 1),
-                stop_reason=StopReason.TOOL_USE,
-            ),
-            Turn(
-                text="done",
-                tool_calls=[],
-                usage=None,
-                stop_reason=StopReason.END_TURN,
-                provider_stop_reason="fake_done",
-            ),
-        ]
-    )
-    run = run_driver(make_driver(backend, FakeMcpSession([ToolResult(call_id="a", text="12345")])))
-    row = agent_run_to_harness_dict(
-        run,
-        optimal={"lookup"},
-        alternate=set(),
-        classify=lambda tool, optimal, alternate: (
-            "optimal" if tool in optimal else "alternate" if tool in alternate else "out_of_set"
-        ),
-    )
-
-    required = {
-        "final_text",
-        "calls",
-        "num_calls",
-        "errored_calls",
-        "alternate_calls",
-        "out_of_set_calls",
-        "total_result_tokens",
-        "usage_per_iteration",
-        "cum_input_tokens",
-        "wall_time_s",
-        "stop_reason",
-        "provider_stop_reason",
-        "hit_max_iterations",
-        "result_pair_mismatch",
-        "token_count_failures",
-    }
-    assert required <= row.keys()
-    assert {
-        "tool",
-        "class",
-        "args_chars",
-        "result_tokens",
-        "result_chars",
-        "result_kind",
-        "is_error",
-    } <= row["calls"][0].keys()
-    assert row["calls"][0]["result_chars"] == 5
-    assert row["calls"][0]["result_tokens"] == estimate_result_tokens(5) == 2
-    assert row["result_tokens_estimated"] is True
-    assert row["provider"] == "fake"
-    assert row["model"] == "fake-actual"
-    assert row["requested_model"] == "fake-requested"
-    assert row["provider_stop_reason"] == "fake_done"
-
-
-class FakeAnthropicMessages:
-    def __init__(self, responses: list[dict[str, Any]]) -> None:
-        self.responses = deque(responses)
-        self.requests: list[dict[str, Any]] = []
-
-    def create(self, **kwargs):
-        self.requests.append(copy.deepcopy(kwargs))
-        return self.responses.popleft()
-
-
 @pytest.mark.parametrize(
     ("raw_reason", "expected"),
     [
@@ -510,16 +455,6 @@ def test_anthropic_backend_translates_tools_turns_and_results():
     }
     assert second.text == "done"
     assert backend.actual_model == "claude-actual"
-
-
-class FakeOpenAICompletions:
-    def __init__(self, responses: list[dict[str, Any]]) -> None:
-        self.responses = deque(responses)
-        self.requests: list[dict[str, Any]] = []
-
-    def create(self, **kwargs):
-        self.requests.append(copy.deepcopy(kwargs))
-        return self.responses.popleft()
 
 
 @pytest.mark.parametrize(
@@ -678,11 +613,6 @@ def test_openai_backend_normalizes_refusal_for_driver_guard():
     assert turn.provider_stop_reason == "content_filter"
     assert turn.text == "declined"
     assert turn.tool_calls == [ToolCall("danger", "write", {})]
-
-
-# ---------------------------------------------------------------------------
-# MCP translation helpers
-# ---------------------------------------------------------------------------
 
 
 def test_tool_spec_from_mcp_reads_dict_and_object_entries():
