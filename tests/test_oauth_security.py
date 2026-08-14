@@ -22,7 +22,6 @@ from starlette.testclient import TestClient
 
 from plane_mcp.auth import PlaneOAuthProvider
 
-
 # Exact allowed patterns from plane_mcp/server.py
 ALLOWED_REDIRECT_URI_PATTERNS = [
     "http://localhost:*",
@@ -133,16 +132,12 @@ class TestOAuthRedirectAttack:
 
         # The attacker's domain must never appear in any redirect
         location = response.headers.get("location", "")
-        assert "attacker.com" not in location, (
-            f"VULNERABILITY: Attacker domain found in redirect! Location: {location}"
-        )
+        assert "attacker.com" not in location, f"VULNERABILITY: Attacker domain found in redirect! Location: {location}"
 
         # If the server responds with a redirect, it should be to the upstream
         # Plane OAuth provider — with the *server's own* callback URI, not the attacker's
         if response.is_redirect:
-            assert "localhost" in location, (
-                f"Redirect should go to upstream Plane OAuth (localhost), got: {location}"
-            )
+            assert "localhost" in location, f"Redirect should go to upstream Plane OAuth (localhost), got: {location}"
             # The redirect_uri param in the upstream redirect must point to the
             # server's /auth/callback, NOT to the attacker
             assert "attacker" not in location
@@ -164,9 +159,7 @@ class TestOAuthRedirectAttack:
             "unknown-protocol",
         ],
     )
-    def test_malicious_uris_never_appear_in_redirects(
-        self, client: TestClient, malicious_uri: str
-    ) -> None:
+    def test_malicious_uris_never_appear_in_redirects(self, client: TestClient, malicious_uri: str) -> None:
         """Verify various attack vectors never leak into redirect locations."""
         reg = self._register_client(client, malicious_uri)
 
@@ -186,9 +179,7 @@ class TestOAuthRedirectAttack:
         if response.is_redirect:
             # Extract the redirect_uri parameter from the upstream redirect
             # It must be the server's /auth/callback, not the malicious URI
-            assert malicious_uri not in location, (
-                f"VULNERABILITY: Malicious URI leaked into redirect: {location}"
-            )
+            assert malicious_uri not in location, f"VULNERABILITY: Malicious URI leaked into redirect: {location}"
 
     def test_legitimate_redirect_uri_passes(self, client: TestClient) -> None:
         """Sanity check: legitimate localhost URI is accepted and the flow proceeds."""
@@ -208,9 +199,7 @@ class TestOAuthRedirectAttack:
         )
 
         # Should proceed with the OAuth flow (302 to upstream), not error
-        assert response.status_code != 400, (
-            f"Legitimate redirect URI was rejected: {response.text}"
-        )
+        assert response.status_code != 400, f"Legitimate redirect URI was rejected: {response.text}"
 
     def test_cors_blocks_cross_origin_token_theft(self, client: TestClient) -> None:
         """Step 5: Even if attacker got a code, CORS blocks cross-origin token exchange.

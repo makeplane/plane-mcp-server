@@ -1,58 +1,31 @@
-"""Tools for Plane MCP Server."""
+"""Consolidated tool surface: one action-dispatch tool per Plane resource."""
+
+from __future__ import annotations
 
 from fastmcp import FastMCP
+from fastmcp.utilities.logging import get_logger
 
-from plane_mcp.tools.customers import register_customer_tools
-from plane_mcp.tools.cycles import register_cycle_tools
-from plane_mcp.tools.initiatives import register_initiative_tools
-from plane_mcp.tools.intake import register_intake_tools
-from plane_mcp.tools.labels import register_label_tools
-from plane_mcp.tools.milestones import register_milestone_tools
-from plane_mcp.tools.modules import register_module_tools
-from plane_mcp.tools.pages import register_page_tools
-from plane_mcp.tools.pql import register_pql_tools
-from plane_mcp.tools.projects import register_project_tools
-from plane_mcp.tools.releases import register_release_tools
-from plane_mcp.tools.roles import register_role_tools
-from plane_mcp.tools.states import register_state_tools
-from plane_mcp.tools.users import register_user_tools
-from plane_mcp.tools.work_item_activities import register_work_item_activity_tools
-from plane_mcp.tools.work_item_attachments import register_work_item_attachment_tools
-from plane_mcp.tools.work_item_comments import register_work_item_comment_tools
-from plane_mcp.tools.work_item_links import register_work_item_link_tools
-from plane_mcp.tools.work_item_properties import register_work_item_property_tools
-from plane_mcp.tools.work_item_relation_definitions import register_work_item_relation_definition_tools
-from plane_mcp.tools.work_item_relations import register_work_item_relation_tools
-from plane_mcp.tools.work_item_types import register_work_item_type_tools
-from plane_mcp.tools.work_items import register_work_item_tools
-from plane_mcp.tools.work_logs import register_work_log_tools
-from plane_mcp.tools.workspaces import register_workspace_tools
+from plane_mcp.toolkit import StripOutputSchemas
+from plane_mcp.tools.legacy import LegacyNames
+
+logger = get_logger(__name__)
 
 
-def register_tools(mcp: FastMCP) -> None:
-    """Register all tools with the MCP server."""
-    register_project_tools(mcp)
-    register_work_item_tools(mcp)
-    register_work_item_activity_tools(mcp)
-    register_work_item_attachment_tools(mcp)
-    register_work_item_comment_tools(mcp)
-    register_work_item_link_tools(mcp)
-    register_work_item_relation_definition_tools(mcp)
-    register_work_item_relation_tools(mcp)
-    register_work_log_tools(mcp)
-    register_cycle_tools(mcp)
-    register_user_tools(mcp)
-    register_module_tools(mcp)
-    register_initiative_tools(mcp)
-    register_intake_tools(mcp)
-    register_label_tools(mcp)
-    register_page_tools(mcp)
-    register_work_item_property_tools(mcp)
-    register_work_item_type_tools(mcp)
-    register_state_tools(mcp)
-    register_workspace_tools(mcp)
-    register_milestone_tools(mcp)
-    register_role_tools(mcp)
-    register_release_tools(mcp)
-    register_customer_tools(mcp)
-    register_pql_tools(mcp)
+def register_tools(mcp: FastMCP, *, legacy_names: bool = True) -> int:
+    """Register every resource tool. Returns the number advertised."""
+    # Imported here, not at module scope: `registry` imports the resource modules
+    # out of this package, so a top-level import would run while this module is
+    # still initialising.
+    from plane_mcp.tools.registry import RESOURCES, alias_table
+
+    for mod in RESOURCES:
+        mod.register(mcp)
+
+    mcp.add_transform(StripOutputSchemas())
+    if legacy_names:
+        mcp.add_transform(LegacyNames(alias_table()))
+
+    # Several clients cap how many tools they load and drop the rest silently.
+    # One number in the log lets an operator compare against their client's limit.
+    logger.info("Plane MCP: advertising %d tools", len(RESOURCES))
+    return len(RESOURCES)

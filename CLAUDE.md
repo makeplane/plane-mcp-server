@@ -45,7 +45,19 @@ ruff check plane_mcp/
 
 ### Server Factories (`server.py`)
 
-Three factory functions (`get_oauth_mcp`, `get_header_mcp`, `get_stdio_mcp`) each create a `FastMCP` instance, register all tools, and configure the appropriate auth provider. OAuth/HTTP modes use Redis for token storage (falls back to in-memory).
+Three factory functions (`get_oauth_mcp`, `get_header_mcp`, `get_stdio_mcp`) each create a `FastMCP` instance and configure the appropriate auth provider, then hand it to `_configured()` for the middleware stack and tools — one place, so a transport cannot be left a middleware behind. OAuth/HTTP modes use Redis for token storage (falls back to in-memory).
+
+### Middleware (`middleware.py`)
+
+Ordered as registered; the earlier one wraps the later:
+
+| Middleware | Does |
+|---|---|
+| `PlaneLoggingMiddleware` | structured logging, plus the tool name |
+| `CoerceArguments` | repairs arguments a client encoded as strings, before validation (`coercion.py`) |
+| `ValidateActionArguments` | refuses arguments the chosen action does not accept, from the `ACTIONS` declaration |
+
+Coercion runs before validation so an argument is judged by the value it repairs to. `ValidateActionArguments` closes a gap a per-tool schema cannot: every action's parameters share one schema, so an argument meant for another action validated cleanly and was then dropped, and the call answered a different question than the one asked. Only arguments carrying a value are judged, and retired names are exempt — they arrive with no `action` and under their own parameter spelling.
 
 ### Client Context (`client.py`)
 
@@ -58,21 +70,43 @@ Three factory functions (`get_oauth_mcp`, `get_header_mcp`, `get_stdio_mcp`) eac
 
 ### Tools (`tools/`)
 
-29 tool modules organized by Plane domain (projects, work_items, cycles, modules, releases, etc.), totaling 160+ tools. Each module exports a `register_*_tools(mcp: FastMCP)` function called from `tools/__init__.py`.
+One action-dispatch tool per Plane resource: **28 tools, 183 actions, ~57k chars advertised**. `tools/__init__.py` re-exports `register_tools`, so `server.py` and `__main__.py` see a single entry point.
 
-**Tool pattern:**
-```python
-def register_*_tools(mcp: FastMCP) -> None:
-    @mcp.tool()
-    def tool_name(param: str, optional_param: str | None = None) -> SomePlaneModel:
-        """Docstring with Args and Returns sections."""
-        client, workspace_slug = get_plane_client_context()
-        return client.endpoint.operation(workspace_slug=workspace_slug, ...)
-```
+One module per resource, each exporting `NAME`, `ACTIONS`, `LEGACY` and `register(mcp)`. `ACTIONS` is the single source of truth: the tool description and its `ToolAnnotations` are generated from it, and the conformance suite asserts they agree with the function signature. See `tools/README.md` for the full convention.
+
+`tools/` contains resource modules plus `registry.py` (the `RESOURCES` tuple and alias tables) and `legacy.py` (retired-name resolution). Shared helpers live in `plane_mcp/toolkit/`, not here — see below.
+
+Where a resource exists at both project and workspace scope, it resolves that once in a local `_scope_of` rather than through a shared abstraction: the two resources that need it need different shapes (`workitem_type` is a two-way split, `workitem_property` three-way plus a method-name suffix).
+
+`RESOURCES` is an explicit tuple, not a directory scan. Its order is the advertised order and therefore a wire-format guarantee: tool definitions head a client's prompt cache, so reordering invalidates live conversations. Append; never re-sort. `test_resource_order_is_pinned` holds it to a literal list.
+
+**Retired names.** Before consolidation this server exposed 177 tools, one per operation. 169 of those names still resolve, via a `Transform` mapping each to its `(tool, action)` pair with `action` hidden, and keeping the parameter spelling they shipped with (`work_item_id`, not `workitem_id`). The transforms implement `list_tools`/`get_tool` only — execution keeps the full schema, so tool results are unchanged, and nothing is advertised so the listing is unaffected. Seven encoded their action in a parameter and are declared in `LEGACY_UNMAPPED` with a replacement. `tests/tools/_retired_names.py` is the frozen record of all 177.
 
 Tools return Pydantic models from `plane-sdk` and use Python 3.10+ union syntax (`str | None`).
 
+### Toolkit (`toolkit/`)
+
+Shared building blocks for the tool surface, split by *when* they act:
+
+| Module | Acts at | Provides |
+|---|---|---|
+| `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
+| `runtime.py` | call | `missing`, `needs`, `require`, `one_of`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
+| `paging.py` | response | `envelope`, `dump_results`, `pql_failure`, `workitem_page` |
+| `governance.py` | policy | `workspace_owns_resource`, `GOVERNED_BY`, `workspace_owns`, `migration_in_progress`, `plan_gated` |
+| `transforms.py` | listing | `StripOutputSchemas` |
+
+Governance has two questions, and both matter. `workspace_owns_resource` reads the workspace flag that governs a resource — used *before* a write, to pick the scope. `workspace_owns` reads the refusal — used *after*, because the flag is cached and the lockout outlives it being toggled off. There is no single flag: work item types carry their own (`is_work_item_types_enabled`, public `work_item_types`), while states, labels, workflows, templates and automations share `workspace_governance_status` (public `states_owned_by_workspace`). `GOVERNED_BY` maps resource to flag so a newly governed resource is one row.
+
+Names are re-exported from `plane_mcp/toolkit/__init__.py`, so a resource module needs one import: `from plane_mcp.toolkit import Action, build_description, missing, opt`.
+
+These sit outside `tools/` deliberately. They were previously `_`-prefixed modules inside the resource package, where the underscore was the module-discovery filter rather than a privacy marker — which made helper filenames load-bearing and made the most widely imported module in the package look private. Nothing here knows which catalogue is calling it.
+
+Anything that encodes the catalogue's history — `LegacyNames`, the `RESOURCES` tuple — belongs under `tools/`, not here.
+
 ### Testing
+
+`tests/tools/` covers the surface with no network and no credentials: surface-wide invariants, plus every action of every resource executed against `SpyClient`, a stand-in that binds each call against the genuine SDK signature and type-checks its arguments.
 
 Integration tests in `tests/test_integration.py` use `FastMCP.Client` with `StreamableHttpTransport`. Tests run against a live Plane instance — configure via `.env.test` (copy to `.env.test.local` with real values).
 
