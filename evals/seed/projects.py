@@ -88,13 +88,32 @@ def create_project_with_identifier_retry(
     raise last_exc
 
 
+def workspace_feature_state(plane: PlaneClient, workspace_slug: str) -> dict[str, bool | None]:
+    """Read the workspace feature toggles this module writes, so teardown can put them back.
+
+    The API exposes ``customers``; older payloads spell it ``is_customer_enabled``. Returns
+    ``None`` for a value the API did not report rather than guessing a default.
+    """
+    try:
+        features = plane.workspaces.get_features(workspace_slug=workspace_slug)
+    except Exception:
+        return {"customers": None}
+    dump = features.model_dump() if hasattr(features, "model_dump") else {}
+    value = dump.get("customers")
+    if value is None:
+        value = dump.get("is_customer_enabled")
+    if value is None:
+        value = getattr(features, "customers", None)
+    return {"customers": None if value is None else bool(value)}
+
+
 def enable_workspace_features(
     plane: PlaneClient,
     workspace_slug: str,
     *,
     exclude: set[str] | frozenset[str] | None = None,
-) -> None:
-    """Enable workspace-level feature toggles that task preconditions need.
+) -> dict[str, bool | None]:
+    """Set workspace-level feature toggles to what task preconditions need.
 
     Gate (plane-ee): create-customer 403 when
     ``check_workspace_feature(slug, IS_CUSTOMER_ENABLED)`` is false — DB column
@@ -105,18 +124,20 @@ def enable_workspace_features(
     Deliberately does **not** set ``work_item_types``: that flips
     workspace-vs-project type ownership and would change S1/S3 seed mode.
 
-    ``exclude`` may contain ``customers`` (S5 leaves it off for the agent to enable).
+    An excluded feature is written as ``False``, not left alone. A workspace outlives
+    every run, so omitting the write leaves whatever the last task-rep put there —
+    which silently satisfied S5's customers precondition on every run after the first.
+
+    Returns the prior values so teardown can restore them; the harness runs against a
+    Plane instance it does not own and should not leave configuration drift behind.
     """
     skip = set(exclude or ())
-    data: dict[str, bool] = {}
-    if "customers" not in skip:
-        data["customers"] = True
-    if not data:
-        return
+    prior = workspace_feature_state(plane, workspace_slug)
     plane.workspaces.update_features(
         workspace_slug=workspace_slug,
-        data=WorkspaceFeature(**data),
+        data=WorkspaceFeature(customers="customers" not in skip),
     )
+    return prior
 
 
 def enable_project_features(
@@ -139,20 +160,21 @@ def enable_project_features(
     ``exclude`` is a set of feature keys to leave disabled (for S5):
     ``cycles``, ``modules``, ``intakes``, ``pages``, ``worklogs``.
     Default: enable all (other catalog tasks need them).
+
+    An excluded feature is written as ``False`` rather than omitted. Omitting relies on
+    the fresh project's default being off, which is not uniformly true —
+    ``page_view`` defaults to ``True`` — so excluding ``pages`` by omission would leave
+    the feature on.
     """
     skip = set(exclude or ())
 
-    update_values: dict[str, bool] = {}
-    if "cycles" not in skip:
-        update_values["cycle_view"] = True
-    if "modules" not in skip:
-        update_values["module_view"] = True
-    if "intakes" not in skip:
-        update_values["intake_view"] = True
-    if "pages" not in skip:
-        update_values["page_view"] = True
-    if "worklogs" not in skip:
-        update_values["is_time_tracking_enabled"] = True
+    update_values: dict[str, bool] = {
+        "cycle_view": "cycles" not in skip,
+        "module_view": "modules" not in skip,
+        "intake_view": "intakes" not in skip,
+        "page_view": "pages" not in skip,
+        "is_time_tracking_enabled": "worklogs" not in skip,
+    }
     if update_values:
         plane.projects.update(
             workspace_slug=workspace_slug,
@@ -160,15 +182,12 @@ def enable_project_features(
             data=UpdateProject(**update_values),
         )
 
-    feature_values: dict[str, bool] = {}
-    if "cycles" not in skip:
-        feature_values["cycles"] = True
-    if "modules" not in skip:
-        feature_values["modules"] = True
-    if "intakes" not in skip:
-        feature_values["intakes"] = True
-    if "pages" not in skip:
-        feature_values["pages"] = True
+    feature_values: dict[str, bool] = {
+        "cycles": "cycles" not in skip,
+        "modules": "modules" not in skip,
+        "intakes": "intakes" not in skip,
+        "pages": "pages" not in skip,
+    }
     if feature_values:
         plane.projects.update_features(
             workspace_slug=workspace_slug,

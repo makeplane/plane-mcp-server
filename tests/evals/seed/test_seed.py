@@ -191,6 +191,9 @@ def test_seed_s5_leaves_cycles_worklogs_and_customers_off(monkeypatch):
             return data
 
     class _Workspaces:
+        def get_features(self, workspace_slug):
+            return SimpleNamespace(model_dump=lambda: {"customers": True})
+
         def update_features(self, workspace_slug, data):
             calls.append(("ws_features", data.model_dump(exclude_none=True)))
             return data
@@ -201,15 +204,51 @@ def test_seed_s5_leaves_cycles_worklogs_and_customers_off(monkeypatch):
     assert ctx["feature_exclude"] == ["cycles", "worklogs"]
     assert ctx["ws_feature_exclude"] == ["customers"]
     assert ctx["s5_left_customers_off"] is True
-    # No workspace customers enable call (excluded → _enable_workspace_features no-ops)
-    assert not any(c[0] == "ws_features" for c in calls)
+    # Excluded features are written OFF, not omitted. The workspace outlives the run, so
+    # omitting the write leaves the previous rep's value and S5's precondition never holds.
+    ws = next(c[1] for c in calls if c[0] == "ws_features")
+    assert ws.get("customers") is False
+    assert ctx["workspace_features_prior"] == {"customers": True}
     upd = next(c[1] for c in calls if c[0] == "update")
-    assert "cycle_view" not in upd
-    assert "is_time_tracking_enabled" not in upd
+    assert upd.get("cycle_view") is False
+    assert upd.get("is_time_tracking_enabled") is False
     assert upd.get("module_view") is True
     feat = next(c[1] for c in calls if c[0] == "features")
-    assert "cycles" not in feat
+    assert feat.get("cycles") is False
     assert feat.get("modules") is True
+
+
+def test_excluding_pages_turns_page_view_off_despite_its_true_default(monkeypatch):
+    """``page_view`` defaults to True on a fresh project, so omission is not exclusion.
+
+    The other excludable project features default false, which is why omitting the write
+    happened to work for S5. Relying on that is unsound for any feature added later.
+    """
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("EVAL_PLANE_WORKSPACE_SLUG", "test-ws")
+    monkeypatch.delenv("REDIS_HOST", raising=False)
+    monkeypatch.delenv("REDIS_PORT", raising=False)
+
+    calls: list[tuple] = []
+
+    class _Projects:
+        def update(self, workspace_slug, project_id, data):
+            calls.append(("update", data.model_dump(exclude_none=True)))
+            return SimpleNamespace(id=project_id)
+
+        def update_features(self, workspace_slug, project_id, data):
+            calls.append(("features", data.model_dump(exclude_none=True)))
+            return data
+
+    plane = SimpleNamespace(projects=_Projects())
+    seed_mod.enable_project_features(plane, "test-ws", "proj-1", exclude={"pages"})
+
+    upd = next(c[1] for c in calls if c[0] == "update")
+    assert upd.get("page_view") is False
+    feat = next(c[1] for c in calls if c[0] == "features")
+    assert feat.get("pages") is False
+    assert feat.get("cycles") is True
 
 
 def test_seed_cycles_create_add_then_backdate(monkeypatch):
@@ -341,7 +380,13 @@ def test_seed_cycles_create_add_then_backdate(monkeypatch):
     assert cur_updates == []
 
 
-def test_teardown_s5_reenables_workspace_customers(monkeypatch):
+@pytest.mark.parametrize("prior", [True, False])
+def test_teardown_restores_the_workspace_value_it_found(monkeypatch, prior):
+    """Teardown puts the toggle back, rather than forcing the value this run wanted.
+
+    The harness runs against an instance it does not own. Forcing ``customers=True`` on
+    the way out is configuration drift for anyone whose workspace had it off.
+    """
     from types import SimpleNamespace
 
     from plane.models.workspaces import WorkspaceFeature
@@ -359,8 +404,38 @@ def test_teardown_s5_reenables_workspace_customers(monkeypatch):
             return data
 
     plane = SimpleNamespace(workspaces=_Workspaces(), projects=SimpleNamespace(delete=lambda **k: None))
-    seed_mod.teardown(plane, {"workspace_slug": "test-ws", "s5_left_customers_off": True, "project_id": None})
-    assert calls and calls[0].get("customers") is True
+    seed_mod.teardown(
+        plane,
+        {
+            "workspace_slug": "test-ws",
+            "workspace_features_prior": {"customers": prior},
+            "project_id": None,
+        },
+    )
+    assert calls and calls[0].get("customers") is prior
+
+
+def test_teardown_leaves_workspace_alone_when_the_prior_value_is_unknown():
+    """An unreadable prior value must not become a guess written back to the workspace."""
+    from types import SimpleNamespace
+
+    calls: list = []
+
+    class _Workspaces:
+        def update_features(self, workspace_slug, data):
+            calls.append(data)
+            return data
+
+    plane = SimpleNamespace(workspaces=_Workspaces(), projects=SimpleNamespace(delete=lambda **k: None))
+    seed_mod.teardown(
+        plane,
+        {
+            "workspace_slug": "test-ws",
+            "workspace_features_prior": {"customers": None},
+            "project_id": None,
+        },
+    )
+    assert calls == []
 
 
 def test_seed_enables_features_on_second_project_too(monkeypatch):

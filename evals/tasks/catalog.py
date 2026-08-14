@@ -79,15 +79,32 @@ def task_author(task: dict[str, Any]) -> str:
     return str(task.get("author") or "claude")
 
 
+CATALOG_REVISION = 2
+"""Bumped when a deliberate change to a fixture or verifier redefines what a task asks.
+
+The hash below covers prompts and tool sets, not ``needs`` or verifier bodies, because
+prompt drift is the signal it was built to catch. That leaves a hole: correcting a seeder
+changes the question a task puts to the agent while the fingerprint keeps asserting the
+results are comparable. Bumping this closes the hole by making the redefinition visible.
+
+Revision 1 covers batteries 6-8. Revision 2 is the workspace/project feature-exclusion
+correction: excluding a feature now writes it ``False`` instead of omitting the write, so
+S5 is graded on three conditions the agent must actually satisfy rather than two plus one
+the workspace already happened to be in.
+"""
+
+
 def battery_fingerprint(tasks: list[dict[str, Any]] | None = None) -> str:
     """Stable short hash of the task battery used for a run.
 
-    SHA-256 (first 12 hex chars) over a canonical serialization of every task
-    sorted by id: id, prompt, sorted optimal/alternate tools, and optimal_calls.
+    SHA-256 (first 12 hex chars) over a canonical serialization of ``CATALOG_REVISION``
+    and every task sorted by id: id, prompt, sorted optimal/alternate tools, and
+    optimal_calls.
 
-    Ceilings (intentionally *not* covered by the hash):
-    - Verifier functions and ``needs`` fixtures do not alter the fingerprint —
-      prompt/tool-set drift is the stability signal, not seed/verify logic.
+    Ceilings (intentionally *not* covered per-task by the hash):
+    - Verifier functions and ``needs`` fixtures do not alter the fingerprint on their
+      own — prompt/tool-set drift is the stability signal. Bump ``CATALOG_REVISION``
+      when they change in a way that redefines the question.
     - The hash covers the *selected* task list: ``--tasks`` subsets produce
       different fingerprints than a full-catalog run.
     """
@@ -103,7 +120,8 @@ def battery_fingerprint(tasks: list[dict[str, Any]] | None = None) -> str:
                 "optimal_calls": t.get("optimal_calls"),
             }
         )
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    document = {"revision": CATALOG_REVISION, "tasks": payload}
+    blob = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
 

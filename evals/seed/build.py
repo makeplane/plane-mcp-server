@@ -170,7 +170,11 @@ def seed(plane: PlaneClient, run_id: str, needs: set[str], ctx: dict[str, Any]) 
         ctx["s5_left_customers_off"] = True
     ctx["feature_exclude"] = sorted(feature_exclude)
     ctx["ws_feature_exclude"] = sorted(workspace_feature_exclude)
-    enable_workspace_features(plane, workspace_slug, exclude=workspace_feature_exclude)
+    # Prior values are captured before the write so teardown restores the workspace
+    # rather than forcing it to whatever this run happened to need.
+    ctx["workspace_features_prior"] = enable_workspace_features(
+        plane, workspace_slug, exclude=workspace_feature_exclude
+    )
     enable_project_features(plane, workspace_slug, project.id, exclude=feature_exclude)
 
     # Labels before items so items can attach labels later if needed.

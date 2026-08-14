@@ -90,17 +90,19 @@ def teardown(plane: PlaneClient, ctx: dict[str, Any]) -> None:
     workspace_slug = ctx.get("workspace_slug") or os.environ.get("EVAL_PLANE_WORKSPACE_SLUG", "")
     project_id = ctx.get("project_id")
 
-    # S5 left customers off (or agent enabled them): re-enable for subsequent task-reps
-    # on the shared eval workspace. We always set customers=True — we do not restore a
-    # prior false (S5's job is to leave the workspace usable for C1).
-    if ctx.get("s5_left_customers_off"):
+    # Put workspace toggles back where the run found them. Seeding writes them explicitly
+    # (a task may need one off), and the workspace outlives the run, so leaving this run's
+    # requirements behind is drift on an instance the harness does not own.
+    prior = ctx.get("workspace_features_prior") or {}
+    prior_customers = prior.get("customers")
+    if prior_customers is not None:
         try:
             plane.workspaces.update_features(
                 workspace_slug=workspace_slug,
-                data=WorkspaceFeature(customers=True),
+                data=WorkspaceFeature(customers=bool(prior_customers)),
             )
         except Exception as exc:
-            print(f"teardown warning: re-enable workspace customers failed: {exc}")
+            print(f"teardown warning: restore workspace customers={prior_customers} failed: {exc}")
 
     # Drop agent-created Severity on Bug before project/type teardown (F8 multi-rep pollution).
     try:

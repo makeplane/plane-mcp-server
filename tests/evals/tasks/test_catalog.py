@@ -80,7 +80,10 @@ CATALOG_ID_ORDER = (
     "L5",
 )
 
-PINNED_SYNTHETIC_BATTERY = "eea5abf36382"
+# "eea5abf36382" before CATALOG_REVISION entered the payload; "232036625e00" at revision 1.
+# This pin moves with every deliberate revision bump, and must not move otherwise — an
+# unexplained change means the serialization drifted, which is what the pin exists to catch.
+PINNED_SYNTHETIC_BATTERY = "3e9194740d73"
 
 
 def test_catalog_includes_design_and_extras():
@@ -240,6 +243,43 @@ def test_battery_fingerprint_stable_and_sensitive():
 
     # Subset of selected tasks → different fingerprint (documented ceiling).
     assert battery_fingerprint([t1]) != PINNED_SYNTHETIC_BATTERY
+
+
+def test_revision_bump_changes_the_fingerprint_for_an_unchanged_catalog():
+    """A fixture/verifier correction is expressible even though the hash ignores them.
+
+    The per-task payload deliberately omits ``needs`` and verifier bodies, so without
+    the revision a corrected seeder would keep the old fingerprint and go on asserting
+    that results answering a different question are comparable.
+    """
+    from evals.tasks import catalog
+
+    tasks = list(catalog.TASKS)
+    before = battery_fingerprint(tasks)
+    original = catalog.CATALOG_REVISION
+    try:
+        catalog.CATALOG_REVISION = original + 1
+        after = battery_fingerprint(tasks)
+    finally:
+        catalog.CATALOG_REVISION = original
+
+    assert after != before, "bumping the revision must move the fingerprint"
+    assert battery_fingerprint(tasks) == before, "restoring the revision must restore it"
+
+
+def test_fingerprint_records_the_revision_transition():
+    """Pin the current value, so a future change is read as intentional, not drift.
+
+    ``d546d3181bdb`` was the fingerprint before the revision field existed (batteries 6-8).
+    Revision 2 is the feature-exclusion correction, which redefines what S5 asks without
+    touching any prompt or tool set — exactly the change the hash could not otherwise see.
+    Asserting the constant rather than merely 'it changed' is what makes an unexplained
+    future move visible.
+    """
+    from evals.tasks.catalog import CATALOG_REVISION
+
+    assert CATALOG_REVISION == 2
+    assert battery_fingerprint() == "1e8b5c110b8b"
 
 
 def test_battery_fingerprint_catalog_is_nonempty():

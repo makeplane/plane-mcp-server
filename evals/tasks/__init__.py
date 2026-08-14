@@ -11,6 +11,7 @@ from evals.tasks.answers import (
     word_boundary,
 )
 from evals.tasks.catalog import (
+    CATALOG_REVISION,
     EXPECTED_TASK_IDS,
     TASKS,
     TASKS_BY_ID,
@@ -72,6 +73,7 @@ __all__ = [
     "EXPECTED_TASK_IDS",
     "PromptBindError",
     "TASKS",
+    "CATALOG_REVISION",
     "TASKS_BY_ID",
     "TaskSkipped",
     "as_id",
