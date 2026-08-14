@@ -23,15 +23,33 @@ SECOND_PROJECT_BUG_TITLES = (
 )
 
 
+# Wording a refusal uses when the workspace's plan is what stands in the way. A feature
+# switched off for a project says "not enabled for this project" instead, which is a
+# configuration state the harness can change and so is not a gate.
+PLAN_GATE_PROSE = ("upgrade your plan", "payment required", "subscription", "not available on your")
+
+
 def is_plan_gate(exc: BaseException) -> bool:
-    """True only for genuine plan/subscription feature gates — not generic API failures."""
+    """True only for genuine plan/subscription feature gates — not generic API failures.
+
+    402 is unambiguous: ``check_feature_flag`` returns it for a plan refusal and nothing
+    else in this API uses it.
+
+    403 and 400 are not. Plane raises 403 for an ordinary permission denial *and* for the
+    plan gates on initiatives, teamspaces and some workflow routes, in the same
+    ``{"detail": ...}`` shape; 400 covers every serializer validation error as well as a
+    few plan refusals. Treating a bare 403 as a gate meant a genuine permission failure
+    was recorded as an environment skip — the harness quietly hiding the class of defect
+    it exists to find. Those two statuses now need the refusal to say so.
+    """
     if not isinstance(exc, HttpError):
         return False
-    if exc.status_code in (402, 403):
+    if exc.status_code == 402:
         return True
+    if exc.status_code not in (400, 403):
+        return False
     blob = f"{exc} {exc.response!s}".lower()
-    keywords = ("plan", "subscription", "upgrade", "not available on your", "feature is not enabled")
-    return any(keyword in blob for keyword in keywords)
+    return any(phrase in blob for phrase in PLAN_GATE_PROSE)
 
 
 def is_identifier_collision(exc: BaseException) -> bool:
