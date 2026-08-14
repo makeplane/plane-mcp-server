@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import secrets
+from collections.abc import Iterator
 from typing import Any
 
 from plane import PlaneClient
@@ -50,6 +52,30 @@ def is_plan_gate(exc: BaseException) -> bool:
         return False
     blob = f"{exc} {exc.response!s}".lower()
     return any(phrase in blob for phrase in PLAN_GATE_PROSE)
+
+
+@contextlib.contextmanager
+def plan_gate_skips(feature: str) -> Iterator[None]:
+    """Turn a plan refusal raised inside the block into a task skip.
+
+    ``DESIGN.md`` states that a plan gate is not rewritten as an agent task failure, but
+    an uncaught seed exception becomes ``infra_seed`` and the whole task-rep dies. A
+    capability the workspace's plan does not include is an environment fact, so it is
+    recorded the way L2 records its missing activity worker: a skip carrying a reason,
+    excluded from success denominators.
+
+    ``TaskSkipped`` is imported here rather than at module scope because
+    ``evals.tasks.skip`` cannot be reached without initialising ``evals.tasks``, whose
+    task modules import this package.
+    """
+    from evals.tasks.skip import TaskSkipped
+
+    try:
+        yield
+    except Exception as exc:
+        if is_plan_gate(exc):
+            raise TaskSkipped(f"env:plan-gated:{feature}") from exc
+        raise
 
 
 def is_identifier_collision(exc: BaseException) -> bool:
