@@ -207,7 +207,7 @@ evals/
     lookups.py           Plane reads used to establish verifier truth
     skip.py              task skip signal
     read.py              R1-R7 tasks and verifiers
-    write.py             W1-W10 tasks and verifiers
+    write.py             W1-W11 tasks and verifiers
     schema.py            S1-S5 tasks and verifiers
     cross.py             C1-C2 tasks and verifiers
     debias.py            I1-I5 and L1-L5 tasks and verifiers

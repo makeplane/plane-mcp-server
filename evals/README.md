@@ -141,6 +141,13 @@ fingerprints is comparing different questions, even when task IDs are the same. 
 results from a task whose output contract changed are not directly comparable with its rows in
 older batteries. `evals.report --table` warns when its input rows span fingerprints.
 
+The hash covers prompts and tool sets, not fixtures or verifier bodies — prompt drift is what
+it was built to catch. That leaves a hole, because correcting a seeder changes the question a
+task puts to the agent without touching either. `CATALOG_REVISION` in `tasks/catalog.py` closes
+it: bump it whenever a fixture or verifier change redefines what a task asks, and the
+fingerprint moves with it. Revision 1 covers batteries 6-8; revision 2 is the feature-exclusion
+correction, which made S5 genuinely require all three of its conditions.
+
 ## Running surfaces in parallel
 
 Tasks that touch **workspace-scoped** fixtures (release tags, customer properties) collide
@@ -166,7 +173,7 @@ Tasks live in the `evals/tasks/` package, grouped by task class and kept beside 
 verifiers:
 
 - `read.py`: R1-R7
-- `write.py`: W1-W10
+- `write.py`: W1-W11
 - `schema.py`: S1-S5
 - `cross.py`: C1-C2
 - `debias.py`: I1-I5 and L1-L5
@@ -231,11 +238,15 @@ must not pre-close the cycle that the task is meant to change.
 Any reachable Plane works, so how you get one is your own setup and is not kept in this
 repo. If you run plane-ee locally, two things make it usable for evals:
 
-- Point `FEATURE_FLAG_SERVER_BASE_URL` at a flag server that answers every flag as on.
-  The gated tasks (releases, customers, worklogs, work item types) need it, and the
-  hosted flag server has them off for a local workspace.
 - Raise `API_KEY_RATE_LIMIT`; a full battery makes far more API calls than the default
   allows.
+- Optionally point `FEATURE_FLAG_SERVER_BASE_URL` at a flag server that answers every
+  flag as on. This is **not** required. A capability the plan excludes makes its task
+  record `env:plan-gated:<feature>` and drop out of the denominator, the same way L2
+  handles a missing activity worker; the rest of the battery runs unaffected. Pointing at
+  a permissive flag server simply means those tasks are measured rather than skipped.
+
+  Which tasks that covers: C2 (releases), L4 (customers), R6 and S1 (work item types).
 
 Keep such scripts outside version control — `localdev/` is ignored for exactly this.
 
@@ -243,6 +254,12 @@ Keep such scripts outside version control — `localdev/` is ignored for exactly
 
 - If seeded comments do not materialize as activities, the activity-feed task self-skips
   with `env:no-activity-worker` rather than failing the agent.
+- A capability the workspace's plan excludes self-skips with `env:plan-gated:<feature>`.
+  Only a refusal that names a plan limit counts: 402, or 403/400 whose body says so. A
+  bare 403 is an ordinary permission denial and stays a real error, because classifying it
+  as a gate would let a permission bug leave the denominator and read as "nothing to see".
+- A feature switched **off for a project** is not a plan gate — it is configuration the
+  harness sets itself, and W11 exists to measure what an agent does when it meets one.
 - **Gated endpoints returning 402 on a workspace that should work.** Feature flags are
   cached per workspace, and the cache does not record which flag server answered. Any
   process that touches the DB while pointed at a *different* flag server than the running
@@ -253,8 +270,8 @@ Keep such scripts outside version control — `localdev/` is ignored for exactly
   `ff_ver:<slug>` (`plane.payment.flags.cache`) and the next request refetches. Observed
   while creating a workspace from a Django shell; a plan/licence problem looks identical
   from the outside, so check this first.
-- A workspace licence is **not** required for local runs: the mock flag server enables
-  every flag regardless, and an unlicensed workspace seeds all fixtures (verified by
-  canary against a workspace with no licence row).
+- A workspace licence is **not** required for local runs. With a permissive flag server an
+  unlicensed workspace seeds every fixture (verified by canary against a workspace with no
+  licence row); without one, the gated tasks skip and the rest still run.
 - **Offline tests** cover the harness itself and need no Plane instance:
   `env -u REDIS_HOST -u REDIS_PORT .venv/bin/python -m pytest -q --ignore=tests/test_integration.py`
