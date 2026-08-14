@@ -1,173 +1,147 @@
-"""Intake work item-related tools for Plane MCP Server."""
+"""The intake (triage) queue for a project.
 
-from typing import Any
+Intake items wrap an ordinary work item. Every action here takes the *work item*
+id -- the `issue` field of an intake record -- not the intake record's own id.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
 
 from fastmcp import FastMCP
-from plane.models.intake import (
-    CreateIntakeWorkItem,
-    IntakeWorkItem,
-    PaginatedIntakeWorkItemResponse,
-    UpdateIntakeWorkItem,
-)
+from plane.models.intake import CreateIntakeWorkItem, IntakeWorkItem, UpdateIntakeWorkItem
 from plane.models.query_params import PaginatedQueryParams, RetrieveQueryParams
+from plane.models.work_items import WorkItemForIntakeRequest
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.toolkit import Action, as_params, build_annotations, build_description, envelope, missing, one_of, opt
+
+NAME = "intake"
+TITLE = "Intake queue"
+
+PRIORITIES = ("urgent", "high", "medium", "low", "none")
+
+ACTIONS = (
+    Action("list", ("project_id",), ("cursor", "per_page"), read=True),
+    Action("retrieve", ("project_id", "workitem_id"), read=True),
+    Action("create", ("project_id", "name"), ("description_html", "priority")),
+    Action(
+        "update",
+        ("project_id", "workitem_id"),
+        ("status", "snoozed_till", "duplicate_to", "source", "source_email"),
+        note="pass status to make a triage decision",
+    ),
+    Action("delete", ("project_id", "workitem_id"), destructive=True),
+)
+
+FOOTER = (
+    "workitem_id is the `issue` field of an intake record, not the record's own id. "
+    "status: -2 pending, -1 declined, 0 snoozed (needs snoozed_till), 1 accepted, "
+    "2 duplicate (needs duplicate_to). "
+    f"priority is one of: {', '.join(PRIORITIES)}."
+)
+
+LEGACY = {
+    "list_intake_work_items": "list",
+    "retrieve_intake_work_item": "retrieve",
+    "create_intake_work_item": "create",
+    "update_intake_work_item": "update",
+    "delete_intake_work_item": "delete",
+}
 
 
-def register_intake_tools(mcp: FastMCP) -> None:
-    """Register all intake work item-related tools with the MCP server."""
-
-    @mcp.tool()
-    def list_intake_work_items(
-        project_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[IntakeWorkItem]:
-        """
-        List all intake work items in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            params: Optional query parameters as a dictionary (e.g., per_page, cursor)
-
-        Returns:
-            List of IntakeWorkItem objects
-        """
-        client, workspace_slug = get_plane_client_context()
-
-        query_params = None
-        if params:
-            query_params = PaginatedQueryParams(**params)
-
-        response: PaginatedIntakeWorkItemResponse = client.intake.list(
-            workspace_slug=workspace_slug, project_id=project_id, params=query_params
-        )
-        return response.results
-
-    @mcp.tool()
-    def create_intake_work_item(
-        project_id: str,
-        data: dict[str, Any],
-    ) -> IntakeWorkItem:
-        """
-        Create a new intake work item in a project.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            data: Intake work item data as a dictionary
-
-        Returns:
-            Created IntakeWorkItem object
-        """
-        client, workspace_slug = get_plane_client_context()
-
-        intake_data = CreateIntakeWorkItem(**data)
-
-        return client.intake.create(workspace_slug=workspace_slug, project_id=project_id, data=intake_data)
-
-    @mcp.tool()
-    def retrieve_intake_work_item(
-        project_id: str,
-        work_item_id: str,
-        params: dict[str, Any] | None = None,
-    ) -> IntakeWorkItem:
-        """
-        Retrieve an intake work item by work item ID.
-
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_id: UUID of the work item (use the issue field from
-                IntakeWorkItem response, not the intake work item ID)
-            params: Optional query parameters as a dictionary (e.g., expand, fields)
-
-        Returns:
-            IntakeWorkItem object
-        """
-        client, workspace_slug = get_plane_client_context()
-
-        query_params = None
-        if params:
-            query_params = RetrieveQueryParams(**params)
-
-        return client.intake.retrieve(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-            params=query_params,
-        )
-
-    @mcp.tool()
-    def update_intake_work_item(
-        project_id: str,
-        work_item_id: str,
+def register(mcp: FastMCP) -> None:
+    @mcp.tool(
+        name=NAME,
+        description=build_description("The intake (triage) queue for a project.", ACTIONS, FOOTER),
+        annotations=build_annotations(TITLE, ACTIONS),
+    )
+    def intake(
+        action: Literal["list", "retrieve", "create", "update", "delete"],
+        project_id: str = "",
+        workitem_id: str = "",
+        name: str = "",
+        description_html: str = "",
+        priority: str = "",
+        # -2 is a real status, so status uses an explicit unset rather than 0.
         status: int | None = None,
-        snoozed_till: str | None = None,
-        duplicate_to: str | None = None,
-        source: str | None = None,
-        source_email: str | None = None,
-    ) -> IntakeWorkItem:
-        """
-        Update an intake work item, including triage status.
-
-        Status values:
-            -2 = pending (default/unreviewed)
-            -1 = declined
-             0 = snoozed (requires snoozed_till date)
-             1 = accepted (converts intake item to active work item)
-             2 = duplicate (requires duplicate_to work item ID)
-
-        Args:
-            project_id: UUID of the project
-            work_item_id: UUID of the work item (use the issue field from
-                IntakeWorkItem response, not the intake work item ID)
-            status: Triage status (-2=pending, -1=declined, 0=snoozed, 1=accepted, 2=duplicate)
-            snoozed_till: ISO 8601 date string, required when status=0
-            duplicate_to: UUID of the work item this duplicates, required when status=2
-            source: Source identifier
-            source_email: Source email address
-
-        Returns:
-            Updated IntakeWorkItem object
-        """
-        if status == 0 and not snoozed_till:
-            raise ValueError("snoozed_till is required when status=0 (snoozed)")
-        if status == 2 and not duplicate_to:
-            raise ValueError("duplicate_to is required when status=2 (duplicate)")
-
+        snoozed_till: str = "",
+        duplicate_to: str = "",
+        source: str = "",
+        source_email: str = "",
+        cursor: str = "",
+        per_page: int = 0,
+    ) -> IntakeWorkItem | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
-        intake_data = UpdateIntakeWorkItem(
-            status=status,
-            snoozed_till=snoozed_till,
-            duplicate_to=duplicate_to,
-            source=source,
-            source_email=source_email,
-        )
-        if status is not None or snoozed_till is not None or duplicate_to is not None:
-            return client.intake.update_status(
+
+        if not project_id:
+            return missing(action, "project_id")
+
+        if action == "list":
+            response = client.intake.list(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
-                work_item_id=work_item_id,
-                data=intake_data,
+                params=as_params(PaginatedQueryParams, cursor=cursor, per_page=per_page),
             )
-        return client.intake.update(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-            data=intake_data,
-        )
+            return envelope(response)
 
-    @mcp.tool()
-    def delete_intake_work_item(project_id: str, work_item_id: str) -> None:
-        """
-        Delete an intake work item by work item ID.
+        if action == "create":
+            if not name:
+                return missing(action, "name")
+            if error := one_of("priority", priority, PRIORITIES):
+                return error
+            return client.intake.create(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                # The SDK requires the work item nested under `issue`; a flat payload is rejected.
+                data=CreateIntakeWorkItem(
+                    issue=WorkItemForIntakeRequest(
+                        name=name,
+                        description_html=opt(description_html),
+                        priority=opt(priority),
+                    )
+                ),
+            )
 
-        Args:
-            workspace_slug: The workspace slug identifier
-            project_id: UUID of the project
-            work_item_id: UUID of the work item (use the issue field from
-                IntakeWorkItem response, not the intake work item ID)
-        """
-        client, workspace_slug = get_plane_client_context()
-        client.intake.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
+        if not workitem_id:
+            return missing(action, "workitem_id")
+
+        if action == "retrieve":
+            return client.intake.retrieve(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_id=workitem_id,
+                params=as_params(RetrieveQueryParams),
+            )
+
+        if action == "update":
+            if status == 0 and not snoozed_till:
+                return "Error: snoozed_till is required when status=0 (snoozed)."
+            if status == 2 and not duplicate_to:
+                return "Error: duplicate_to is required when status=2 (duplicate)."
+            if status is None and not (snoozed_till or duplicate_to or source or source_email):
+                return missing(action, "status (or a source field to edit)")
+            data = UpdateIntakeWorkItem(
+                status=status,
+                snoozed_till=opt(snoozed_till),
+                duplicate_to=opt(duplicate_to),
+                source=opt(source),
+                source_email=opt(source_email),
+            )
+            # Triage fields go through the status endpoint; source metadata alone does not.
+            if status is not None or snoozed_till or duplicate_to:
+                return client.intake.update_status(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    work_item_id=workitem_id,
+                    data=data,
+                )
+            return client.intake.update(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_id=workitem_id,
+                data=data,
+            )
+
+        client.intake.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id)
+        return None

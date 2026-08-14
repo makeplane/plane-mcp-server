@@ -1,18 +1,38 @@
-"""
-Simple integration test for Plane MCP Server.
+"""End-to-end test for the Plane MCP Server, against a live workspace.
 
-Environment Variables Required:
-    PLANE_TEST_API_KEY: API key for authentication
-    PLANE_TEST_WORKSPACE_SLUG: Workspace slug for testing
-    PLANE_TEST_MCP_URL: MCP server URL (default: http://localhost:8211)
+Drives a running server over streamable HTTP and writes real data: a project,
+work items, an epic and a milestone, then deletes all of it.
+
+Tools are called by their pre-consolidation names, which still resolve, so this
+also covers that compatibility path.
+
+Environment variables:
+    PLANE_TEST_API_KEY:        API key for authentication (required)
+    PLANE_TEST_WORKSPACE_SLUG: Workspace slug to write to (required)
+    PLANE_TEST_MCP_URL:        Server URL (default: http://localhost:8211)
+
+Skipped unless the two required variables are set.
 """
 
 import asyncio
 import os
 import uuid
 
+import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
+
+# These tests write to a live Plane workspace through a running server, so they
+# are skipped unless it has been pointed at one. Without this a fresh clone
+# fails two tests on the first `pytest`, which reads as a broken checkout rather
+# than as optional coverage.
+pytestmark = pytest.mark.skipif(
+    not (os.getenv("PLANE_TEST_API_KEY") and os.getenv("PLANE_TEST_WORKSPACE_SLUG")),
+    reason=(
+        "live integration test: set PLANE_TEST_API_KEY and PLANE_TEST_WORKSPACE_SLUG, "
+        "and run a server at PLANE_TEST_MCP_URL (default http://localhost:8211)"
+    ),
+)
 
 
 def get_config():
@@ -22,9 +42,7 @@ def get_config():
     mcp_url = os.getenv("PLANE_TEST_MCP_URL", "http://localhost:8211")
 
     if not api_key or not workspace_slug:
-        raise RuntimeError(
-            "Missing required env vars: PLANE_TEST_API_KEY, PLANE_TEST_WORKSPACE_SLUG"
-        )
+        raise RuntimeError("Missing required env vars: PLANE_TEST_API_KEY, PLANE_TEST_WORKSPACE_SLUG")
 
     return {
         "api_key": api_key,
@@ -44,7 +62,7 @@ def extract_result(result):
         if hasattr(content, "text"):
             try:
                 return json.loads(content.text)
-            except:
+            except ValueError:
                 return {"raw": content.text}
     return {}
 
@@ -54,8 +72,8 @@ async def run_integration_test():
     Full integration test:
     1. Create a project
     2. Create work item 1
-    3. Create work item 2 
-    4. Update work item 2 with work item 1 as parent 
+    3. Create work item 2
+    4. Update work item 2 with work item 1 as parent
     5. Find or create an "Epic" work item type, and create an epic work item
     6. Update work item 2 to be under the epic
     7. List all epics (work items of the "Epic" type)
@@ -66,8 +84,8 @@ async def run_integration_test():
     12. Delete the epic
     13. Delete work items
     14. Delete project
-    """ 
-    config = get_config() 
+    """
+    config = get_config()
     unique_id = uuid.uuid4().hex[:6]
 
     transport = StreamableHttpTransport(
@@ -133,9 +151,7 @@ async def run_integration_test():
 
         # 5. Find or create an "Epic" work item type, and create an epic work item
         print("Finding or creating 'Epic' work item type...")
-        epic_type_result = await client.call_tool(
-            "resolve_work_item_type", {"project_id": project_id, "name": "Epic"}
-        )
+        epic_type_result = await client.call_tool("resolve_work_item_type", {"project_id": project_id, "name": "Epic"})
         epic_type = extract_result(epic_type_result)
 
         epic_type_id = epic_type["id"]
@@ -181,22 +197,33 @@ async def run_integration_test():
         epics = extract_result(epics_result)["results"]
         print(f"Epics in project: {[e['id'] for e in epics]}")
 
-        # 8. Create a milestone and associate it with the project and work items
+        # 8. Create a milestone and associate work items with it.
+        # A milestone is named by `title`, and work items are linked afterwards --
+        # `create` takes no work-item ids.
         print("Creating milestone...")
         milestone_result = await client.call_tool(
             "create_milestone",
             {
                 "project_id": project_id,
-                "name": f"Milestone {unique_id}",
-                "description": "Integration test milestone",   
-                "associated_work_item_ids": [epic_id, work_item_1_id, work_item_2_id],
+                "title": f"Milestone {unique_id}",
+                "target_date": "2030-01-01",
             },
         )
         milestone = extract_result(milestone_result)
         milestone_id = milestone["id"]
+        print(f"Created milestone: {milestone_id}")
+
+        print("Associating work items with milestone...")
+        await client.call_tool(
+            "manage_milestone_work_items",
+            {
+                "project_id": project_id,
+                "milestone_id": milestone_id,
+                "add_ids": ",".join([epic_id, work_item_1_id, work_item_2_id]),
+            },
+        )
 
         print("List work items associated with milestone...")
-
         milestone_details_result = await client.call_tool(
             "list_milestone_work_items",
             {
@@ -204,23 +231,22 @@ async def run_integration_test():
                 "milestone_id": milestone_id,
             },
         )
-
-        milestone_work_items = extract_result(milestone_details_result)
+        linked = extract_result(milestone_details_result)
+        # A paginated action answers with an envelope; a bare list means the whole set.
+        milestone_work_items = linked["results"] if isinstance(linked, dict) else linked
         print(f"Work items associated with milestone: {[wi['id'] for wi in milestone_work_items]}")
+        assert len(milestone_work_items) == 3, milestone_work_items
 
-        print(f"Created milestone: {milestone_id}")
-        
-        # 9. Update the milestone to change its name and description
+        # 9. Update the milestone's title
         print("Updating milestone...")
         await client.call_tool(
-            "update_milestone", 
-            { 
-                "project_id": project_id, 
-                "milestone_id": milestone_id, 
-                "name": f"Updated Milestone {unique_id}", 
-                "description": "Updated description for integration test milestone" 
+            "update_milestone",
+            {
+                "project_id": project_id,
+                "milestone_id": milestone_id,
+                "title": f"Updated Milestone {unique_id}",
             },
-        ) 
+        )
 
         print("Updated milestone")
 

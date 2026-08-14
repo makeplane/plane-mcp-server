@@ -1,6 +1,6 @@
 [project]
 name = "plane-mcp-server"
-version = "0.2.11"
+version = "0.3.0"
 description = "A Model Context Protocol server for Plane integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,6 +48,10 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+# Model-facing reference prose, including a markdown table that reflowing would break.
+"plane_mcp/pql_reference.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"

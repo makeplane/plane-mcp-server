@@ -894,7 +894,7 @@ wheels = [
 
 [[package]]
 name = "plane-mcp-server"
-version = "0.2.9"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "authlib" },
@@ -920,7 +920,7 @@ requires-dist = [
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1,<2.35.0" },
     { name = "fastmcp", specifier = "==3.2.0" },
     { name = "mcp", specifier = "==1.26.0" },
-    { name = "plane-sdk", specifier = "==0.2.16" },
+    { name = "plane-sdk", specifier = "==0.2.20" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4,<0.5.0" },
     { name = "pyjwt", specifier = ">=2.12.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -930,15 +930,15 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "plane-sdk"
-version = "0.2.16"
+version = "0.2.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/a5/34db34e8286df62d3080dae04546686d23dc196581b574dff6bd94193baf/plane_sdk-0.2.16.tar.gz", hash = "sha256:0cc881880be107fd0e03db8df17766d72828d4a23d2c1aa3975b45040f67f752", size = 64910, upload-time = "2026-06-15T13:39:09.372Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/d8/d9465cdf001aac5988cde173af812b298c85afb8550682fad11ba897112f/plane_sdk-0.2.20.tar.gz", hash = "sha256:d4559e00281be200e386bd322e53dbaafd9f1968bd528bb555f6eda2115518b4", size = 86662, upload-time = "2026-07-20T16:57:41.599Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/f5/049b5ed3286c4c4d4efbd1562bb254b41453888e0a708ca24cd3246289f2/plane_sdk-0.2.16-py3-none-any.whl", hash = "sha256:3f5aaac8b89248c74c2dbfd9902cb4defcfe5a65c430c9239549ce311fcfd999", size = 103856, upload-time = "2026-06-15T13:39:08.385Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/8b/c2c52c8c632947e1e12c5612be31bd6180bb6c02046bceb66991f44545ab/plane_sdk-0.2.20-py3-none-any.whl", hash = "sha256:b0a55fec3140025761e8a6c3766b2eed9bea4828ae98c45e3df335cffd1df774", size = 123900, upload-time = "2026-07-20T16:57:40.32Z" },
 ]
 
 [[package]]
