@@ -549,13 +549,10 @@ def _time_tracking_enabled(plane: Any, workspace_slug: str, project_id: str) -> 
 async def verify_w11(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
     """W11: the work log lands even though the project shipped with time tracking off.
 
-    Same end state as W8, reached from an obstacle: the worklog endpoint 404s with
-    "Worklog is not enabled for the project" until the agent turns the feature on. The
-    prompt authorises that, so enabling and proceeding is the expected route rather than
-    an overreach the verifier would be rewarding.
-
-    The failure notes separate the ways it can go wrong, because "no work log" alone does
-    not say whether the agent gave up, half-finished, or claimed success it never earned.
+    W8's end state reached from an obstacle — the worklog endpoint 404s until the feature
+    is on, which the prompt authorises. Failure notes separate the routes to failure,
+    since "no work log" alone does not say whether the agent gave up, half-finished, or
+    claimed a success it never earned.
     """
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]

@@ -44,18 +44,12 @@ def prepare_antigravity_fake_home(
     env: dict[str, str],
     real_home: Path | None = None,
 ) -> None:
-    """Build an isolated HOME for agy with MCP config + shared auth artifacts.
+    """Build an isolated HOME for agy with MCP config plus copied auth artifacts.
 
-    Writes mcp_config.json to BOTH documented locations (cheap; live probe
-    should settle which path agy actually reads):
-      - ~/.gemini/config/mcp_config.json
-      - ~/.gemini/antigravity-cli/mcp_config.json
-
-    Creates ``antigravity-cli`` as a **real directory** (never a symlink of the
-    whole tree — that would write mcp_config and runtime logs into real user
-    state). Auth artifacts (``antigravity-oauth-token``) are plain **copies** —
-    never symlinks — so an in-place token refresh cannot write through into the
-    real home. Staleness over a single eval run is negligible.
+    Writes mcp_config.json to both documented paths (~/.gemini/config/ and
+    ~/.gemini/antigravity-cli/) since which one agy reads is unsettled. antigravity-cli is
+    a real directory and the oauth token a plain copy, never symlinks — otherwise a token
+    refresh or a runtime log would write through into the user's real home.
     """
     real_home = real_home or Path.home()
     gemini_root = fake_home / ".gemini"
@@ -97,16 +91,10 @@ def prepare_antigravity_fake_home(
 class AntigravityCliDriver(CliDriver):
     """Run tasks via Google Antigravity CLI (``agy``).
 
-    Probed flags (2026-08-12, ``agy --help``):
-      - ``-p`` / ``--print`` headless single-prompt mode
-      - ``--output-format`` text|json|stream-json
-      - ``--model``, ``--dangerously-skip-permissions``
-      - MCP via ``~/.gemini/config/mcp_config.json`` (``mcpServers`` map;
-        stdio: command/args/env). No CLI flag for MCP config → HOME isolation.
-      - No max-turns / turn-cap flag in help → ``hit_max_turns=False`` + note.
-
-    Tool calls come from the recording proxy sidecar (protocol-layer), not
-    agy stdout parsing.
+    Probed 2026-08-12: -p headless, --output-format text|json|stream-json, --model,
+    --dangerously-skip-permissions. MCP only via ~/.gemini/config/mcp_config.json with no
+    CLI flag, hence HOME isolation; no turn-cap flag, so hit_max_turns=False plus a note.
+    Tool calls come from the proxy sidecar, not from parsing agy stdout.
     """
 
     name = "antigravity-cli"

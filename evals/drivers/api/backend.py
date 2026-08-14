@@ -19,15 +19,9 @@ class UnmappedModelTierError(ValueError):
 class StopReason(str, Enum):
     """Harness-owned reasons why a provider turn stopped.
 
-    Values intentionally preserve the strings historically emitted by the
-    Anthropic API path so old and new result rows remain comparable. Provider
-    adapters retain the provider's original value separately on ``Turn``.
-
-    ``END_TURN`` is a normal completed response; ``TOOL_USE`` requests tool
-    execution; ``MAX_TOKENS`` and ``MODEL_CONTEXT_WINDOW_EXCEEDED`` are token
-    limits; ``REFUSAL`` is terminal and prevents requested side effects;
-    ``PAUSE_TURN`` asks the loop to continue; and ``UNKNOWN`` is the explicit
-    fallback for missing or newly introduced provider values.
+    Values keep the strings the Anthropic path historically emitted so old and new rows
+    stay comparable; adapters keep the provider's own value on ``Turn``. REFUSAL is
+    terminal and prevents side effects; UNKNOWN is the explicit fallback for new values.
     """
 
     END_TURN = "end_turn"

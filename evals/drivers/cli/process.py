@@ -15,13 +15,9 @@ _CLI_TIMEOUT_DRAIN_S = 2.0
 def kill_process_group(proc: subprocess.Popen[Any]) -> bool:
     """SIGKILL the process group whose leader is ``proc``.
 
-    With ``start_new_session=True``, ``pgid == proc.pid`` even after the leader
-    has been reaped — call ``killpg(proc.pid, …)`` directly (never fall back to
-    killing only the leader, which leaves grandchildren alive).
-
-    Returns True if ``killpg`` delivered the signal; False if the group is
-    already fully gone (``ProcessLookupError`` = success for cleanup, but the
-    kill itself did not run).
+    With start_new_session, pgid == proc.pid even after the leader is reaped, so killpg on
+    that pid directly — killing only the leader leaves grandchildren alive. Returns True if
+    the signal was delivered, False if the group was already gone.
     """
     if proc.pid is None:
         return False
@@ -71,17 +67,10 @@ def run_cli_subprocess(
 ) -> subprocess.CompletedProcess[Any]:
     """Run a CLI in its own process group; kill the **whole group** on timeout/interrupt.
 
-    Node wrappers (e.g. ``codex``) spawn native grandchildren. Plain
-    ``subprocess.run`` on timeout only kills the parent; the grandchild keeps
-    stdout open and ``communicate()`` hangs indefinitely. This runner:
-
-    1. launches with ``start_new_session=True`` (new process group; pgid=pid);
-    2. on timeout **or any other exception** (incl. KeyboardInterrupt),
-       ``os.killpg(pid, SIGKILL)`` the group;
-    3. drains pipes with a **bounded** second ``communicate`` (never unbounded).
-
-    Raises ``subprocess.TimeoutExpired`` with attribute
-    ``killed_process_group=True`` only when killpg actually delivered the signal.
+    Node wrappers like ``codex`` spawn native grandchildren, and plain subprocess.run kills
+    only the parent — the grandchild holds stdout open and communicate() hangs forever. So:
+    start_new_session, killpg on any exception, then a bounded second communicate to drain.
+    Raises TimeoutExpired with ``killed_process_group=True`` only when the signal landed.
     """
     popen_kwargs: dict[str, Any] = {
         "cwd": cwd,

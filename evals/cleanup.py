@@ -1,12 +1,7 @@
-"""Delete leftover projects whose names start with a space-delimited prefix (default ``"EVAL "``).
+"""Delete leftover projects whose names start with a prefix (default ``"EVAL "``).
 
-Usage:
-  python -m evals.cleanup                     # dry-run: list only
-  python -m evals.cleanup --prefix "EVAL "    # custom name prefix (note trailing space)
-  python -m evals.cleanup --yes               # actually delete
-
-Uses EVAL_PLANE_API_KEY / EVAL_PLANE_WORKSPACE_SLUG via make_plane_client.
-Default is dry-run; ``--yes`` is required to call delete.
+``python -m evals.cleanup [--prefix "EVAL " | --yes]`` — dry-run lists only; ``--yes`` is
+required before anything is deleted. Credentials come from EVAL_PLANE_* via make_plane_client.
 """
 
 from __future__ import annotations

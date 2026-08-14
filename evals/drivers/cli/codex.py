@@ -162,16 +162,12 @@ def parse_codex_rollout_calls(rollout_path: Path) -> list[dict[str, Any]]:
 
 
 def find_codex_rollout(session_id: str | None, *, after_ts: float | None = None) -> Path | None:
-    """Find a rollout JSONL under ``~/.codex/sessions`` matching *session_id* exactly.
+    """Find the rollout JSONL under ~/.codex/sessions matching *session_id* exactly.
 
-    Matches filename containing the id (rollout filenames end with ``thread_id``)
-    or a first-line ``session_meta`` / ``thread.started`` id field.
-
-    **No newest-after-ts fallback**: under parallel runs that would pick another
-    task's rollout and corrupt final_text. Callers should note
-    ``codex_rollout_unmatched`` when this returns None.
-
-    ``after_ts`` is accepted for API compatibility but ignored.
+    Matches the filename (which ends with thread_id) or a first-line session_meta id.
+    Deliberately no newest-after-ts fallback: under parallel runs that picks another
+    task's rollout and corrupts final_text. Callers note codex_rollout_unmatched on None.
+    ``after_ts`` is accepted for API compatibility and ignored.
     """
     del after_ts  # intentionally unused — see docstring
     if not session_id:

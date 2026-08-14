@@ -32,17 +32,12 @@ PLAN_GATE_PROSE = ("upgrade your plan", "payment required", "subscription", "not
 
 
 def is_plan_gate(exc: BaseException) -> bool:
-    """True only for genuine plan/subscription feature gates — not generic API failures.
+    """True only for genuine plan gates — not generic API failures.
 
-    402 is unambiguous: ``check_feature_flag`` returns it for a plan refusal and nothing
-    else in this API uses it.
-
-    403 and 400 are not. Plane raises 403 for an ordinary permission denial *and* for the
-    plan gates on initiatives, teamspaces and some workflow routes, in the same
-    ``{"detail": ...}`` shape; 400 covers every serializer validation error as well as a
-    few plan refusals. Treating a bare 403 as a gate meant a genuine permission failure
-    was recorded as an environment skip — the harness quietly hiding the class of defect
-    it exists to find. Those two statuses now need the refusal to say so.
+    402 is unambiguous. 403 and 400 are not: Plane uses 403 for ordinary permission denial
+    and for the initiative/teamspace plan gates in the same shape, so a bare 403 counted as
+    a gate turned real permission bugs into environment skips. Those two now need the
+    refusal to name a plan limit.
     """
     if not isinstance(exc, HttpError):
         return False
@@ -58,15 +53,9 @@ def is_plan_gate(exc: BaseException) -> bool:
 def plan_gate_skips(feature: str) -> Iterator[None]:
     """Turn a plan refusal raised inside the block into a task skip.
 
-    ``DESIGN.md`` states that a plan gate is not rewritten as an agent task failure, but
-    an uncaught seed exception becomes ``infra_seed`` and the whole task-rep dies. A
-    capability the workspace's plan does not include is an environment fact, so it is
-    recorded the way L2 records its missing activity worker: a skip carrying a reason,
-    excluded from success denominators.
-
-    ``TaskSkipped`` is imported here rather than at module scope because
-    ``evals.tasks.skip`` cannot be reached without initialising ``evals.tasks``, whose
-    task modules import this package.
+    An uncaught seed exception becomes infra_seed and kills the task-rep; a capability the
+    plan excludes is an environment fact, recorded like L2's missing activity worker.
+    TaskSkipped is imported inside because evals.tasks imports this package at module load.
     """
     from evals.tasks.skip import TaskSkipped
 
@@ -157,23 +146,11 @@ def enable_workspace_features(
     *,
     exclude: set[str] | frozenset[str] | None = None,
 ) -> dict[str, bool | None]:
-    """Set workspace-level feature toggles to what task preconditions need.
+    """Set workspace-level feature toggles, returning the prior values for teardown.
 
-    Gate (plane-ee): create-customer 403 when
-    ``check_workspace_feature(slug, IS_CUSTOMER_ENABLED)`` is false — DB column
-    ``WorkspaceFeature.is_customer_enabled``. Legacy/SDK flips it via
-    ``workspaces.update_features`` / ``WorkspaceFeature(customers=True)``
-    (API serializer maps ``customers`` → ``is_customer_enabled``).
-
-    Deliberately does **not** set ``work_item_types``: that flips
-    workspace-vs-project type ownership and would change S1/S3 seed mode.
-
-    An excluded feature is written as ``False``, not left alone. A workspace outlives
-    every run, so omitting the write leaves whatever the last task-rep put there —
-    which silently satisfied S5's customers precondition on every run after the first.
-
-    Returns the prior values so teardown can restore them; the harness runs against a
-    Plane instance it does not own and should not leave configuration drift behind.
+    Excluded features are written ``False``, not skipped: the workspace outlives every run,
+    so omitting the write silently satisfied S5's customers precondition after run one.
+    Never sets ``work_item_types`` — that flips type ownership and changes S1/S3 seed mode.
     """
     skip = set(exclude or ())
     prior = workspace_feature_state(plane, workspace_slug)

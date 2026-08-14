@@ -23,23 +23,10 @@ def seed_cycles(
 ) -> None:
     """Seed Sprint 12 (past) + Sprint 13 (active) with work items.
 
-    Plane forbids adding issues to a cycle whose end_date is already past
-    (``The Cycle has already been completed so no new issues can be added`` —
-    plane-ee cycle/issue.py). Ordering for Sprint 12:
-
-      1. create with an *active* window (start past, end future)
-      2. add_work_items while still active
-      3. update end_date to the past (backdate) so the cycle is completed
-
-    ``leave_past_open`` skips step 3, leaving Sprint 12 ending tomorrow. Closing a
-    cycle is only legal while it is still open — Plane rejects every edit to an
-    ended cycle (``The Cycle has already been completed so it cannot be edited``)
-    and rejects a transfer out of a still-running one (``The old cycle is not
-    completed yet``), so a fixture that pre-closes Sprint 12 makes "close it"
-    unachievable and leaves ``progress_snapshot`` (a transfer side effect) as the
-    only observable close signal. W6 asks the agent to close, so it seeds open.
-
-    Sprint 13 is created and populated while genuinely active (start ≤ today ≤ end).
+    Plane refuses to add issues to an ended cycle, so Sprint 12 is created with an active
+    window, filled, then backdated. ``leave_past_open`` skips the backdate: Plane also
+    rejects every edit to an ended cycle, so pre-closing it makes W6's "close it"
+    unachievable and leaves progress_snapshot (a transfer side effect) as the only signal.
     """
     project_id = context["project_id"]
     me_id = context.get("me_id") or str(plane.users.get_me().id)

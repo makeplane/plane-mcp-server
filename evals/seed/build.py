@@ -31,15 +31,11 @@ from .work_items import (
 
 
 def remove_stale_workspace_artifacts(plane: PlaneClient, workspace_slug: str) -> None:
-    """Delete leftover WS3 long-tail artifacts so a dirty workspace cannot false-pass.
+    """Delete leftover release tag ``eval-rc1`` and customer property ``Eval Industry``.
 
-    Removes any existing release tag ``eval-rc1`` and customer property
-    ``Eval Industry`` before the rep seeds.
-
-    Empty / not-found lists are silent. Clients without the API surface (offline
-    test stubs) are skipped silently. If a matching artifact is **found** and
-    cannot be deleted — or list fails on a present API — raises so the harness
-    records ``infra_seed`` rather than running against dirty state.
+    A dirty workspace would otherwise false-pass. Missing lists and clients without the
+    API surface are silent, but a found-and-undeletable artifact raises so the harness
+    records infra_seed instead of grading against dirty state.
     """
     releases = getattr(plane, "releases", None)
     tags_api = getattr(releases, "tags", None) if releases is not None else None

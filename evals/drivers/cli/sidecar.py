@@ -181,14 +181,11 @@ def wait_for_proxy_meta(
     poll_s: float = 0.2,
     max_wait_s: float | None = None,
 ) -> bool:
-    """Poll until the sidecar gains a ``proxy_meta`` row (or the wait expires).
+    """Poll until the sidecar gains a ``proxy_meta`` row, returning True if it appears.
 
-    After a CLI timeout the driver kills the CLI; the proxy is a *separate*
-    process that only then sees stdin EOF and needs up to
-    ``SHUTDOWN_DEADLINE_S`` to flush call rows + meta. Call this **before**
-    harvesting so the temp dir is not deleted mid-finalization.
-
-    Returns True if meta was observed.
+    The proxy is a separate process: after the driver kills the CLI it only then sees stdin
+    EOF and needs up to SHUTDOWN_DEADLINE_S to flush. Call before harvesting so the temp
+    directory is not deleted mid-finalization.
     """
     # Local import keeps drivers import-light for non-proxy unit tests.
     from evals.proxy import SHUTDOWN_DEADLINE_S

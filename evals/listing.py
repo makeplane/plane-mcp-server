@@ -1,14 +1,8 @@
-"""Measure MCP tool listing size (tool count + cl100k tokens).
+"""Measure MCP tool listing size: tool count and cl100k tokens.
 
-Usage:
-  python -m evals.listing --label local
-  python -m evals.listing --server-cmd '/path/bin/python -m plane_mcp stdio' --server-env KEY=VAL
-
-Reports: tool count, wire listing tokens (incl. outputSchema), model-facing tokens
-(minus outputSchema), and the top-10 tools by wire tokens.
-
-Credentials: EVAL_PLANE_API_KEY, EVAL_PLANE_WORKSPACE_SLUG, optional EVAL_PLANE_BASE_URL.
-tiktoken is a **dev** optional dependency (same as scripts/check_token_budget.py).
+``python -m evals.listing [--label local | --server-cmd '<cmd>' --server-env KEY=VAL]``
+Reports wire tokens (with outputSchema), model-facing tokens (without), and the top-10
+tools by size. Needs EVAL_PLANE_* credentials; tiktoken is a dev optional dependency.
 """
 
 from __future__ import annotations

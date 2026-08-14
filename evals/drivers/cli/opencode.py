@@ -43,12 +43,9 @@ def write_opencode_mcp_config(
 class OpencodeCliDriver(CliDriver):
     """Run tasks via ``opencode run`` (proxy-first call recording).
 
-    Probed flags (2026-08-12):
-      - ``opencode run [message..]`` non-interactive
-      - ``--format json|default``, ``-m/--model``
-      - MCP via ``opencode.json`` ``mcp`` section (local: type/command/environment)
-        written into the task cwd (or a temp project dir).
-      - No turn-cap flag → ``hit_max_turns=False`` + note ``no_turn_cap``.
+    Probed 2026-08-12: ``opencode run [message..]`` non-interactive, --format json|default,
+    -m/--model. MCP comes from an ``opencode.json`` mcp section written into the task cwd;
+    no turn-cap flag, so hit_max_turns=False plus a ``no_turn_cap`` note.
     """
 
     name = "opencode-cli"

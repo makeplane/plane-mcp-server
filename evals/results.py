@@ -87,12 +87,9 @@ class AgentRun:
 class TaskResult:
     """One task repetition and the complete persisted row schema.
 
-    ``schema_version=0`` identifies rows written before this type existed;
-    :meth:`from_row` supplies defaults for every field added since. Version 1
-    defines ``wall_time_s`` as CLI invocation time only, excluding harness-owned
-    config/temp-directory setup. Pre-versioned Claude, Antigravity, and OpenCode
-    rows include a few milliseconds of that setup; Codex and API rows already
-    used invocation/agent-loop timing.
+    schema_version 0 marks rows written before this type existed; from_row defaults every
+    field added since. Version 1 defines wall_time_s as CLI invocation time only — earlier
+    Claude/Antigravity/OpenCode rows also include a few ms of harness setup.
     """
 
     schema_version: int = RESULT_SCHEMA_VERSION
@@ -446,13 +443,9 @@ def agent_run_to_task_result(
 ) -> TaskResult:
     """Map an ``AgentRun`` onto the typed driver-owned portion of a task result.
 
-    Only **plane** MCP tools are classified and counted in ``num_calls`` /
-    mispick metrics. Client built-ins (``ToolSearch``, …) go to
-    ``client_tool_calls`` and are excluded.
-
-    CLI drivers never populate ``cum_input_tokens`` from bare
-    ``usage.input_tokens`` (that field is uncached-only under Claude Code and
-    misreads multi-turn cached runs as ~10 tokens). Use ``usage_total`` instead.
+    Only Plane MCP tools count toward num_calls and mispicks; client built-ins go to
+    client_tool_calls. CLI drivers never fill cum_input_tokens from bare usage.input_tokens
+    — under Claude Code that is uncached-only and misreads cached runs as ~10 tokens.
     """
     # Re-split in case callers passed a mixed list
     plane_src, client_extra = split_plane_and_client_calls(list(run.calls))

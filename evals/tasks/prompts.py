@@ -18,14 +18,10 @@ def format_task_prompt(
 ) -> str:
     """Render a task prompt with seed-bound placeholders.
 
-    Always provides ``project`` (from ctx or a dry-run sample). Tasks that hand
-    the agent concrete UUIDs / PROJ-N identifiers supply extra keys via an
-    optional ``prompt_bind(ctx) -> dict`` callable on the task dict.
-
-    When ``strict=True`` (live runs), empty-string values or binder exceptions
-    raise ``PromptBindError`` so the harness records ``infra_seed`` rather than
-    sending a blank-ID prompt to the agent. Dry-run uses ``strict=False`` and
-    fills missing keys with explicit ``<name>`` markers.
+    Always supplies ``project``; tasks needing concrete UUIDs add keys via an optional
+    ``prompt_bind(ctx)``. Live runs use strict=True so an empty value or a binder error
+    raises PromptBindError and is recorded infra_seed, rather than sending the agent a
+    blank ID; dry runs fill missing keys with ``<name>`` markers instead.
     """
     tpl = str(task.get("prompt") or "")
     fields: dict[str, Any] = {

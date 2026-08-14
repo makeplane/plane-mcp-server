@@ -1,19 +1,9 @@
-"""Stdio MCP recording proxy — byte-faithful JSON-RPC relay with sidecar call log.
+"""Stdio MCP recording proxy — byte-faithful JSON-RPC relay with a sidecar call log.
 
-Usage:
-  python -m evals.proxy --log SIDECAR.jsonl [--record-result-payloads] -- <target server command...>
-
-Spawns the target as a child, relays parent stdin → child stdin and child
-stdout → parent stdout as raw bytes (byte-faithful; does not re-serialize).
-Parses complete newline-delimited JSON lines from a *copy* of each direction
-to record ``tools/call`` request/response pairs into the sidecar JSONL.
-
-I/O uses ``os.read`` on raw fds + per-direction bytearray buffers — never
-``select`` + buffered ``readline`` (partial lines would hang; buffered
-prefetch would stall multi-line clients).
-
-Child stderr is forwarded to our stderr. Exit code matches the child
-(negative/signal codes map to conventional 128+signum).
+``python -m evals.proxy --log SIDECAR.jsonl [--record-result-payloads] -- <server cmd...>``
+Relays raw bytes both ways and parses a *copy* to log tools/call pairs. Uses ``os.read`` on
+raw fds, never select + buffered readline: partial lines hang and prefetch stalls multi-line
+clients. Child stderr is forwarded; exit code matches the child (signals as 128+signum).
 """
 
 from __future__ import annotations

@@ -22,34 +22,11 @@ from evals.tool_names import normalize_tool_call, split_plane_and_client_calls
 def normalize_claude_usage(data: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Parse Claude print-mode usage into (raw_usage, usage_total).
 
-    Real envelope (probed 2026-08-12, ``claude -p --output-format json``)::
-
-        {
-          "usage": {
-            "input_tokens": 10,              # uncached NEW input only — NOT run total
-            "cache_creation_input_tokens": 17459,
-            "cache_read_input_tokens": 18464,
-            "output_tokens": 143,
-            "iterations": [...],
-            ...
-          },
-          "modelUsage": {
-            "<model-id>": {
-              "inputTokens": 10,
-              "outputTokens": 143,
-              "cacheReadInputTokens": 18464,
-              "cacheCreationInputTokens": 17459,
-              "costUSD": 0.037,
-              ...
-            }
-          },
-          "total_cost_usd": 0.037
-        }
-
-    ``usage.input_tokens`` alone is misleading for multi-turn cached runs (live
-    rows showed 8–10 while cache_read was 180k+). We keep the split fields and
-    compute an inclusive total under ``usage_total``; callers must **not** copy
-    bare ``input_tokens`` into ``cum_input_tokens``.
+    The envelope splits input across ``input_tokens`` (uncached new input only),
+    ``cache_creation_input_tokens`` and ``cache_read_input_tokens``, mirrored in
+    ``modelUsage.<model-id>`` as camelCase plus ``costUSD``/``total_cost_usd``.
+    Bare ``input_tokens`` is the trap: live multi-turn rows read 8-10 while
+    cache_read was 180k+, so callers must never copy it into ``cum_input_tokens``.
     """
     usage = data.get("usage")
     if usage is not None and not isinstance(usage, dict):
