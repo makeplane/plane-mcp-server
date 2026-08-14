@@ -100,106 +100,11 @@ def _write_fake_server(path: Path) -> Path:
     return path
 
 
-def test_proxy_records_tools_call_and_exit_code(tmp_path: Path):
-    server = _write_fake_server(tmp_path / "fake_server.py")
-    sidecar = tmp_path / "side.jsonl"
-    cmd = [
-        sys.executable,
-        "-m",
-        "evals.proxy",
-        "--log",
-        str(sidecar),
-        "--",
-        sys.executable,
-        str(server),
-    ]
-    # Drive the proxy: initialize, tools/call ok, tools/call error, unparsed, then close.
-    client_in = (
-        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
-        + "\n"
-        + json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": "list_work_items", "arguments": {"project": "P"}},
-            }
-        )
-        + "\n"
-        + json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {"name": "boom", "arguments": {}},
-            }
-        )
-        + "\n"
-        + "NOT_JSON_LINE\n"
-    )
-    proc = subprocess.run(
-        cmd,
-        input=client_in.encode("utf-8"),
-        capture_output=True,
-        cwd=str(REPO),
-        timeout=15,
-    )
-    assert proc.returncode == 7  # child exit propagated
-    # Byte-faithful: unparsed line and JSON responses appear on stdout.
-    out = proc.stdout.decode("utf-8", errors="replace")
-    assert "NOT_JSON_LINE" in out
-    assert "list_work_items" in out or "ok:list_work_items" in out
-
-    rows = [json.loads(ln) for ln in sidecar.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    call_rows = [r for r in rows if r.get("row_type") != "proxy_meta"]
-    meta = next(r for r in rows if r.get("row_type") == "proxy_meta")
-    assert len(call_rows) == 2
-    assert call_rows[0]["tool"] == "list_work_items"
-    assert call_rows[0]["args"] == {"project": "P"}
-    assert call_rows[0]["is_error"] is False
-    assert call_rows[0]["result_chars"] > 0
-    assert call_rows[0]["seq"] == 1
-    assert call_rows[1]["tool"] == "boom"
-    assert call_rows[1]["is_error"] is True
-    assert meta["unparsed_lines"] >= 1
-    assert meta["relayed_lines"] >= 3
-
-
-def test_proxy_byte_faithful_child_receives_exact_bytes(tmp_path: Path):
-    """Child sees the exact request bytes the client sent (no re-serialization)."""
-    received = tmp_path / "received.bin"
-    echo_server = tmp_path / "echo_server.py"
-    echo_server.write_text(
-        textwrap.dedent(
-            f"""
-            import sys
-            data = sys.stdin.buffer.read()
-            open({str(received)!r}, "wb").write(data)
-            # Still answer initialize-ish so proxy drains cleanly
-            for line in data.splitlines(keepends=True):
-                if not line.strip():
-                    continue
-                try:
-                    import json
-                    msg = json.loads(line)
-                except Exception:
-                    sys.stdout.buffer.write(line)
-                    sys.stdout.buffer.flush()
-                    continue
-                if msg.get("id") is not None:
-                    sys.stdout.buffer.write(
-                        (json.dumps({{"jsonrpc": "2.0", "id": msg["id"], "result": {{}}}}) + "\\n").encode()
-                    )
-                    sys.stdout.buffer.flush()
-            """
-        ),
-        encoding="utf-8",
-    )
-    sidecar = tmp_path / "s.jsonl"
-    # Deliberately non-canonical JSON spacing — re-serialization would change it.
-    payload = b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{  "x":1}}\n'
-    proc = subprocess.run(
-        [
+def test_proxy_behaviours(tmp_path):
+    def test_proxy_records_tools_call_and_exit_code(tmp_path):
+        server = _write_fake_server(tmp_path / "fake_server.py")
+        sidecar = tmp_path / "side.jsonl"
+        cmd = [
             sys.executable,
             "-m",
             "evals.proxy",
@@ -207,66 +112,491 @@ def test_proxy_byte_faithful_child_receives_exact_bytes(tmp_path: Path):
             str(sidecar),
             "--",
             sys.executable,
-            str(echo_server),
-        ],
-        input=payload,
-        capture_output=True,
-        cwd=str(REPO),
-        timeout=10,
-    )
-    assert proc.returncode == 0
-    assert received.read_bytes() == payload
+            str(server),
+        ]
+        # Drive the proxy: initialize, tools/call ok, tools/call error, unparsed, then close.
+        client_in = (
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+            + "\n"
+            + json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": "list_work_items", "arguments": {"project": "P"}},
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "boom", "arguments": {}},
+                }
+            )
+            + "\n"
+            + "NOT_JSON_LINE\n"
+        )
+        proc = subprocess.run(
+            cmd,
+            input=client_in.encode("utf-8"),
+            capture_output=True,
+            cwd=str(REPO),
+            timeout=15,
+        )
+        assert proc.returncode == 7  # child exit propagated
+        # Byte-faithful: unparsed line and JSON responses appear on stdout.
+        out = proc.stdout.decode("utf-8", errors="replace")
+        assert "NOT_JSON_LINE" in out
+        assert "list_work_items" in out or "ok:list_work_items" in out
+
+        rows = [json.loads(ln) for ln in sidecar.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        call_rows = [r for r in rows if r.get("row_type") != "proxy_meta"]
+        meta = next(r for r in rows if r.get("row_type") == "proxy_meta")
+        assert len(call_rows) == 2
+        assert call_rows[0]["tool"] == "list_work_items"
+        assert call_rows[0]["args"] == {"project": "P"}
+        assert call_rows[0]["is_error"] is False
+        assert call_rows[0]["result_chars"] > 0
+        assert call_rows[0]["seq"] == 1
+        assert call_rows[1]["tool"] == "boom"
+        assert call_rows[1]["is_error"] is True
+        assert meta["unparsed_lines"] >= 1
+        assert meta["relayed_lines"] >= 3
+
+    def test_proxy_byte_faithful_child_receives_exact_bytes(tmp_path):
+        received = tmp_path / "received.bin"
+        echo_server = tmp_path / "echo_server.py"
+        echo_server.write_text(
+            textwrap.dedent(
+                f"""
+                import sys
+                data = sys.stdin.buffer.read()
+                open({str(received)!r}, "wb").write(data)
+                # Still answer initialize-ish so proxy drains cleanly
+                for line in data.splitlines(keepends=True):
+                    if not line.strip():
+                        continue
+                    try:
+                        import json
+                        msg = json.loads(line)
+                    except Exception:
+                        sys.stdout.buffer.write(line)
+                        sys.stdout.buffer.flush()
+                        continue
+                    if msg.get("id") is not None:
+                        sys.stdout.buffer.write(
+                            (json.dumps({{"jsonrpc": "2.0", "id": msg["id"], "result": {{}}}}) + "\\n").encode()
+                        )
+                        sys.stdout.buffer.flush()
+                """
+            ),
+            encoding="utf-8",
+        )
+        sidecar = tmp_path / "s.jsonl"
+        # Deliberately non-canonical JSON spacing — re-serialization would change it.
+        payload = b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{  "x":1}}\n'
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "evals.proxy",
+                "--log",
+                str(sidecar),
+                "--",
+                sys.executable,
+                str(echo_server),
+            ],
+            input=payload,
+            capture_output=True,
+            cwd=str(REPO),
+            timeout=10,
+        )
+        assert proc.returncode == 0
+        assert received.read_bytes() == payload
+
+    def test_proxy_main_requires_command():
+        with pytest.raises(SystemExit):
+            proxy_main(["--log", "/tmp/x.jsonl"])
+
+    def test_proxy_exits_when_child_dies_first(tmp_path):
+        server = tmp_path / "die_soon.py"
+        server.write_text(
+            textwrap.dedent(
+                """
+                import sys, time
+                # Emit nothing and exit quickly; leave proxy client stdin open.
+                time.sleep(0.15)
+                sys.exit(3)
+                """
+            ),
+            encoding="utf-8",
+        )
+        sidecar = tmp_path / "side.jsonl"
+        t0 = __import__("time").monotonic()
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "evals.proxy",
+                "--log",
+                str(sidecar),
+                "--",
+                sys.executable,
+                str(server),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(REPO),
+        )
+        try:
+            # Keep stdin open (do not close) so the stdin pump blocks on readline;
+            # the proxy must still notice child death and exit.
+            deadline = SHUTDOWN_DEADLINE_S + 5.0
+            try:
+                rc = proc.wait(timeout=deadline)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                pytest.fail(f"proxy hung >{deadline}s after child exit")
+            elapsed = __import__("time").monotonic() - t0
+            # Must finish well under the hang window (not wait the full drain).
+            assert elapsed < deadline
+            # Child's exit code (3) should propagate; tolerate signal map if the
+            # runtime reaps oddly, but meta must still be present.
+            assert rc in (3, 128 + 3) or rc == 3
+            assert sidecar.is_file()
+            text = sidecar.read_text(encoding="utf-8")
+            assert "proxy_meta" in text
+            # Prefer exact child code when available
+            if rc not in (3, 128 + 3):
+                # At least ensure we did not hang; surface stderr for diagnosis.
+                err = (proc.stderr.read() if proc.stderr else b"").decode()
+                assert "proxy_meta" in text, f"rc={rc} stderr={err!r}"
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            if proc.stdin:
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+
+    def test_proxy_from_foreign_cwd_with_pythonpath(tmp_path):
+        server = tmp_path / "echo_once.py"
+        server.write_text(
+            textwrap.dedent(
+                """
+                import json, sys
+                line = sys.stdin.readline()
+                msg = json.loads(line)
+                sys.stdout.write(json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": msg["id"],
+                    "result": {"content": [], "isError": False},
+                }) + "\\n")
+                sys.stdout.flush()
+                """
+            ),
+            encoding="utf-8",
+        )
+        sidecar = tmp_path / "side.jsonl"
+        foreign = tmp_path / "foreign_cwd"
+        foreign.mkdir()
+        env = ensure_proxy_pythonpath(dict(**{k: v for k, v in __import__("os").environ.items()}))
+        # Drop any ambient PYTHONPATH pollution by putting repo first.
+        assert str(REPO) in env["PYTHONPATH"].split(__import__("os").pathsep)
+        client_in = (
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "ping", "arguments": {}},
+                }
+            )
+            + "\n"
+        )
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "evals.proxy",
+                "--log",
+                str(sidecar),
+                "--",
+                sys.executable,
+                str(server),
+            ],
+            input=client_in.encode(),
+            capture_output=True,
+            cwd=str(foreign),  # foreign cwd — must still import evals.proxy
+            env=env,
+            timeout=15,
+        )
+        assert proc.returncode == 0, proc.stderr.decode()
+        calls = load_proxy_sidecar_calls(sidecar)
+        assert len(calls) == 1
+        assert calls[0]["tool"] == "ping"
+
+    def test_proxy_child_env_pythonpath_clean(tmp_path):
+        server = tmp_path / "check_env.py"
+        server.write_text(
+            textwrap.dedent(
+                f"""
+                import json, os, sys
+                root = {str(REPO)!r}
+                pp = os.environ.get("PYTHONPATH", "")
+                parts = [p for p in pp.split(os.pathsep) if p]
+                bad = root in parts
+                line = sys.stdin.readline()
+                msg = json.loads(line)
+                sys.stdout.write(json.dumps({{
+                    "jsonrpc": "2.0",
+                    "id": msg["id"],
+                    "result": {{"content": [{{"type": "text", "text": "bad=" + str(bad)}}], "isError": False}},
+                }}) + "\\n")
+                sys.stdout.flush()
+                sys.exit(0 if not bad else 9)
+                """
+            ),
+            encoding="utf-8",
+        )
+        sidecar = tmp_path / "side.jsonl"
+        foreign = tmp_path / "foreign"
+        foreign.mkdir()
+        env = ensure_proxy_pythonpath(dict(__import__("os").environ))
+        assert str(REPO) in env.get("PYTHONPATH", "")
+        client_in = (
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "envcheck", "arguments": {}},
+                }
+            )
+            + "\n"
+        )
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "evals.proxy",
+                "--log",
+                str(sidecar),
+                "--",
+                sys.executable,
+                str(server),
+            ],
+            input=client_in.encode(),
+            capture_output=True,
+            cwd=str(foreign),
+            env=env,
+            timeout=15,
+        )
+        assert proc.returncode == 0, proc.stderr.decode()
+        assert b"bad=False" in proc.stdout
+
+    def test_proxy_survives_cli_group_kill_and_writes_meta(tmp_path):
+        import os
+        import signal
+        import time
+
+        server = tmp_path / "echo_server.py"
+        server.write_text(
+            textwrap.dedent(
+                """
+                import json, sys
+                for line in sys.stdin:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except Exception:
+                        continue
+                    mid = msg.get("id")
+                    if mid is not None:
+                        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": mid, "result": {}}) + "\\n")
+                        sys.stdout.flush()
+                """
+            ),
+            encoding="utf-8",
+        )
+        sidecar = tmp_path / "side.jsonl"
+        leader_script = tmp_path / "cli_leader.py"
+        leader_script.write_text(
+            textwrap.dedent(
+                f"""
+                import os, subprocess, sys, time
+                from pathlib import Path
+                sidecar = Path({str(sidecar)!r})
+                server = Path({str(server)!r})
+                # Spawn proxy in our process group (no start_new_session on child).
+                # proxy main() will os.setsid() and detach.
+                proxy = subprocess.Popen(
+                    [
+                        sys.executable, "-m", "evals.proxy",
+                        "--log", str(sidecar),
+                        "--",
+                        sys.executable, str(server),
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                # Give setsid a moment, then write a tools/call and keep stdin open briefly.
+                time.sleep(0.4)
+                if proxy.stdin:
+                    req = (
+                        '{{"jsonrpc":"2.0","id":1,"method":"tools/call",'
+                        '"params":{{"name":"t","arguments":{{}}}}}}\\n'
+                    )
+                    proxy.stdin.write(req.encode())
+                    proxy.stdin.flush()
+                # Stay alive as group leader until killed by the test harness.
+                time.sleep(9999)
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        # Leader is a process-group leader (like run_cli_subprocess).
+        env = {**os.environ, "PYTHONPATH": str(REPO) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+        leader = subprocess.Popen(
+            [sys.executable, str(leader_script)],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(REPO),
+            env=env,
+        )
+        try:
+            # Wait until proxy has started (sidecar created) and setsid likely done.
+            boot = time.monotonic() + 5.0
+            while time.monotonic() < boot:
+                if sidecar.is_file():
+                    break
+                time.sleep(0.05)
+            time.sleep(0.5)  # allow setsid + optional tools/call
+            # SIGKILL the CLI process group — must NOT kill the detached proxy.
+            try:
+                os.killpg(leader.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                leader.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                leader.kill()
+                leader.wait(timeout=1.0)
+
+            # Proxy should see stdin EOF (leader dead → pipe closed), finalize meta.
+            deadline = time.monotonic() + SHUTDOWN_DEADLINE_S + 5.0
+            meta_seen = False
+            while time.monotonic() < deadline:
+                if sidecar.is_file():
+                    text = sidecar.read_text(encoding="utf-8")
+                    if "proxy_meta" in text:
+                        meta_seen = True
+                        break
+                time.sleep(0.1)
+            assert meta_seen, (
+                f"proxy_meta missing after group kill; sidecar={sidecar.read_text() if sidecar.is_file() else None!r}"
+            )
+            rows = [json.loads(ln) for ln in sidecar.read_text().splitlines() if ln.strip()]
+            assert rows[-1].get("row_type") == "proxy_meta"
+        finally:
+            if leader.poll() is None:
+                try:
+                    os.killpg(leader.pid, signal.SIGKILL)
+                except Exception:
+                    leader.kill()
+                try:
+                    leader.wait(timeout=2.0)
+                except Exception:
+                    pass
+
+    _d0 = tmp_path / "test_proxy_records_tools_call_and_exit_code"
+    _d0.mkdir()
+    test_proxy_records_tools_call_and_exit_code(_d0)
+    _d1 = tmp_path / "test_proxy_byte_faithful_child_receives_exact_bytes"
+    _d1.mkdir()
+    test_proxy_byte_faithful_child_receives_exact_bytes(_d1)
+    test_proxy_main_requires_command()
+    _d3 = tmp_path / "test_proxy_exits_when_child_dies_first"
+    _d3.mkdir()
+    test_proxy_exits_when_child_dies_first(_d3)
+    _d4 = tmp_path / "test_proxy_from_foreign_cwd_with_pythonpath"
+    _d4.mkdir()
+    test_proxy_from_foreign_cwd_with_pythonpath(_d4)
+    _d5 = tmp_path / "test_proxy_child_env_pythonpath_clean"
+    _d5.mkdir()
+    test_proxy_child_env_pythonpath_clean(_d5)
+    _d6 = tmp_path / "test_proxy_survives_cli_group_kill_and_writes_meta"
+    _d6.mkdir()
+    test_proxy_survives_cli_group_kill_and_writes_meta(_d6)
 
 
-def test_sidecar_recorder_unit(tmp_path: Path):
-    rec = SidecarRecorder(tmp_path / "a.jsonl")
-    rec.on_client_message(
-        {
-            "jsonrpc": "2.0",
-            "id": 9,
-            "method": "tools/call",
-            "params": {"name": "t", "arguments": {"a": 1}},
-        }
-    )
-    rec.on_server_message({"jsonrpc": "2.0", "id": 9, "result": {"content": [], "isError": False}})
-    rec.write_meta()
-    calls = load_proxy_sidecar_calls(tmp_path / "a.jsonl")
-    raw_rows = [json.loads(line) for line in (tmp_path / "a.jsonl").read_text().splitlines()]
-    raw_call = next(row for row in raw_rows if row.get("row_type") != "proxy_meta")
-    assert len(calls) == 1
-    assert calls[0]["tool"] == "t"
-    assert calls[0]["args"] == {"a": 1}
-    assert calls[0]["origin"] == "plane"
-    assert "result_text" not in calls[0]
-    assert "result_text" not in raw_call
-    assert rec.finalized is True
+def test_sidecar_behaviours(tmp_path):
+    def test_sidecar_recorder_unit(tmp_path):
+        rec = SidecarRecorder(tmp_path / "a.jsonl")
+        rec.on_client_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {"name": "t", "arguments": {"a": 1}},
+            }
+        )
+        rec.on_server_message({"jsonrpc": "2.0", "id": 9, "result": {"content": [], "isError": False}})
+        rec.write_meta()
+        calls = load_proxy_sidecar_calls(tmp_path / "a.jsonl")
+        raw_rows = [json.loads(line) for line in (tmp_path / "a.jsonl").read_text().splitlines()]
+        raw_call = next(row for row in raw_rows if row.get("row_type") != "proxy_meta")
+        assert len(calls) == 1
+        assert calls[0]["tool"] == "t"
+        assert calls[0]["args"] == {"a": 1}
+        assert calls[0]["origin"] == "plane"
+        assert "result_text" not in calls[0]
+        assert "result_text" not in raw_call
+        assert rec.finalized is True
 
+    def test_sidecar_result_payload_round_trips_only_when_enabled(tmp_path):
+        path = tmp_path / "payload.jsonl"
+        rec = SidecarRecorder(path, record_result_payloads=True)
+        rec.on_client_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "find_work_items", "arguments": {}},
+            }
+        )
+        result = {"content": [{"type": "text", "text": "workspace result"}], "isError": False}
+        rec.on_server_message({"jsonrpc": "2.0", "id": 3, "result": result})
+        rec.write_meta()
 
-def test_sidecar_result_payload_round_trips_only_when_enabled(tmp_path: Path):
-    path = tmp_path / "payload.jsonl"
-    rec = SidecarRecorder(path, record_result_payloads=True)
-    rec.on_client_message(
-        {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {"name": "find_work_items", "arguments": {}},
-        }
-    )
-    result = {"content": [{"type": "text", "text": "workspace result"}], "isError": False}
-    rec.on_server_message({"jsonrpc": "2.0", "id": 3, "result": result})
-    rec.write_meta()
+        expected_text = json.dumps(result, default=str, ensure_ascii=False)
+        raw_call = next(
+            row
+            for row in (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
+            if row.get("row_type") != "proxy_meta"
+        )
+        assert raw_call["result_text"] == expected_text
+        calls = load_proxy_sidecar_calls(path)
+        assert calls[0]["result_text"] == expected_text
+        assert calls[0]["result_chars"] == len(expected_text)
 
-    expected_text = json.dumps(result, default=str, ensure_ascii=False)
-    raw_call = next(
-        row
-        for row in (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
-        if row.get("row_type") != "proxy_meta"
-    )
-    assert raw_call["result_text"] == expected_text
-    calls = load_proxy_sidecar_calls(path)
-    assert calls[0]["result_text"] == expected_text
-    assert calls[0]["result_chars"] == len(expected_text)
+    _d0 = tmp_path / "test_sidecar_recorder_unit"
+    _d0.mkdir()
+    test_sidecar_recorder_unit(_d0)
+    _d1 = tmp_path / "test_sidecar_result_payload_round_trips_only_when_enabled"
+    _d1.mkdir()
+    test_sidecar_result_payload_round_trips_only_when_enabled(_d1)
 
 
 def test_append_after_finalize_is_dropped(tmp_path: Path):
@@ -359,11 +689,6 @@ def test_reap_timeout_floor_when_deadline_exhausted():
     assert reap_timeout(future, floor=0.1) >= 4.0
 
 
-def test_proxy_main_requires_command():
-    with pytest.raises(SystemExit):
-        proxy_main(["--log", "/tmp/x.jsonl"])
-
-
 def test_server_initiated_request_does_not_pop_pending(tmp_path: Path):
     """Server message with method+id must not complete a tools/call pending slot."""
     rec = SidecarRecorder(tmp_path / "s.jsonl")
@@ -427,132 +752,6 @@ def test_write_all_fd_loops_on_short_writes(tmp_path: Path):
         got += chunk
     os.close(r)
     assert got == payload
-
-
-def test_proxy_exits_when_child_dies_first(tmp_path: Path):
-    """Child exits while parent stdin is still open — proxy must not hang."""
-    server = tmp_path / "die_soon.py"
-    server.write_text(
-        textwrap.dedent(
-            """
-            import sys, time
-            # Emit nothing and exit quickly; leave proxy client stdin open.
-            time.sleep(0.15)
-            sys.exit(3)
-            """
-        ),
-        encoding="utf-8",
-    )
-    sidecar = tmp_path / "side.jsonl"
-    t0 = __import__("time").monotonic()
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "evals.proxy",
-            "--log",
-            str(sidecar),
-            "--",
-            sys.executable,
-            str(server),
-        ],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=str(REPO),
-    )
-    try:
-        # Keep stdin open (do not close) so the stdin pump blocks on readline;
-        # the proxy must still notice child death and exit.
-        deadline = SHUTDOWN_DEADLINE_S + 5.0
-        try:
-            rc = proc.wait(timeout=deadline)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            pytest.fail(f"proxy hung >{deadline}s after child exit")
-        elapsed = __import__("time").monotonic() - t0
-        # Must finish well under the hang window (not wait the full drain).
-        assert elapsed < deadline
-        # Child's exit code (3) should propagate; tolerate signal map if the
-        # runtime reaps oddly, but meta must still be present.
-        assert rc in (3, 128 + 3) or rc == 3
-        assert sidecar.is_file()
-        text = sidecar.read_text(encoding="utf-8")
-        assert "proxy_meta" in text
-        # Prefer exact child code when available
-        if rc not in (3, 128 + 3):
-            # At least ensure we did not hang; surface stderr for diagnosis.
-            err = (proc.stderr.read() if proc.stderr else b"").decode()
-            assert "proxy_meta" in text, f"rc={rc} stderr={err!r}"
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-        if proc.stdin:
-            try:
-                proc.stdin.close()
-            except Exception:
-                pass
-
-
-def test_proxy_from_foreign_cwd_with_pythonpath(tmp_path: Path):
-    """proxy + plane path must resolve when cwd is a temp dir (OpenCode case)."""
-    server = tmp_path / "echo_once.py"
-    server.write_text(
-        textwrap.dedent(
-            """
-            import json, sys
-            line = sys.stdin.readline()
-            msg = json.loads(line)
-            sys.stdout.write(json.dumps({
-                "jsonrpc": "2.0",
-                "id": msg["id"],
-                "result": {"content": [], "isError": False},
-            }) + "\\n")
-            sys.stdout.flush()
-            """
-        ),
-        encoding="utf-8",
-    )
-    sidecar = tmp_path / "side.jsonl"
-    foreign = tmp_path / "foreign_cwd"
-    foreign.mkdir()
-    env = ensure_proxy_pythonpath(dict(**{k: v for k, v in __import__("os").environ.items()}))
-    # Drop any ambient PYTHONPATH pollution by putting repo first.
-    assert str(REPO) in env["PYTHONPATH"].split(__import__("os").pathsep)
-    client_in = (
-        json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {"name": "ping", "arguments": {}},
-            }
-        )
-        + "\n"
-    )
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "evals.proxy",
-            "--log",
-            str(sidecar),
-            "--",
-            sys.executable,
-            str(server),
-        ],
-        input=client_in.encode(),
-        capture_output=True,
-        cwd=str(foreign),  # foreign cwd — must still import evals.proxy
-        env=env,
-        timeout=15,
-    )
-    assert proc.returncode == 0, proc.stderr.decode()
-    calls = load_proxy_sidecar_calls(sidecar)
-    assert len(calls) == 1
-    assert calls[0]["tool"] == "ping"
 
 
 def test_process_buffer_partial_line_and_multi_line_chunk(tmp_path: Path):
@@ -646,67 +845,6 @@ def test_scrub_child_pythonpath_removes_repo():
     # Only-repo entry drops the var entirely
     only = scrub_child_pythonpath({"PYTHONPATH": str(REPO)})
     assert "PYTHONPATH" not in only
-
-
-def test_proxy_child_env_pythonpath_clean(tmp_path: Path):
-    """Real MCP child must not inherit the monorepo PYTHONPATH entry."""
-    server = tmp_path / "check_env.py"
-    server.write_text(
-        textwrap.dedent(
-            f"""
-            import json, os, sys
-            root = {str(REPO)!r}
-            pp = os.environ.get("PYTHONPATH", "")
-            parts = [p for p in pp.split(os.pathsep) if p]
-            bad = root in parts
-            line = sys.stdin.readline()
-            msg = json.loads(line)
-            sys.stdout.write(json.dumps({{
-                "jsonrpc": "2.0",
-                "id": msg["id"],
-                "result": {{"content": [{{"type": "text", "text": "bad=" + str(bad)}}], "isError": False}},
-            }}) + "\\n")
-            sys.stdout.flush()
-            sys.exit(0 if not bad else 9)
-            """
-        ),
-        encoding="utf-8",
-    )
-    sidecar = tmp_path / "side.jsonl"
-    foreign = tmp_path / "foreign"
-    foreign.mkdir()
-    env = ensure_proxy_pythonpath(dict(__import__("os").environ))
-    assert str(REPO) in env.get("PYTHONPATH", "")
-    client_in = (
-        json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {"name": "envcheck", "arguments": {}},
-            }
-        )
-        + "\n"
-    )
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "evals.proxy",
-            "--log",
-            str(sidecar),
-            "--",
-            sys.executable,
-            str(server),
-        ],
-        input=client_in.encode(),
-        capture_output=True,
-        cwd=str(foreign),
-        env=env,
-        timeout=15,
-    )
-    assert proc.returncode == 0, proc.stderr.decode()
-    assert b"bad=False" in proc.stdout
 
 
 def test_rapid_response_pairing(tmp_path: Path):
@@ -914,129 +1052,3 @@ def test_bounded_shutdown_wall_clock(tmp_path: Path):
     assert elapsed < SHUTDOWN_DEADLINE_S + 2.0
     rows = [json.loads(ln) for ln in sidecar.read_text().splitlines() if ln.strip()]
     assert rows[-1].get("row_type") == "proxy_meta"
-
-
-def test_proxy_survives_cli_group_kill_and_writes_meta(tmp_path: Path):
-    """Proxy os.setsid() detaches from the CLI process group.
-
-    Simulate: CLI process-group leader spawns proxy as a child (same group);
-    proxy main() calls setsid and leaves the group; SIGKILL the CLI group;
-    proxy still finalizes proxy_meta within the shutdown deadline.
-    """
-    import os
-    import signal
-    import time
-
-    server = tmp_path / "echo_server.py"
-    server.write_text(
-        textwrap.dedent(
-            """
-            import json, sys
-            for line in sys.stdin:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                except Exception:
-                    continue
-                mid = msg.get("id")
-                if mid is not None:
-                    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": mid, "result": {}}) + "\\n")
-                    sys.stdout.flush()
-            """
-        ),
-        encoding="utf-8",
-    )
-    sidecar = tmp_path / "side.jsonl"
-    leader_script = tmp_path / "cli_leader.py"
-    leader_script.write_text(
-        textwrap.dedent(
-            f"""
-            import os, subprocess, sys, time
-            from pathlib import Path
-            sidecar = Path({str(sidecar)!r})
-            server = Path({str(server)!r})
-            # Spawn proxy in our process group (no start_new_session on child).
-            # proxy main() will os.setsid() and detach.
-            proxy = subprocess.Popen(
-                [
-                    sys.executable, "-m", "evals.proxy",
-                    "--log", str(sidecar),
-                    "--",
-                    sys.executable, str(server),
-                ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            # Give setsid a moment, then write a tools/call and keep stdin open briefly.
-            time.sleep(0.4)
-            if proxy.stdin:
-                req = (
-                    '{{"jsonrpc":"2.0","id":1,"method":"tools/call",'
-                    '"params":{{"name":"t","arguments":{{}}}}}}\\n'
-                )
-                proxy.stdin.write(req.encode())
-                proxy.stdin.flush()
-            # Stay alive as group leader until killed by the test harness.
-            time.sleep(9999)
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    # Leader is a process-group leader (like run_cli_subprocess).
-    env = {**os.environ, "PYTHONPATH": str(REPO) + os.pathsep + os.environ.get("PYTHONPATH", "")}
-    leader = subprocess.Popen(
-        [sys.executable, str(leader_script)],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        cwd=str(REPO),
-        env=env,
-    )
-    try:
-        # Wait until proxy has started (sidecar created) and setsid likely done.
-        boot = time.monotonic() + 5.0
-        while time.monotonic() < boot:
-            if sidecar.is_file():
-                break
-            time.sleep(0.05)
-        time.sleep(0.5)  # allow setsid + optional tools/call
-        # SIGKILL the CLI process group — must NOT kill the detached proxy.
-        try:
-            os.killpg(leader.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            leader.wait(timeout=2.0)
-        except subprocess.TimeoutExpired:
-            leader.kill()
-            leader.wait(timeout=1.0)
-
-        # Proxy should see stdin EOF (leader dead → pipe closed), finalize meta.
-        deadline = time.monotonic() + SHUTDOWN_DEADLINE_S + 5.0
-        meta_seen = False
-        while time.monotonic() < deadline:
-            if sidecar.is_file():
-                text = sidecar.read_text(encoding="utf-8")
-                if "proxy_meta" in text:
-                    meta_seen = True
-                    break
-            time.sleep(0.1)
-        assert meta_seen, (
-            f"proxy_meta missing after group kill; sidecar={sidecar.read_text() if sidecar.is_file() else None!r}"
-        )
-        rows = [json.loads(ln) for ln in sidecar.read_text().splitlines() if ln.strip()]
-        assert rows[-1].get("row_type") == "proxy_meta"
-    finally:
-        if leader.poll() is None:
-            try:
-                os.killpg(leader.pid, signal.SIGKILL)
-            except Exception:
-                leader.kill()
-            try:
-                leader.wait(timeout=2.0)
-            except Exception:
-                pass

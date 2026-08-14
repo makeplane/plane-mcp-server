@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from evals import cli as run_mod
@@ -37,47 +35,53 @@ DESIGN_IDS = {
 EXTRA_IDS = {"W9", "W10", "R7", "S5"}  # bulk, pages, transitions, features
 
 
-def test_cmd_list_prints_all_task_ids(capsys):
-    rc = cmd_list()
-    assert rc == 0
-    out = capsys.readouterr().out
-    for tid in DESIGN_IDS | EXTRA_IDS:
-        assert tid in out
+def test_cmd_behaviours(capsys):
+    def test_cmd_list_prints_all_task_ids(capsys):
+        rc = cmd_list()
+        assert rc == 0
+        out = capsys.readouterr().out
+        for tid in DESIGN_IDS | EXTRA_IDS:
+            assert tid in out
+
+    def test_cmd_dry_run_all_tasks(capsys):
+        rc = cmd_dry_run(list(TASKS))
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Seed plan:" in out
+        for tid in ("R1", "W9", "S4", "C2", "R7"):
+            assert f"=== {tid} ===" in out
+
+    test_cmd_list_prints_all_task_ids(capsys)
+    test_cmd_dry_run_all_tasks(capsys)
 
 
-def test_cmd_dry_run_all_tasks(capsys):
-    rc = cmd_dry_run(list(TASKS))
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "Seed plan:" in out
-    for tid in ("R1", "W9", "S4", "C2", "R7"):
-        assert f"=== {tid} ===" in out
+def test_parse_args_behaviours():
+    def test_parse_args_list():
+        a = parse_args(["--list", "--label", "candidate-build"])
+        assert a.list is True
+        assert a.label == "candidate-build"
+        assert parse_args(["--list"]).label == "local"
 
+    def test_parse_args_accepts_driver():
+        a = parse_args(["--driver", "claude-cli", "--dry-run"])
+        assert a.driver == "claude-cli"
+        b = parse_args(["--dry-run"])
+        assert b.driver == "api"
+        assert b.model == "standard"
+        assert b.provider == "anthropic"
+        assert b.record_result_payloads is False
+        c = parse_args(["--driver", "claude-cli", "--record-result-payloads", "--dry-run"])
+        assert c.record_result_payloads is True
 
-def test_parse_args_list():
-    a = parse_args(["--list", "--label", "candidate-build"])
-    assert a.list is True
-    assert a.label == "candidate-build"
-    assert parse_args(["--list"]).label == "local"
+    def test_parse_args_resume_and_canary():
+        a = run_mod.parse_args(["--resume", "evals/output/x.jsonl", "--dry-run"])
+        assert a.resume == "evals/output/x.jsonl"
+        b = run_mod.parse_args(["--canary", "--tasks", "R1"])
+        assert b.canary is True
 
-
-def test_parse_args_accepts_driver():
-    a = parse_args(["--driver", "claude-cli", "--dry-run"])
-    assert a.driver == "claude-cli"
-    b = parse_args(["--dry-run"])
-    assert b.driver == "api"
-    assert b.model == "standard"
-    assert b.provider == "anthropic"
-    assert b.record_result_payloads is False
-    c = parse_args(["--driver", "claude-cli", "--record-result-payloads", "--dry-run"])
-    assert c.record_result_payloads is True
-
-
-def test_parse_args_resume_and_canary():
-    a = run_mod.parse_args(["--resume", "evals/output/x.jsonl", "--dry-run"])
-    assert a.resume == "evals/output/x.jsonl"
-    b = run_mod.parse_args(["--canary", "--tasks", "R1"])
-    assert b.canary is True
+    test_parse_args_list()
+    test_parse_args_accepts_driver()
+    test_parse_args_resume_and_canary()
 
 
 def test_model_tiers_resolve_per_driver_and_provider():
@@ -108,30 +112,35 @@ def test_non_tier_model_strings_pass_through_unchanged(driver, model):
     assert resolve_model_for_driver(driver, model) == model
 
 
-def test_unmapped_opencode_tier_fails_with_explicit_model_guidance():
-    with pytest.raises(ValueError, match=r"opencode models"):
-        resolve_model_for_driver("opencode-cli", "standard")
+def test_unmapped_behaviours(tmp_path, capsys):
+    def test_unmapped_opencode_tier_fails_with_explicit_model_guidance():
+        with pytest.raises(ValueError, match=r"opencode models"):
+            resolve_model_for_driver("opencode-cli", "standard")
 
+    def test_unmapped_tier_cli_error_is_loud_and_prevents_run(tmp_path, capsys):
+        out = tmp_path / "must-not-exist.jsonl"
 
-def test_unmapped_tier_cli_error_is_loud_and_prevents_run(tmp_path: Path, capsys):
-    out = tmp_path / "must-not-exist.jsonl"
+        rc = eval_main(
+            [
+                "--driver",
+                "opencode-cli",
+                "--model",
+                "standard",
+                "--tasks",
+                "R1",
+                "--out",
+                str(out),
+            ]
+        )
 
-    rc = eval_main(
-        [
-            "--driver",
-            "opencode-cli",
-            "--model",
-            "standard",
-            "--tasks",
-            "R1",
-            "--out",
-            str(out),
-        ]
-    )
+        assert rc == 2
+        assert "explicit provider/model ID" in capsys.readouterr().err
+        assert out.exists() is False
 
-    assert rc == 2
-    assert "explicit provider/model ID" in capsys.readouterr().err
-    assert out.exists() is False
+    test_unmapped_opencode_tier_fails_with_explicit_model_guidance()
+    _d1 = tmp_path / "test_unmapped_tier_cli_error_is_loud_and_prevents_run"
+    _d1.mkdir()
+    test_unmapped_tier_cli_error_is_loud_and_prevents_run(_d1, capsys)
 
 
 def test_tier_mapping_is_scoped_to_cli_provider():

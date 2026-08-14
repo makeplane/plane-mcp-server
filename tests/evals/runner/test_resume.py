@@ -25,136 +25,198 @@ from evals.runner import live as runner_live
 from tests.evals.conftest import _data_rows
 
 
-def test_should_skip_resume_row_completed_success():
-    assert should_skip_resume_row({"error": None, "error_class": None, "success": True}) is True
+def test_should_skip_behaviours():
+    def test_should_skip_resume_row_completed_success():
+        assert should_skip_resume_row({"error": None, "error_class": None, "success": True}) is True
+
+    def test_should_skip_resume_row_verify_fail_without_error():
+        assert should_skip_resume_row({"error": None, "error_class": None, "success": False}) is True
+
+    def test_should_skip_resume_row_infra_seed_retries():
+        assert should_skip_resume_row({"error": "HttpError: 409", "error_class": "infra_seed"}) is False
+
+    def test_should_skip_resume_row_infra_cli_retries():
+        assert should_skip_resume_row({"error": "timeout after 120s", "error_class": "infra_cli"}) is False
+
+    def test_should_skip_resume_row_non_null_error_retries():
+        assert should_skip_resume_row({"error": "TypeError: x", "error_class": "task"}) is False
+        assert should_skip_resume_row({"error": "boom", "error_class": None}) is False
+
+    test_should_skip_resume_row_completed_success()
+    test_should_skip_resume_row_verify_fail_without_error()
+    test_should_skip_resume_row_infra_seed_retries()
+    test_should_skip_resume_row_infra_cli_retries()
+    test_should_skip_resume_row_non_null_error_retries()
 
 
-def test_should_skip_resume_row_verify_fail_without_error():
-    # Completed attempt (agent ran, verify failed) — do not re-run on resume.
-    assert should_skip_resume_row({"error": None, "error_class": None, "success": False}) is True
+def test_load_behaviours(tmp_path, capsys):
+    def test_load_resume_skip_keys_summary(tmp_path):
+        p = tmp_path / "out.jsonl"
+        rows = [
+            {"task_id": "R1", "rep": 0, "label": "local", "error": None, "error_class": None},
+            {"task_id": "R1", "rep": 1, "label": "local", "error": "x", "error_class": "infra_seed"},
+            {"task_id": "W1", "rep": 0, "label": "local", "error": None, "success": False},
+        ]
+        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
+        assert skip == {("R1", 0, "local"), ("W1", 0, "local")}
+        assert n_skip == 2
+        assert n_retry == 1
 
+    def test_load_resume_skip_keys_n_retry_ignores_later_success(tmp_path):
+        p = tmp_path / "out.jsonl"
+        rows = [
+            {"task_id": "R1", "rep": 0, "label": "local", "error": "boom", "error_class": "infra_cli"},
+            {"task_id": "R1", "rep": 0, "label": "local", "error": None, "error_class": None, "success": True},
+        ]
+        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
+        assert skip == {("R1", 0, "local")}
+        assert n_skip == 1
+        assert n_retry == 0
 
-def test_should_skip_resume_row_infra_seed_retries():
-    assert should_skip_resume_row({"error": "HttpError: 409", "error_class": "infra_seed"}) is False
+    def test_load_resume_skip_keys_label_mismatch(tmp_path):
+        p = tmp_path / "out.jsonl"
+        p.write_text(json.dumps({"task_id": "R1", "rep": 0, "label": "other", "error": None}) + "\n")
+        with pytest.raises(SystemExit, match="label"):
+            load_resume_skip_keys(p, label="local")
 
-
-def test_should_skip_resume_row_infra_cli_retries():
-    assert should_skip_resume_row({"error": "timeout after 120s", "error_class": "infra_cli"}) is False
-
-
-def test_should_skip_resume_row_non_null_error_retries():
-    assert should_skip_resume_row({"error": "TypeError: x", "error_class": "task"}) is False
-    assert should_skip_resume_row({"error": "boom", "error_class": None}) is False
-
-
-def test_load_resume_skip_keys_summary(tmp_path: Path):
-    p = tmp_path / "out.jsonl"
-    rows = [
-        {"task_id": "R1", "rep": 0, "label": "local", "error": None, "error_class": None},
-        {"task_id": "R1", "rep": 1, "label": "local", "error": "x", "error_class": "infra_seed"},
-        {"task_id": "W1", "rep": 0, "label": "local", "error": None, "success": False},
-    ]
-    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
-    assert skip == {("R1", 0, "local"), ("W1", 0, "local")}
-    assert n_skip == 2
-    assert n_retry == 1
-
-
-def test_load_resume_skip_keys_n_retry_ignores_later_success(tmp_path: Path):
-    """Historical error row whose later row succeeded must not inflate n_retry."""
-    p = tmp_path / "out.jsonl"
-    rows = [
-        {"task_id": "R1", "rep": 0, "label": "local", "error": "boom", "error_class": "infra_cli"},
-        {"task_id": "R1", "rep": 0, "label": "local", "error": None, "error_class": None, "success": True},
-    ]
-    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
-    assert skip == {("R1", 0, "local")}
-    assert n_skip == 1
-    assert n_retry == 0
-
-
-def test_load_resume_skip_keys_label_mismatch(tmp_path: Path):
-    p = tmp_path / "out.jsonl"
-    p.write_text(json.dumps({"task_id": "R1", "rep": 0, "label": "other", "error": None}) + "\n")
-    with pytest.raises(SystemExit, match="label"):
-        load_resume_skip_keys(p, label="local")
-
-
-def test_load_resume_skip_keys_battery_model_driver_mismatch(tmp_path: Path):
-    p = tmp_path / "out.jsonl"
-    p.write_text(
-        json.dumps(
-            {
-                "task_id": "R1",
-                "rep": 0,
-                "label": "local",
-                "battery": "aaaaaaaaaaaa",
-                "model": "sonnet",
-                "driver": "claude-cli",
-                "error": None,
-            }
+    def test_load_resume_skip_keys_battery_model_driver_mismatch(tmp_path):
+        p = tmp_path / "out.jsonl"
+        p.write_text(
+            json.dumps(
+                {
+                    "task_id": "R1",
+                    "rep": 0,
+                    "label": "local",
+                    "battery": "aaaaaaaaaaaa",
+                    "model": "sonnet",
+                    "driver": "claude-cli",
+                    "error": None,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(SystemExit, match="battery"):
-        load_resume_skip_keys(p, label="local", battery="bbbbbbbbbbbb")
-    with pytest.raises(SystemExit, match="model"):
-        load_resume_skip_keys(p, label="local", battery="aaaaaaaaaaaa", model="haiku")
-    with pytest.raises(SystemExit, match="driver"):
-        load_resume_skip_keys(p, label="local", battery="aaaaaaaaaaaa", model="sonnet", driver="unknown")
-    # Missing keys on older rows: pass (back-compat)
-    p2 = tmp_path / "old.jsonl"
-    p2.write_text(json.dumps({"task_id": "R1", "rep": 0, "label": "local", "error": None}) + "\n")
-    skip, _, _ = load_resume_skip_keys(p2, label="local", battery="anything", model="sonnet", driver="claude-cli")
-    assert ("R1", 0, "local") in skip
+        with pytest.raises(SystemExit, match="battery"):
+            load_resume_skip_keys(p, label="local", battery="bbbbbbbbbbbb")
+        with pytest.raises(SystemExit, match="model"):
+            load_resume_skip_keys(p, label="local", battery="aaaaaaaaaaaa", model="haiku")
+        with pytest.raises(SystemExit, match="driver"):
+            load_resume_skip_keys(p, label="local", battery="aaaaaaaaaaaa", model="sonnet", driver="unknown")
+        # Missing keys on older rows: pass (back-compat)
+        p2 = tmp_path / "old.jsonl"
+        p2.write_text(json.dumps({"task_id": "R1", "rep": 0, "label": "local", "error": None}) + "\n")
+        skip, _, _ = load_resume_skip_keys(p2, label="local", battery="anything", model="sonnet", driver="claude-cli")
+        assert ("R1", 0, "local") in skip
 
-
-def test_resume_identity_uses_resolved_model_not_tier_label(tmp_path: Path):
-    p = tmp_path / "tiered.jsonl"
-    p.write_text(
-        json.dumps(
-            {
-                "task_id": "R1",
-                "rep": 0,
-                "label": "local",
-                "model": "provider-reported-id",
-                "requested_model": "standard",
-                "requested_tier": "standard",
-                "resolved_model": "old-standard-id",
-                "error": None,
-            }
+    def test_load_resume_skip_keys_truncated_json(tmp_path, capsys):
+        p = tmp_path / "out.jsonl"
+        p.write_text(
+            json.dumps({"task_id": "R1", "rep": 0, "label": "local", "error": None})
+            + "\n"
+            + '{"task_id": "W1", "rep": 0, "label": "local", "error":\n',  # truncated
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
+        skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
+        assert skip == {("R1", 0, "local")}
+        assert n_skip == 1
+        err = capsys.readouterr().err
+        assert "invalid JSON" in err
 
-    skip, _, _ = load_resume_skip_keys(p, label="local", model="old-standard-id")
-    assert skip == {("R1", 0, "local")}
-    with pytest.raises(SystemExit, match="model"):
-        load_resume_skip_keys(p, label="local", model="new-standard-id")
+    def test_load_resume_skip_keys_missing_file(tmp_path):
+        skip, n_skip, n_retry = load_resume_skip_keys(tmp_path / "missing.jsonl", label="local")
+        assert skip == set() and n_skip == 0 and n_retry == 0
+
+    _d0 = tmp_path / "test_load_resume_skip_keys_summary"
+    _d0.mkdir()
+    test_load_resume_skip_keys_summary(_d0)
+    _d1 = tmp_path / "test_load_resume_skip_keys_n_retry_ignores_later_success"
+    _d1.mkdir()
+    test_load_resume_skip_keys_n_retry_ignores_later_success(_d1)
+    _d2 = tmp_path / "test_load_resume_skip_keys_label_mismatch"
+    _d2.mkdir()
+    test_load_resume_skip_keys_label_mismatch(_d2)
+    _d3 = tmp_path / "test_load_resume_skip_keys_battery_model_driver_mismatch"
+    _d3.mkdir()
+    test_load_resume_skip_keys_battery_model_driver_mismatch(_d3)
+    _d4 = tmp_path / "test_load_resume_skip_keys_truncated_json"
+    _d4.mkdir()
+    test_load_resume_skip_keys_truncated_json(_d4, capsys)
+    _d5 = tmp_path / "test_load_resume_skip_keys_missing_file"
+    _d5.mkdir()
+    test_load_resume_skip_keys_missing_file(_d5)
 
 
-def test_load_resume_skip_keys_truncated_json(tmp_path: Path, capsys):
-    p = tmp_path / "out.jsonl"
-    p.write_text(
-        json.dumps({"task_id": "R1", "rep": 0, "label": "local", "error": None})
-        + "\n"
-        + '{"task_id": "W1", "rep": 0, "label": "local", "error":\n',  # truncated
-        encoding="utf-8",
-    )
-    skip, n_skip, n_retry = load_resume_skip_keys(p, label="local")
-    assert skip == {("R1", 0, "local")}
-    assert n_skip == 1
-    err = capsys.readouterr().err
-    assert "invalid JSON" in err
+def test_resume_behaviours(tmp_path):
+    def test_resume_identity_uses_resolved_model_not_tier_label(tmp_path):
+        p = tmp_path / "tiered.jsonl"
+        p.write_text(
+            json.dumps(
+                {
+                    "task_id": "R1",
+                    "rep": 0,
+                    "label": "local",
+                    "model": "provider-reported-id",
+                    "requested_model": "standard",
+                    "requested_tier": "standard",
+                    "resolved_model": "old-standard-id",
+                    "error": None,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
+        skip, _, _ = load_resume_skip_keys(p, label="local", model="old-standard-id")
+        assert skip == {("R1", 0, "local")}
+        with pytest.raises(SystemExit, match="model"):
+            load_resume_skip_keys(p, label="local", model="new-standard-id")
 
-def test_load_resume_skip_keys_missing_file(tmp_path: Path):
-    skip, n_skip, n_retry = load_resume_skip_keys(tmp_path / "missing.jsonl", label="local")
-    assert skip == set() and n_skip == 0 and n_retry == 0
+    def test_resume_skips_meta_and_mismatch_checks_it(tmp_path):
+        p = tmp_path / "out.jsonl"
+        p.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "row_type": "meta",
+                            "label": "candidate",
+                            "battery": "bbbbbbbbbbbb",
+                            "model": "sonnet",
+                            "driver": "claude-cli",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "task_id": "R1",
+                            "rep": 0,
+                            "label": "candidate",
+                            "error": None,
+                            "error_class": None,
+                            "success": True,
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        skip, n_skip, n_retry = load_resume_skip_keys(
+            p, label="candidate", battery="bbbbbbbbbbbb", model="sonnet", driver="claude-cli"
+        )
+        assert skip == {("R1", 0, "candidate")}
+        assert n_skip == 1 and n_retry == 0
+
+        with pytest.raises(SystemExit, match="battery"):
+            load_resume_skip_keys(p, label="candidate", battery="aaaaaaaaaaaa", model="sonnet", driver="claude-cli")
+
+    _d0 = tmp_path / "test_resume_identity_uses_resolved_model_not_tier_label"
+    _d0.mkdir()
+    test_resume_identity_uses_resolved_model_not_tier_label(_d0)
+    _d1 = tmp_path / "test_resume_skips_meta_and_mismatch_checks_it"
+    _d1.mkdir()
+    test_resume_skips_meta_and_mismatch_checks_it(_d1)
 
 
 def test_run_live_resume_skips_completed_retries_infra(tmp_path: Path, monkeypatch):
@@ -285,42 +347,3 @@ def test_make_run_meta_row_and_write_once(tmp_path: Path):
     assert len(lines) == 2
     assert json.loads(lines[0])["row_type"] == "meta"
     assert json.loads(lines[1])["task_id"] == "R1"
-
-
-def test_resume_skips_meta_and_mismatch_checks_it(tmp_path: Path):
-    p = tmp_path / "out.jsonl"
-    p.write_text(
-        "\n".join(
-            [
-                json.dumps(
-                    {
-                        "row_type": "meta",
-                        "label": "candidate",
-                        "battery": "bbbbbbbbbbbb",
-                        "model": "sonnet",
-                        "driver": "claude-cli",
-                    }
-                ),
-                json.dumps(
-                    {
-                        "task_id": "R1",
-                        "rep": 0,
-                        "label": "candidate",
-                        "error": None,
-                        "error_class": None,
-                        "success": True,
-                    }
-                ),
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    skip, n_skip, n_retry = load_resume_skip_keys(
-        p, label="candidate", battery="bbbbbbbbbbbb", model="sonnet", driver="claude-cli"
-    )
-    assert skip == {("R1", 0, "candidate")}
-    assert n_skip == 1 and n_retry == 0
-
-    with pytest.raises(SystemExit, match="battery"):
-        load_resume_skip_keys(p, label="candidate", battery="aaaaaaaaaaaa", model="sonnet", driver="claude-cli")

@@ -1,37 +1,7 @@
-"""Agent-driver abstraction for the Plane MCP eval harness.
+"""Agent drivers: run one task against a tool surface and return an ``AgentRun``.
 
-Drivers run one task against a tool surface and return a normalized
-``AgentRun``. The default ``api`` driver owns a provider-neutral model/tool
-loop over an in-process MCP client. CLI drivers (``claude-cli``, ``codex-cli``,
-``antigravity-cli``, ``opencode-cli``) spawn locally installed agent CLIs on
-the user's subscription — no Anthropic API key required for those paths.
-
-Real CLI surfaces (probed on this machine, 2026-08-12):
-
-Claude Code (``claude`` v2.1.228):
-  - ``-p`` / ``--print`` headless
-  - ``--mcp-config <file|json>`` (repeatable; ``--strict-mcp-config``)
-  - ``--output-format json|text|stream-json`` (print mode)
-  - ``--max-turns <n>`` (print mode; *hidden* from ``--help`` but present)
-  - ``--model <alias|id>``
-  - ``--permission-mode`` choices: acceptEdits, auto, bypassPermissions,
-    manual, dontAsk, plan
-  - ``--dangerously-skip-permissions``, ``--allowedTools`` / ``--allowed-tools``
-  - Transcript: ``~/.claude/projects/<cwd-with-/-as-->/<session_id>.jsonl``
-    with ``assistant`` rows whose ``message.content`` holds ``tool_use`` blocks.
-  - MCP tools surface as ``mcp__<server>__<tool>`` — strip for classification.
-
-Codex (``codex exec``):
-  - ``codex exec --json`` JSONL events on stdout
-  - ``-c key=value`` / ``--config`` for config.toml overrides (incl. mcp_servers)
-  - ``-m`` / ``--model``
-  - Session rollouts: ``~/.codex/sessions/**/rollout-*.jsonl`` with
-    ``response_item`` / ``function_call`` payloads (name + arguments JSON string)
-  - Marked **experimental**; live runs are opt-in (metered quota).
-
-This package splits that surface into focused modules (driver protocol, subprocess
-lifecycle, recording-proxy glue, and per-vendor drivers). Driver names and their
-public parse/configuration helpers are re-exported here.
+The ``api`` driver owns a provider-neutral loop; CLI drivers spawn locally installed
+agent CLIs on the user's own subscription. Probed CLI details live with each vendor.
 """
 
 from __future__ import annotations

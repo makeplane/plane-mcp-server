@@ -13,24 +13,25 @@ README = (REPO_ROOT / "evals" / "README.md").read_text()
 DESIGN = (REPO_ROOT / "evals" / "DESIGN.md").read_text()
 
 
-def test_the_flag_server_is_documented_as_optional():
-    """A gated capability skips its task; it does not stop the battery."""
-    assert "FEATURE_FLAG_SERVER_BASE_URL" in README, "the option should still be documented"
-    index = README.index("FEATURE_FLAG_SERVER_BASE_URL")
-    paragraph = README[max(0, index - 200) : index + 500]
-    assert "not** required" in paragraph or "Optionally" in paragraph, (
-        "the flag server stopped being a prerequisite when the seeders learned to skip; "
-        "the runbook must not tell people otherwise"
-    )
+def test_the_behaviours():
+    def test_the_flag_server_is_documented_as_optional():
+        assert "FEATURE_FLAG_SERVER_BASE_URL" in README, "the option should still be documented"
+        index = README.index("FEATURE_FLAG_SERVER_BASE_URL")
+        paragraph = README[max(0, index - 200) : index + 500]
+        assert "not** required" in paragraph or "Optionally" in paragraph, (
+            "the flag server stopped being a prerequisite when the seeders learned to skip; "
+            "the runbook must not tell people otherwise"
+        )
 
+    def test_the_plan_gate_skip_reason_is_documented():
+        assert "env:plan-gated:" in README
 
-def test_the_plan_gate_skip_reason_is_documented():
-    assert "env:plan-gated:" in README
+    def test_the_fingerprint_revision_is_documented():
+        assert "CATALOG_REVISION" in README
 
-
-def test_the_fingerprint_revision_is_documented():
-    """Anyone comparing two batteries needs to know a revision bump can move the hash."""
-    assert "CATALOG_REVISION" in README
+    test_the_flag_server_is_documented_as_optional()
+    test_the_plan_gate_skip_reason_is_documented()
+    test_the_fingerprint_revision_is_documented()
 
 
 def test_design_still_states_the_skip_contract_the_seeders_now_implement():

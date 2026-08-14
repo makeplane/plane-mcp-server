@@ -18,55 +18,64 @@ def test_is_infra_error_row_covers_infrastructure_prefix():
     assert is_infra_error_row({"error_class": "task"}) is False
 
 
-def test_load_rows_dedupe_latest_wins(tmp_path: Path):
-    p = tmp_path / "dup.jsonl"
-    rows = [
-        {"task_id": "R1", "rep": 0, "label": "local", "success": True, "num_calls": 1},
-        {"task_id": "R1", "rep": 0, "label": "local", "success": False, "num_calls": 9},
-    ]
-    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    loaded = load_rows(p)  # default dedupe=latest
-    assert len(loaded) == 1
-    assert loaded[0].num_calls == 9
-    assert loaded[0].success is False
+def test_load_behaviours(tmp_path, capsys):
+    def test_load_rows_dedupe_latest_wins(tmp_path):
+        p = tmp_path / "dup.jsonl"
+        rows = [
+            {"task_id": "R1", "rep": 0, "label": "local", "success": True, "num_calls": 1},
+            {"task_id": "R1", "rep": 0, "label": "local", "success": False, "num_calls": 9},
+        ]
+        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        loaded = load_rows(p)  # default dedupe=latest
+        assert len(loaded) == 1
+        assert loaded[0].num_calls == 9
+        assert loaded[0].success is False
 
+    def test_load_rows_no_dedupe_warns_on_duplicate_keys(tmp_path, capsys):
+        p = tmp_path / "dup.jsonl"
+        rows = [
+            {"task_id": "R1", "rep": 0, "label": "local", "success": True},
+            {"task_id": "R1", "rep": 0, "label": "local", "success": False},
+        ]
+        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        loaded = load_rows(p, dedupe="none")
+        assert len(loaded) == 2
+        err = capsys.readouterr().err
+        assert "duplicate" in err
+        assert "R1" in err
 
-def test_load_rows_no_dedupe_warns_on_duplicate_keys(tmp_path: Path, capsys):
-    p = tmp_path / "dup.jsonl"
-    rows = [
-        {"task_id": "R1", "rep": 0, "label": "local", "success": True},
-        {"task_id": "R1", "rep": 0, "label": "local", "success": False},
-    ]
-    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    loaded = load_rows(p, dedupe="none")
-    assert len(loaded) == 2
-    err = capsys.readouterr().err
-    assert "duplicate" in err
-    assert "R1" in err
+    def test_load_rows_skips_meta_and_missing_task_id(tmp_path):
+        p = tmp_path / "r.jsonl"
+        lines = [
+            json.dumps(
+                {
+                    "row_type": "meta",
+                    "run_id": "abc",
+                    "label": "candidate",
+                    "battery": "deadbeef0001",
+                    "model": "sonnet",
+                    "driver": "claude-cli",
+                    "git_sha": "x",
+                    "ts": "t",
+                }
+            ),
+            json.dumps({"label": "candidate", "rep": 0, "success": True}),  # no task_id
+            json.dumps({"task_id": "R1", "rep": 0, "label": "candidate", "success": True, "num_calls": 2}),
+        ]
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        rows = load_rows(p)
+        assert len(rows) == 1
+        assert rows[0].task_id == "R1"
 
-
-def test_load_rows_skips_meta_and_missing_task_id(tmp_path: Path):
-    p = tmp_path / "r.jsonl"
-    lines = [
-        json.dumps(
-            {
-                "row_type": "meta",
-                "run_id": "abc",
-                "label": "candidate",
-                "battery": "deadbeef0001",
-                "model": "sonnet",
-                "driver": "claude-cli",
-                "git_sha": "x",
-                "ts": "t",
-            }
-        ),
-        json.dumps({"label": "candidate", "rep": 0, "success": True}),  # no task_id
-        json.dumps({"task_id": "R1", "rep": 0, "label": "candidate", "success": True, "num_calls": 2}),
-    ]
-    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    rows = load_rows(p)
-    assert len(rows) == 1
-    assert rows[0].task_id == "R1"
+    _d0 = tmp_path / "test_load_rows_dedupe_latest_wins"
+    _d0.mkdir()
+    test_load_rows_dedupe_latest_wins(_d0)
+    _d1 = tmp_path / "test_load_rows_no_dedupe_warns_on_duplicate_keys"
+    _d1.mkdir()
+    test_load_rows_no_dedupe_warns_on_duplicate_keys(_d1, capsys)
+    _d2 = tmp_path / "test_load_rows_skips_meta_and_missing_task_id"
+    _d2.mkdir()
+    test_load_rows_skips_meta_and_missing_task_id(_d2)
 
 
 def test_real_historical_rows_parse_and_report_with_backward_defaults():

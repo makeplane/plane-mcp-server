@@ -123,435 +123,238 @@ class _L5Plane:
         self.work_items = SimpleNamespace(attachments=SimpleNamespace(list=lambda **kw: _Page(rows)))
 
 
-def test_i1_untouched_urgent_fails():
+BACKLOG = SimpleNamespace(id="st-backlog", name="Backlog", group="unstarted")
+DONE = SimpleNamespace(id="st-done", name="Done", group="completed")
+
+
+def _i1_ctx():
+    return {"workspace_slug": "ws", "project_id": "p1", "items": {I1_TITLE: "wi-1"}}
+
+
+def test_i1_passes_only_when_the_target_item_itself_changed():
+    """Priority must land on the item the task names, not merely somewhere."""
+
     async def _go():
-        plane = _WIRetrievePlane(by_id={"wi-1": SimpleNamespace(id="wi-1", priority="urgent")})
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {I1_TITLE: "wi-1"}}
-        ok, note = await verify_i1(plane, ctx, _run())
-        assert ok is False, note
+        cases = [
+            (
+                "untouched: target still urgent",
+                _WIRetrievePlane(by_id={"wi-1": SimpleNamespace(id="wi-1", priority="urgent")}),
+                (),
+            ),
+            (
+                "right value on the wrong item",
+                _WIRetrievePlane(
+                    by_id={
+                        "wi-1": SimpleNamespace(id="wi-1", priority="urgent"),
+                        "wi-other": SimpleNamespace(id="wi-other", priority="high"),
+                    }
+                ),
+                ("urgent", "high"),
+            ),
+        ]
+        for label, plane, expect_any in cases:
+            ok, note = await verify_i1(plane, _i1_ctx(), _run())
+            assert ok is False, f"{label}: {note}"
+            if expect_any:
+                assert any(s in note for s in expect_any), f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_i1_wrong_item_high_target_still_urgent_fails():
+def test_i2_requires_the_state_contract_to_name_the_real_state():
     async def _go():
-        # Right value on the wrong item; target remains urgent.
-        plane = _WIRetrievePlane(
-            by_id={
-                "wi-1": SimpleNamespace(id="wi-1", priority="urgent"),
-                "wi-other": SimpleNamespace(id="wi-other", priority="high"),
+        def plane_for(states):
+            return _WIRetrievePlane(by_id={"wi-2": SimpleNamespace(id="wi-2", state=BACKLOG)}, states=states)
+
+        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {W2_TITLE: "wi-2"}}
+        cases = [
+            ("untouched: empty answer", [BACKLOG], "", False),
+            ("names a different state", [BACKLOG, DONE], "Done", False),
+            ("exact contract line", [BACKLOG], "state: Backlog", True),
+        ]
+        for label, states, text, want in cases:
+            ok, note = await verify_i2(plane_for(states), dict(ctx), _run(text))
+            assert ok is want, f"{label}: {note}"
+
+    return asyncio.run(_go())
+
+
+def test_i3_fails_unless_the_target_item_is_on_the_cycle():
+    async def _go():
+        cases = [
+            ("untouched: target never added", ["other-1", "other-2"]),
+            ("added the wrong item", ["wrong-item"]),
+        ]
+        for label, on_cycle in cases:
+            ctx = {
+                "workspace_slug": "ws",
+                "project_id": "p1",
+                "items": {I3_TITLE: "footer-1"},
+                "cycle_current_id": "cyc-1",
             }
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {I1_TITLE: "wi-1"}}
-        ok, note = await verify_i1(plane, ctx, _run())
-        assert ok is False, note
-        assert "urgent" in note or "high" in note
+            ok, note = await verify_i3(_I3Plane(on_cycle), ctx, _run())
+            assert ok is False, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_i2_untouched_empty_final_text_fails():
+def test_i4_requires_the_named_label_on_the_target():
     async def _go():
-        st = SimpleNamespace(id="st-backlog", name="Backlog", group="unstarted")
-        plane = _WIRetrievePlane(
-            by_id={"wi-2": SimpleNamespace(id="wi-2", state=st)},
-            states=[st],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {W2_TITLE: "wi-2"}}
-        ok, note = await verify_i2(plane, ctx, _run(""))
-        assert ok is False, note
+        cases = [
+            ("untouched: no labels", []),
+            ("a different label attached", [SimpleNamespace(id="lab-auth")]),
+        ]
+        for label, labels in cases:
+            plane = _WIRetrievePlane(by_id={"wi-4": SimpleNamespace(id="wi-4", labels=labels)})
+            ctx = {
+                "workspace_slug": "ws",
+                "project_id": "p1",
+                "items": {I4_TITLE: "wi-4"},
+                "labels": {"perf": "lab-perf"},
+            }
+            ok, note = await verify_i4(plane, ctx, _run())
+            assert ok is False, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_i2_wrong_state_name_in_text_fails():
+def test_i5_rejects_both_untouched_and_wrong_priority():
     async def _go():
-        st = SimpleNamespace(id="st-backlog", name="Backlog", group="unstarted")
-        plane = _WIRetrievePlane(
-            by_id={"wi-2": SimpleNamespace(id="wi-2", state=st)},
-            states=[
-                st,
-                SimpleNamespace(id="st-done", name="Done", group="completed"),
-            ],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {W2_TITLE: "wi-2"}}
-        ok, note = await verify_i2(plane, ctx, _run("Done"))
-        assert ok is False, note
+        cases = [
+            ("untouched: priority none", "none", ()),
+            ("wrong value: high", "high", ("high",)),
+        ]
+        for label, priority, expect in cases:
+            plane = _WIRetrievePlane(by_id={"wi-5": SimpleNamespace(id="wi-5", priority=priority)})
+            ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {I3_TITLE: "wi-5"}}
+            ok, note = await verify_i5(plane, ctx, _run())
+            assert ok is False, f"{label}: {note}"
+            for s in expect:
+                assert s in note, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_i2_exact_state_contract_passes():
+def test_l1_grades_the_duration_contract_not_the_prose():
+    """Prose stating the right facts still fails: the format is part of the task.
+
+    Covers the counterexamples — English "ninety" is not a number, and a correct log with an empty answer.
+    """
+
     async def _go():
-        st = SimpleNamespace(id="st-backlog", name="Backlog", group="unstarted")
-        plane = _WIRetrievePlane(
-            by_id={"wi-2": SimpleNamespace(id="wi-2", state=st)},
-            states=[st],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {W2_TITLE: "wi-2"}}
-        ok, note = await verify_i2(plane, ctx, _run("state: Backlog"))
-        assert ok is True, note
-
-    return asyncio.run(_go())
-
-
-def test_i3_untouched_not_on_cycle_fails():
-    async def _go():
-        plane = _I3Plane(["other-1", "other-2"])
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "items": {I3_TITLE: "footer-1"},
-            "cycle_current_id": "cyc-1",
-        }
-        ok, note = await verify_i3(plane, ctx, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_i3_wrong_item_on_cycle_target_missing_fails():
-    async def _go():
-        plane = _I3Plane(["wrong-item"])
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "items": {I3_TITLE: "footer-1"},
-            "cycle_current_id": "cyc-1",
-        }
-        ok, note = await verify_i3(plane, ctx, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_i4_untouched_no_label_fails():
-    async def _go():
-        plane = _WIRetrievePlane(by_id={"wi-4": SimpleNamespace(id="wi-4", labels=[])})
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "items": {I4_TITLE: "wi-4"},
-            "labels": {"perf": "lab-perf"},
-        }
-        ok, note = await verify_i4(plane, ctx, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_i4_wrong_label_attached_fails():
-    async def _go():
-        plane = _WIRetrievePlane(by_id={"wi-4": SimpleNamespace(id="wi-4", labels=[SimpleNamespace(id="lab-auth")])})
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "items": {I4_TITLE: "wi-4"},
-            "labels": {"perf": "lab-perf"},
-        }
-        ok, note = await verify_i4(plane, ctx, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_i5_untouched_none_priority_fails():
-    async def _go():
-        plane = _WIRetrievePlane(by_id={"wi-5": SimpleNamespace(id="wi-5", priority="none")})
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {I3_TITLE: "wi-5"}}
-        ok, note = await verify_i5(plane, ctx, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_i5_wrong_value_high_fails():
-    async def _go():
-        plane = _WIRetrievePlane(by_id={"wi-5": SimpleNamespace(id="wi-5", priority="high")})
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {I3_TITLE: "wi-5"}}
-        ok, note = await verify_i5(plane, ctx, _run())
-        assert ok is False, note
-        assert "high" in note
-
-    return asyncio.run(_go())
-
-
-def test_l1_untouched_no_worklog_fails():
-    async def _go():
-        plane = _L1Plane([])
         ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
-        ok, note = await verify_l1(plane, ctx, _run())
-        assert ok is False, note
+        cases = [
+            ("untouched: no worklog", [], None, "", False, ()),
+            ("wrong duration 120", [120], ["wi-l1"], "Logged 120 minutes; summary ok.", False, ("90",)),
+            ("90m logged but empty answer", [90], ["wi-l1"], "", False, ("logged-minutes",)),
+            (
+                "English 'ninety' is not a number",
+                [90],
+                ["wi-l1"],
+                "Logged one hundred ninety minutes. Project summary looks fine.",
+                False,
+                (),
+            ),
+            ("correct facts, no contract", [90], ["wi-l1"], "Logged 1.5 hours total.", False, ()),
+            ("bare prose, no contract", [90], ["wi-l1"], "90 minutes of work", False, ("logged-minutes",)),
+            (
+                "exact contract",
+                [90],
+                ["wi-l1"],
+                "logged-minutes: 90\nsummary-work-item-id: wi-l1",
+                True,
+                (),
+            ),
+        ]
+        for label, durations, summary_ids, text, want, expect in cases:
+            plane = _L1Plane(durations, summary_ids=summary_ids)
+            ok, note = await verify_l1(plane, dict(ctx), _run(text))
+            assert ok is want, f"{label}: {note}"
+            for s in expect:
+                assert s in note.lower(), f"{label}: {note}"
 
-    return asyncio.run(_go())
-
-
-def test_l1_wrong_duration_120_fails():
-    async def _go():
-        plane = _L1Plane([120], summary_ids=["wi-l1"])
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
-        ok, note = await verify_l1(plane, ctx, _run("Logged 120 minutes; summary ok."))
-        assert ok is False, note
-        assert "90" in note
-
-    return asyncio.run(_go())
-
-
-def test_l1_empty_summary_with_90m_log_fails():
-    """Reviewer counterexample: 90m log present but final text empty → fail."""
-
-    async def _go():
+        # The 'ninety' case must name the duration it objected to.
         plane = _L1Plane([90], summary_ids=["wi-l1"])
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
-        ok, note = await verify_l1(plane, ctx, _run(""))
-        assert ok is False, note
-        assert "logged-minutes" in note.lower()
-
-    return asyncio.run(_go())
-
-
-def test_l1_one_hundred_ninety_minutes_fails():
-    """Reviewer counterexample: English 'ninety' must not satisfy numeric duration."""
-
-    async def _go():
-        plane = _L1Plane([90], summary_ids=["wi-l1"])
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
-        ok, note = await verify_l1(
-            plane,
-            ctx,
-            _run("Logged one hundred ninety minutes. Project summary looks fine."),
+        _, note = await verify_l1(
+            plane, dict(ctx), _run("Logged one hundred ninety minutes. Project summary looks fine.")
         )
-        assert ok is False, note
-        assert "duration" in note.lower() or "90" in note or "1.5" in note
+        assert "duration" in note.lower() or "90" in note or "1.5" in note, note
 
     return asyncio.run(_go())
 
 
-def test_l1_prose_with_correct_facts_but_without_contract_fails():
-    """Correct facts in prose do not satisfy the explicit output contract."""
-
+def test_l2_counts_activities_through_the_contract_only():
     async def _go():
-        plane = _L1Plane([90], summary_ids=["wi-l1"])
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
-        ok, note = await verify_l1(plane, ctx, _run("Logged 1.5 hours total."))
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_l1_ninety_minutes_of_work_fails_by_design():
-    """Calibration: prose without contract lines fails by design."""
-
-    async def _go():
-        plane = _L1Plane([90], summary_ids=["wi-l1"])
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
-        ok, note = await verify_l1(plane, ctx, _run("90 minutes of work"))
-        assert ok is False, note
-        assert "logged-minutes" in note.lower()
-
-    return asyncio.run(_go())
-
-
-def test_l1_exact_duration_and_summary_contract_passes():
-    async def _go():
-        plane = _L1Plane([90], summary_ids=["wi-l1"])
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
-        ok, note = await verify_l1(
-            plane,
-            ctx,
-            _run("logged-minutes: 90\nsummary-work-item-id: wi-l1"),
-        )
-        assert ok is True, note
-
-    return asyncio.run(_go())
-
-
-def test_l2_untouched_empty_final_text_fails():
-    async def _go():
-        plane = _L2Plane(3)
         ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L2_TITLE: "wi-l2"}}
-        ok, note = await verify_l2(plane, ctx, _run(""))
-        assert ok is False, note
+        cases = [
+            ("untouched: empty answer", "", False),
+            ("contract matches truth 3", "Saw some history.\ncount: 3", True),
+            ("contract says 2, truth 3", "count: 2", False),
+            ("bare negative", "-3", False),
+            ("negative contract", "count: -3", False),
+            ("prose without contract", "There are 3 activities and some comment phrases.", False),
+        ]
+        for label, text, want in cases:
+            ok, note = await verify_l2(_L2Plane(3), dict(ctx), _run(text))
+            assert ok is want, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_l2_contract_count_three_passes():
-    """Contract line 'count: 3' truth=3 passes."""
-
+def test_l3_requires_the_exact_release_tag_version():
     async def _go():
-        plane = _L2Plane(3)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L2_TITLE: "wi-l2"}}
-        ok, note = await verify_l2(plane, ctx, _run("Saw some history.\ncount: 3"))
-        assert ok is True, note
+        cases = [("untouched: no tags", [], ()), ("wrong version", ["v0.0.1", "other-rc"], (L3_TAG_VERSION,))]
+        for label, versions, expect in cases:
+            ok, note = await verify_l3(_L3Plane(versions), {"workspace_slug": "ws"}, _run())
+            assert ok is False, f"{label}: {note}"
+            for s in expect:
+                assert s in note, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_l2_contract_count_two_fails_truth_three():
-    """Contract 'count: 2' truth=3 fails."""
+def test_l4_matches_the_property_on_name_type_and_value():
+    """A URL-typed property whose name merely contains "Industry" must not satisfy it."""
 
     async def _go():
-        plane = _L2Plane(3)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L2_TITLE: "wi-l2"}}
-        ok, note = await verify_l2(plane, ctx, _run("count: 2"))
-        assert ok is False, note
+        exact = SimpleNamespace(id="prop-1", display_name=L4_PROP_DISPLAY, name="eval-industry", property_type="TEXT")
+        loose = SimpleNamespace(id="prop-url", display_name="Industry", name="industry", property_type="URL")
+        cases = [
+            ("untouched: no property", [], {}, False, ()),
+            (
+                "right property, wrong value",
+                [exact],
+                {"prop-1": ["Startup"]},
+                False,
+                (L4_PROP_VALUE, "Startup", "lack"),
+            ),
+            ("wrong name and type, right value", [loose], {"prop-url": [L4_PROP_VALUE]}, False, ()),
+            ("exact text property", [exact], {"prop-1": [L4_PROP_VALUE]}, True, ()),
+        ]
+        for label, props, values, want, expect_any in cases:
+            ctx = {"workspace_slug": "ws", "customer": {"id": "cust-1", "name": "Acme Corp"}}
+            ok, note = await verify_l4(_L4Plane(props=props, values=values), ctx, _run())
+            assert ok is want, f"{label}: {note}"
+            if expect_any:
+                assert any(s in note for s in expect_any), f"{label}: {note}"
+            if want:
+                assert any(o.get("kind") == "customer_property" for o in ctx.get("workspace_objects") or [])
 
     return asyncio.run(_go())
 
 
-def test_l2_negative_contract_and_bare_fail_truth_three():
-    """'-3' and 'count: -3' fail truth=3 (signed equality)."""
-
+def test_l5_accepts_a_zero_count_only_through_the_contract():
     async def _go():
-        plane = _L2Plane(3)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L2_TITLE: "wi-l2"}}
-        ok1, _ = await verify_l2(plane, ctx, _run("-3"))
-        ok2, _ = await verify_l2(plane, ctx, _run("count: -3"))
-        assert ok1 is False
-        assert ok2 is False
-
-    return asyncio.run(_go())
-
-
-def test_l2_prose_only_without_contract_fails_by_design():
-    """By design: prose without 'count: N' (or bare int) fails — format is part of the task."""
-
-    async def _go():
-        plane = _L2Plane(3)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L2_TITLE: "wi-l2"}}
-        ok, note = await verify_l2(plane, ctx, _run("There are 3 activities and some comment phrases."))
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_l3_untouched_no_tag_fails():
-    async def _go():
-        plane = _L3Plane([])
-        ok, note = await verify_l3(plane, {"workspace_slug": "ws"}, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_l3_wrong_version_tag_fails():
-    async def _go():
-        plane = _L3Plane(["v0.0.1", "other-rc"])
-        ok, note = await verify_l3(plane, {"workspace_slug": "ws"}, _run())
-        assert ok is False, note
-        assert L3_TAG_VERSION in note
-
-    return asyncio.run(_go())
-
-
-def test_l4_untouched_no_property_fails():
-    async def _go():
-        plane = _L4Plane(props=[], values={})
-        ctx = {"workspace_slug": "ws", "customer": {"id": "cust-1", "name": "Acme Corp"}}
-        ok, note = await verify_l4(plane, ctx, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_l4_right_property_wrong_value_fails():
-    async def _go():
-        prop = SimpleNamespace(id="prop-1", display_name=L4_PROP_DISPLAY, name="eval-industry", property_type="TEXT")
-        plane = _L4Plane(props=[prop], values={"prop-1": ["Startup"]})
-        ctx = {"workspace_slug": "ws", "customer": {"id": "cust-1"}}
-        ok, note = await verify_l4(plane, ctx, _run())
-        assert ok is False, note
-        assert L4_PROP_VALUE in note or "Startup" in note or "lack" in note
-
-    return asyncio.run(_go())
-
-
-def test_l4_industry_url_type_with_enterprise_fails():
-    """Reviewer counterexample: name contains Industry, URL type, value Enterprise → fail."""
-
-    async def _go():
-        prop = SimpleNamespace(
-            id="prop-url",
-            display_name="Industry",  # substring / wrong exact name
-            name="industry",
-            property_type="URL",
-        )
-        plane = _L4Plane(props=[prop], values={"prop-url": [L4_PROP_VALUE]})
-        ctx = {"workspace_slug": "ws", "customer": {"id": "cust-1"}}
-        ok, note = await verify_l4(plane, ctx, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_l4_exact_text_enterprise_passes():
-    async def _go():
-        prop = SimpleNamespace(id="prop-1", display_name=L4_PROP_DISPLAY, name="eval-industry", property_type="TEXT")
-        plane = _L4Plane(props=[prop], values={"prop-1": [L4_PROP_VALUE]})
-        ctx = {"workspace_slug": "ws", "customer": {"id": "cust-1"}}
-        ok, note = await verify_l4(plane, ctx, _run())
-        assert ok is True, note
-        assert any(o.get("kind") == "customer_property" for o in ctx.get("workspace_objects") or [])
-
-    return asyncio.run(_go())
-
-
-def test_l5_untouched_empty_final_text_fails():
-    async def _go():
-        plane = _L5Plane(0)
         ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L5_TITLE: "wi-l5"}}
-        ok, note = await verify_l5(plane, ctx, _run(""))
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_l5_bare_zero_passes():
-    """Fallback: whole-answer bare '0' still passes truth=0."""
-
-    async def _go():
-        plane = _L5Plane(0)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L5_TITLE: "wi-l5"}}
-        ok, note = await verify_l5(plane, ctx, _run("0"))
-        assert ok is True, note
-
-    return asyncio.run(_go())
-
-
-def test_l5_multiline_ending_count_zero_passes():
-    """Multi-line answer ending with 'count: 0' passes truth=0."""
-
-    async def _go():
-        plane = _L5Plane(0)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L5_TITLE: "wi-l5"}}
-        ok, note = await verify_l5(
-            plane,
-            ctx,
-            _run("No files on this work item.\ncount: 0"),
-        )
-        assert ok is True, note
-
-    return asyncio.run(_go())
-
-
-def test_l5_prose_only_without_contract_fails_by_design():
-    """By design: prose without contract line fails (format instruction is part of the task)."""
-
-    async def _go():
-        plane = _L5Plane(0)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L5_TITLE: "wi-l5"}}
-        ok, note = await verify_l5(plane, ctx, _run("There are 0 attachments."))
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_l5_wrong_contract_count_fails():
-    async def _go():
-        plane = _L5Plane(0)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L5_TITLE: "wi-l5"}}
-        ok, note = await verify_l5(plane, ctx, _run("count: 10"))
-        assert ok is False, note
+        cases = [
+            ("untouched: empty answer", "", False),
+            ("bare zero as the whole answer", "0", True),
+            ("multiline ending in the contract", "No files on this work item.\ncount: 0", True),
+            ("prose without contract", "There are 0 attachments.", False),
+            ("contract with the wrong count", "count: 10", False),
+        ]
+        for label, text, want in cases:
+            ok, note = await verify_l5(_L5Plane(0), dict(ctx), _run(text))
+            assert ok is want, f"{label}: {note}"
 
     return asyncio.run(_go())

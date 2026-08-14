@@ -153,15 +153,8 @@ def seed(plane: PlaneClient, run_id: str, needs: set[str], ctx: dict[str, Any]) 
     ctx["project_id"] = project.id
     ctx["project_identifier"] = getattr(project, "identifier", None)
 
-    # Feature enablement (workspace first, then project).
-    #
-    # Ordering for S5 vs C1 on a shared eval workspace:
-    # - Each task-rep has its own seed/teardown; there is no multi-task seed batch.
-    # - Default tasks: enable workspace customers=True so C1 create_customer works.
-    # - S5 (needs leave_cycles_worklogs_off): leave project cycles+worklogs AND
-    #   workspace customers OFF so the agent must flip all three; teardown then
-    #   re-enables customers=True so a later C1 rep is not left 403ing.
-    # - We do not try to "run workspace enable after S5 check" — seed is per-task.
+    # Workspace first, then project. Seeding is per task-rep, so S5 turning workspace
+    # customers off must be undone in teardown or a later C1 rep 403s.
     feature_exclude: set[str] = set()
     workspace_feature_exclude: set[str] = set()
     if "leave_cycles_worklogs_off" in needs:

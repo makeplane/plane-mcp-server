@@ -191,24 +191,10 @@ def enable_project_features(
     *,
     exclude: set[str] | frozenset[str] | None = None,
 ) -> None:
-    """Enable per-project feature gates that fresh projects ship with disabled.
+    """Set per-project feature gates; ``exclude`` names the ones to leave off.
 
-    Two SDK calls (harmless if already on):
-
-    1. ``projects.update`` / ``UpdateProject`` — view columns API gates read:
-       ``cycle_view``, ``module_view``, ``intake_view``, ``page_view``,
-       ``is_time_tracking_enabled`` (worklog 404 when false).
-    2. ``projects.update_features`` / ``ProjectFeature`` — capability flags
-       that the server maps onto the same view columns for cycles/modules/… .
-
-    ``exclude`` is a set of feature keys to leave disabled (for S5):
-    ``cycles``, ``modules``, ``intakes``, ``pages``, ``worklogs``.
-    Default: enable all (other catalog tasks need them).
-
-    An excluded feature is written as ``False`` rather than omitted. Omitting relies on
-    the fresh project's default being off, which is not uniformly true —
-    ``page_view`` defaults to ``True`` — so excluding ``pages`` by omission would leave
-    the feature on.
+    Excluded features are written ``False``, not omitted: ``page_view`` defaults to True,
+    so omission would silently leave it on.
     """
     skip = set(exclude or ())
 

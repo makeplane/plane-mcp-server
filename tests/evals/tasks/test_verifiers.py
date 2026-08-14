@@ -72,36 +72,39 @@ class _W7Plane:
         return _Page([SimpleNamespace(url=u) for u in self._urls])
 
 
-def test_f1_w7_blocked_by_only_does_not_pass():
-    async def _go():
-        """tgt id only in blocked_by (reverse) must FAIL — not pass via str(dump)."""
-        plane = _W7Plane(
-            {
-                "blocking": [],
-                "blocked_by": [{"id": "tgt-1"}],  # reverse direction only
-            }
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1"}
-        ok, note = await verify_w7(plane, ctx, _run())
-        assert ok is False, note
-        assert "blocking" in note.lower() or "no blocking" in note.lower()
-        assert "wrong direction" in note or "tgt-1" in note
+def test_f1_w7_behaviours():
+    def test_f1_w7_blocked_by_only_does_not_pass():
+        async def _go():
+            """tgt id only in blocked_by (reverse) must FAIL — not pass via str(dump)."""
+            plane = _W7Plane(
+                {
+                    "blocking": [],
+                    "blocked_by": [{"id": "tgt-1"}],  # reverse direction only
+                }
+            )
+            ctx = {"workspace_slug": "ws", "project_id": "p1"}
+            ok, note = await verify_w7(plane, ctx, _run())
+            assert ok is False, note
+            assert "blocking" in note.lower() or "no blocking" in note.lower()
+            assert "wrong direction" in note or "tgt-1" in note
 
-    return asyncio.run(_go())
+        return asyncio.run(_go())
 
+    def test_f1_w7_blocking_passes():
+        async def _go():
+            plane = _W7Plane({"blocking": [{"id": "tgt-1"}], "blocked_by": []})
+            ctx = {"workspace_slug": "ws", "project_id": "p1"}
+            ok, note = await verify_w7(plane, ctx, _run())
+            assert ok is True, note
 
-def test_f1_w7_blocking_passes():
-    async def _go():
-        plane = _W7Plane({"blocking": [{"id": "tgt-1"}], "blocked_by": []})
-        ctx = {"workspace_slug": "ws", "project_id": "p1"}
-        ok, note = await verify_w7(plane, ctx, _run())
-        assert ok is True, note
+        # ---------------------------------------------------------------------------
+        # F2 W6 — seeded past end_date alone must NOT pass as closed
+        # ---------------------------------------------------------------------------
 
-    # ---------------------------------------------------------------------------
-    # F2 W6 — seeded past end_date alone must NOT pass as closed
-    # ---------------------------------------------------------------------------
+        return asyncio.run(_go())
 
-    return asyncio.run(_go())
+    test_f1_w7_blocked_by_only_does_not_pass()
+    test_f1_w7_blocking_passes()
 
 
 class _W6Plane:
@@ -124,102 +127,37 @@ class _W6Plane:
         return _Page([_item(f"i{i}", n) for i, n in enumerate(self._s13)])
 
 
-def test_f2_w6_seeded_past_end_alone_fails():
-    async def _go():
-        """Sprint 12 still at seed end_date (today-14) with no archive → not closed."""
-        seed_end = (date.today() - timedelta(days=14)).isoformat()
-        plane = _W6Plane(past_end=seed_end, sprint13_names=["Inventory count goes negative under load"])
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "cycle_past_id": "c12",
-            "cycle_current_id": "c13",
-            "cycle_past_seed_end_date": seed_end,
-            "w6_unfinished_titles": ["Inventory count goes negative under load"],
-            "cycles": {CYCLE_PAST: "c12"},
-        }
-        ok, note = await verify_w6(plane, ctx, _run())
-        assert ok is False, note
-        assert "not closed" in note.lower() or "Sprint 12 not closed" in note
+def test_f2_w6_closes_only_on_a_real_end_date_signal():
+    """The API returns end_date as a timestamp, so whole-string comparison to today never
+    matched — which silently left the transfer side effect as the only way to pass."""
 
-    return asyncio.run(_go())
-
-
-def test_f2_w6_end_date_today_as_timestamp_passes_close():
-    async def _go():
-        """The API returns end_date as a timestamp, not a bare date.
-
-        Sprint 12 closed today comes back as '<today>T00:00:00Z'; comparing the
-        whole string to today's date never matches, which silently killed the
-        complete_cycle close signal and left the transfer side effect
-        (progress_snapshot) as the only way to pass.
-        """
-        today = date.today().isoformat()
-        titles = ["Inventory count goes negative under load"]
-        plane = _W6Plane(past_end=f"{today}T00:00:00Z", sprint13_names=titles)
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "cycle_past_id": "c12",
-            "cycle_current_id": "c13",
-            "cycle_past_seed_end_date": (date.today() + timedelta(days=1)).isoformat(),
-            "w6_unfinished_titles": titles,
-        }
-        ok, note = await verify_w6(plane, ctx, _run())
-        assert ok is True, note
-        assert "end_date" in note
-
-    return asyncio.run(_go())
-
-
-def test_f2_w6_open_seed_end_tomorrow_alone_fails():
-    async def _go():
-        """A no-op agent leaves Sprint 12 ending tomorrow → not closed."""
-        seed_end = (date.today() + timedelta(days=1)).isoformat()
-        titles = ["Inventory count goes negative under load"]
-        plane = _W6Plane(past_end=f"{seed_end}T00:00:00Z", sprint13_names=titles)
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "cycle_past_id": "c12",
-            "cycle_current_id": "c13",
-            "cycle_past_seed_end_date": seed_end,
-            "w6_unfinished_titles": titles,
-        }
-        ok, note = await verify_w6(plane, ctx, _run())
-        assert ok is False, note
-        assert "not closed" in note.lower()
-
-    return asyncio.run(_go())
-
-
-def test_f2_w6_end_date_today_passes_close():
     async def _go():
         today = date.today().isoformat()
-        plane = _W6Plane(
-            past_end=today,
-            sprint13_names=[
-                "Inventory count goes negative under load",
-                "Tooltip clipped inside modal dialog",
-            ],
-        )
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "cycle_past_id": "c12",
-            "cycle_current_id": "c13",
-            "cycle_past_seed_end_date": (date.today() - timedelta(days=14)).isoformat(),
-            "w6_unfinished_titles": [
-                "Inventory count goes negative under load",
-                "Tooltip clipped inside modal dialog",
-            ],
-        }
-        ok, note = await verify_w6(plane, ctx, _run())
-        assert ok is True, note
-
-    # ---------------------------------------------------------------------------
-    # F3 W5 — 404 without archived list entry is NOT archive
-    # ---------------------------------------------------------------------------
+        past = (date.today() - timedelta(days=14)).isoformat()
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        titles = ["Inventory count goes negative under load"]
+        two = [*titles, "Tooltip clipped inside modal dialog"]
+        cases = [
+            ("still at the seeded past end, never closed", past, past, titles, False, "not closed"),
+            ("no-op agent: still ends tomorrow", f"{tomorrow}T00:00:00Z", tomorrow, titles, False, "not closed"),
+            ("closed today, returned as a timestamp", f"{today}T00:00:00Z", tomorrow, titles, True, "end_date"),
+            ("closed today, returned as a bare date", today, past, two, True, ""),
+        ]
+        for label, end_date, seed_end, names, want, expect in cases:
+            plane = _W6Plane(past_end=end_date, sprint13_names=names)
+            ctx = {
+                "workspace_slug": "ws",
+                "project_id": "p1",
+                "cycle_past_id": "c12",
+                "cycle_current_id": "c13",
+                "cycle_past_seed_end_date": seed_end,
+                "w6_unfinished_titles": names,
+                "cycles": {CYCLE_PAST: "c12"},
+            }
+            ok, note = await verify_w6(plane, ctx, _run())
+            assert ok is want, f"{label}: {note}"
+            if expect:
+                assert expect in note.lower() or expect in note, f"{label}: {note}"
 
     return asyncio.run(_go())
 
@@ -247,48 +185,29 @@ class _W5Plane:
         return _Page([_item(i, f"n-{i}") for i in self._archived_ids])
 
 
-def test_f3_w5_deleted_404_without_archive_fails():
-    async def _go():
-        """All items 404 and archived list empty → fail (deletes ≠ archive)."""
-        ids = ["m1", "m2", "m3"]
-        plane = _W5Plane(retrieve_map={}, archived_ids=[])  # all 404, none archived
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "module_completed_ids": ids,
-        }
-        ok, note = await verify_w5(plane, ctx, _run())
-        assert ok is False, note
-        assert "not archived" in note
+def test_f3_w5_accepts_archive_but_not_deletion():
+    """A 404 alone is not evidence of archiving — deleting every item would also 404."""
 
-    return asyncio.run(_go())
-
-
-def test_f3_w5_404_present_in_archived_passes():
     async def _go():
         ids = ["m1", "m2", "m3"]
-        plane = _W5Plane(retrieve_map={}, archived_ids=ids)
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "module_completed_ids": ids}
-        ok, note = await verify_w5(plane, ctx, _run())
-        assert ok is True, note
-
-    return asyncio.run(_go())
-
-
-def test_f3_w5_archived_at_on_retrieve_passes():
-    async def _go():
-        ids = ["m1"]
-        plane = _W5Plane(
-            retrieve_map={"m1": SimpleNamespace(id="m1", archived_at="2026-01-01T00:00:00Z")},
-            archived_ids=[],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "module_completed_ids": ids}
-        ok, note = await verify_w5(plane, ctx, _run())
-        assert ok is True, note
-
-    # ---------------------------------------------------------------------------
-    # F4 C1 — must link exact R1 item; acme* / random links fail
-    # ---------------------------------------------------------------------------
+        archived_at = SimpleNamespace(id="m1", archived_at="2026-01-01T00:00:00Z")
+        cases = [
+            ("all 404, nothing archived", _W5Plane(retrieve_map={}, archived_ids=[]), ids, False, "not archived"),
+            ("404 but present in the archived list", _W5Plane(retrieve_map={}, archived_ids=ids), ids, True, ""),
+            (
+                "archived_at on retrieve",
+                _W5Plane(retrieve_map={"m1": archived_at}, archived_ids=[]),
+                ["m1"],
+                True,
+                "",
+            ),
+        ]
+        for label, plane, module_ids, want, expect in cases:
+            ctx = {"workspace_slug": "ws", "project_id": "p1", "module_completed_ids": module_ids}
+            ok, note = await verify_w5(plane, ctx, _run())
+            assert ok is want, f"{label}: {note}"
+            if expect:
+                assert expect in note, f"{label}: {note}"
 
     return asyncio.run(_go())
 
@@ -310,53 +229,44 @@ class _C1Plane:
         self.work_items = SimpleNamespace(list=lambda **kw: _Page(project_items))
 
 
-def test_f4_c1_wrong_customer_name_fails():
+def test_f4_c1_requires_the_named_customer_linked_to_the_named_item():
+    """Both ends are checked: a lookalike customer name and a link to any other item fail."""
+
     async def _go():
-        plane = _C1Plane(
-            customers=[SimpleNamespace(id="c1", name="Acme Industries")],
-            requests=[SimpleNamespace(id="r1", name=CUSTOMER_REQUEST_NAME)],
-            linked=[SimpleNamespace(id="wi-r1")],
-            project_items=[_item("wi-r1", R1_TITLE)],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {R1_TITLE: "wi-r1"}}
-        ok, note = await verify_c1(plane, ctx, _run())
-        assert ok is False, note
-        assert CUSTOMER_NAME in note
-
-    return asyncio.run(_go())
-
-
-def test_f4_c1_linked_other_item_not_r1_fails():
-    async def _go():
-        plane = _C1Plane(
-            customers=[SimpleNamespace(id="c1", name=CUSTOMER_NAME)],
-            requests=[SimpleNamespace(id="r1", name=CUSTOMER_REQUEST_NAME)],
-            linked=[SimpleNamespace(id="wi-other")],  # not R1
-            project_items=[_item("wi-r1", R1_TITLE), _item("wi-other", "Other")],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1"}
-        ok, note = await verify_c1(plane, ctx, _run())
-        assert ok is False, note
-        assert "not linked" in note or "wi-r1" in note
-
-    return asyncio.run(_go())
-
-
-def test_f4_c1_exact_r1_link_passes():
-    async def _go():
-        plane = _C1Plane(
-            customers=[SimpleNamespace(id="c1", name=CUSTOMER_NAME)],
-            requests=[SimpleNamespace(id="r1", name=CUSTOMER_REQUEST_NAME)],
-            linked=[SimpleNamespace(id="wi-r1")],
-            project_items=[_item("wi-r1", R1_TITLE)],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1"}
-        ok, note = await verify_c1(plane, ctx, _run())
-        assert ok is True, note
-
-    # ---------------------------------------------------------------------------
-    # F5 W3 — comment must contain 'contrast tokens'
-    # ---------------------------------------------------------------------------
+        request = SimpleNamespace(id="r1", name=CUSTOMER_REQUEST_NAME)
+        cases = [
+            (
+                "customer name is a lookalike",
+                [SimpleNamespace(id="c1", name="Acme Industries")],
+                [SimpleNamespace(id="wi-r1")],
+                [_item("wi-r1", R1_TITLE)],
+                False,
+                (CUSTOMER_NAME,),
+            ),
+            (
+                "linked to a different item",
+                [SimpleNamespace(id="c1", name=CUSTOMER_NAME)],
+                [SimpleNamespace(id="wi-other")],
+                [_item("wi-r1", R1_TITLE), _item("wi-other", "Other")],
+                False,
+                ("not linked", "wi-r1"),
+            ),
+            (
+                "exact customer and item",
+                [SimpleNamespace(id="c1", name=CUSTOMER_NAME)],
+                [SimpleNamespace(id="wi-r1")],
+                [_item("wi-r1", R1_TITLE)],
+                True,
+                (),
+            ),
+        ]
+        for label, customers, linked, project_items, want, expect_any in cases:
+            plane = _C1Plane(customers=customers, requests=[request], linked=linked, project_items=project_items)
+            ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {R1_TITLE: "wi-r1"}}
+            ok, note = await verify_c1(plane, ctx, _run())
+            assert ok is want, f"{label}: {note}"
+            if expect_any:
+                assert any(s in note for s in expect_any), f"{label}: {note}"
 
     return asyncio.run(_go())
 
@@ -369,32 +279,19 @@ class _W3Plane:
         )
 
 
-def test_f5_w3_unrelated_comment_fails():
+def test_f5_w3_matches_the_phrase_in_either_comment_field():
     async def _go():
-        plane = _W3Plane([SimpleNamespace(comment_html="<p>lgtm</p>", comment_stripped="lgtm")])
-        ok, note = await verify_w3(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-        assert "contrast tokens" in note
-
-    return asyncio.run(_go())
-
-
-def test_f5_w3_phrase_in_html_passes():
-    async def _go():
-        plane = _W3Plane(
-            [
-                SimpleNamespace(
-                    comment_html="<p>Reviewed contrast tokens — needs design pass</p>",
-                    comment_stripped="Reviewed contrast tokens — needs design pass",
-                )
-            ]
-        )
-        ok, note = await verify_w3(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is True, note
-
-    # ---------------------------------------------------------------------------
-    # F7 W4 — seeded triage id is authoritative
-    # ---------------------------------------------------------------------------
+        html = "<p>Reviewed contrast tokens — needs design pass</p>"
+        cases = [
+            ("unrelated comment", "<p>lgtm</p>", "lgtm", False, "contrast tokens"),
+            ("phrase present", html, "Reviewed contrast tokens — needs design pass", True, ""),
+        ]
+        for label, comment_html, stripped, want, expect in cases:
+            plane = _W3Plane([SimpleNamespace(comment_html=comment_html, comment_stripped=stripped)])
+            ok, note = await verify_w3(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
+            assert ok is want, f"{label}: {note}"
+            if expect:
+                assert expect in note, f"{label}: {note}"
 
     return asyncio.run(_go())
 
@@ -411,37 +308,32 @@ class _W4Plane:
         return self._by_id[lid]
 
 
-def test_f7_w4_wrong_label_renamed_triage_id_unchanged_fails():
+def test_f7_w4_follows_the_seeded_label_id_not_the_name():
+    """A name scan would accept a different label renamed to the target."""
+
     async def _go():
-        """Name-scan would see needs-triage, but seeded triage id still named triage."""
-        plane = _W4Plane(
-            by_id={"triage-id": SimpleNamespace(id="triage-id", name="triage")},
-            listed=[
-                SimpleNamespace(id="triage-id", name="triage"),
-                SimpleNamespace(id="other", name="needs-triage"),  # wrong label renamed
-            ],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "labels": {"triage": "triage-id"}}
-        ok, note = await verify_w4(plane, ctx, _run())
-        assert ok is False, note
-        assert "triage-id" in note
-
-    return asyncio.run(_go())
-
-
-def test_f7_w4_seeded_id_renamed_passes():
-    async def _go():
-        plane = _W4Plane(
-            by_id={"triage-id": SimpleNamespace(id="triage-id", name="needs-triage")},
-            listed=[SimpleNamespace(id="triage-id", name="needs-triage")],
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "labels": {"triage": "triage-id"}}
-        ok, note = await verify_w4(plane, ctx, _run())
-        assert ok is True, note
-
-    # ---------------------------------------------------------------------------
-    # F6 S3 — required OPTION must not pass as TEXT
-    # ---------------------------------------------------------------------------
+        cases = [
+            (
+                "decoy label carries the new name",
+                {"triage-id": SimpleNamespace(id="triage-id", name="triage")},
+                [SimpleNamespace(id="triage-id", name="triage"), SimpleNamespace(id="other", name="needs-triage")],
+                False,
+                "triage-id",
+            ),
+            (
+                "the seeded label itself was renamed",
+                {"triage-id": SimpleNamespace(id="triage-id", name="needs-triage")},
+                [SimpleNamespace(id="triage-id", name="needs-triage")],
+                True,
+                "",
+            ),
+        ]
+        for label, by_id, listed, want, expect in cases:
+            ctx = {"workspace_slug": "ws", "project_id": "p1", "labels": {"triage": "triage-id"}}
+            ok, note = await verify_w4(_W4Plane(by_id=by_id, listed=listed), ctx, _run())
+            assert ok is want, f"{label}: {note}"
+            if expect:
+                assert expect in note, f"{label}: {note}"
 
     return asyncio.run(_go())
 
@@ -459,45 +351,48 @@ class _S3Plane:
         self.workspace_work_item_types = SimpleNamespace(list=lambda **kw: [])
 
 
-def test_f6_s3_required_option_does_not_pass():
-    async def _go():
-        plane = _S3Plane(
-            props=[
-                SimpleNamespace(
-                    id="p1",
-                    display_name="Severity",
-                    property_type="OPTION",
-                    is_required=True,
-                )
-            ]
-        )
-        ok, note = await verify_s3(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-        assert "TEXT" in note
+def test_f6_s3_behaviours():
+    def test_f6_s3_required_option_does_not_pass():
+        async def _go():
+            plane = _S3Plane(
+                props=[
+                    SimpleNamespace(
+                        id="p1",
+                        display_name="Severity",
+                        property_type="OPTION",
+                        is_required=True,
+                    )
+                ]
+            )
+            ok, note = await verify_s3(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
+            assert ok is False, note
+            assert "TEXT" in note
 
-    return asyncio.run(_go())
+        return asyncio.run(_go())
 
+    def test_f6_s3_required_text_passes():
+        async def _go():
+            plane = _S3Plane(
+                props=[
+                    SimpleNamespace(
+                        id="p1",
+                        display_name="Impact summary",
+                        property_type="TEXT",
+                        is_required=True,
+                    )
+                ]
+            )
+            ok, note = await verify_s3(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
+            assert ok is True, note
 
-def test_f6_s3_required_text_passes():
-    async def _go():
-        plane = _S3Plane(
-            props=[
-                SimpleNamespace(
-                    id="p1",
-                    display_name="Impact summary",
-                    property_type="TEXT",
-                    is_required=True,
-                )
-            ]
-        )
-        ok, note = await verify_s3(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is True, note
+        # ---------------------------------------------------------------------------
+        # F9 S3 — workspace types found via get_features probe (not seed flag)
+        # ---------------------------------------------------------------------------
 
-    # ---------------------------------------------------------------------------
-    # F9 S3 — workspace types found via get_features probe (not seed flag)
-    # ---------------------------------------------------------------------------
+        return asyncio.run(_go())
 
-    return asyncio.run(_go())
+    test_f6_s3_required_option_does_not_pass()
+    test_f6_s3_required_text_passes()
 
 
 def test_f9_s3_workspace_type_via_features_probe():
@@ -529,38 +424,38 @@ def test_f9_s3_workspace_type_via_features_probe():
     return asyncio.run(_go())
 
 
-def test_f8_r3_due_date_clamped_to_iso_week():
-    """today+2d on Sat/Sun must not leave the week — replicate seed formula."""
-    for weekday in range(7):  # 0=Mon … 6=Sun
-        # Build a fixed "today" with that weekday relative to a known Monday.
-        # 2026-08-10 is a Monday.
-        monday = date(2026, 8, 10)
-        today = monday + timedelta(days=weekday)
-        days_to_week_end = 6 - today.weekday()
-        due = min(today + timedelta(days=2), today + timedelta(days=days_to_week_end))
-        # Sunday of that week
-        week_end = today + timedelta(days=days_to_week_end)
-        week_start = today - timedelta(days=today.weekday())
-        assert week_start <= due <= week_end, f"weekday={weekday} due={due}"
-        # Specifically: Sat/Sun must not go past Sunday
-        if weekday >= 5:
-            assert due <= week_end
-            assert due == week_end or due == today  # Sun→today, Sat→Sun
+def test_f8_behaviours():
+    def test_f8_r3_due_date_clamped_to_iso_week():
+        for weekday in range(7):  # 0=Mon … 6=Sun
+            # Build a fixed "today" with that weekday relative to a known Monday.
+            # 2026-08-10 is a Monday.
+            monday = date(2026, 8, 10)
+            today = monday + timedelta(days=weekday)
+            days_to_week_end = 6 - today.weekday()
+            due = min(today + timedelta(days=2), today + timedelta(days=days_to_week_end))
+            # Sunday of that week
+            week_end = today + timedelta(days=days_to_week_end)
+            week_start = today - timedelta(days=today.weekday())
+            assert week_start <= due <= week_end, f"weekday={weekday} due={due}"
+            # Specifically: Sat/Sun must not go past Sunday
+            if weekday >= 5:
+                assert due <= week_end
+                assert due == week_end or due == today  # Sun→today, Sat→Sun
 
+    def test_f8_seed_r3_due_date_function_matches():
+        sat = date(2026, 8, 15)  # known Saturday
+        assert sat.weekday() == 5
+        days_to_week_end = 6 - sat.weekday()
+        due = min(sat + timedelta(days=2), sat + timedelta(days=days_to_week_end))
+        assert due == date(2026, 8, 16)  # Sunday, not Monday 17
+        # Sunday
+        sun = date(2026, 8, 16)
+        days_to_week_end = 6 - sun.weekday()
+        due = min(sun + timedelta(days=2), sun + timedelta(days=days_to_week_end))
+        assert due == sun
 
-def test_f8_seed_r3_due_date_function_matches():
-    """Import seed's computation path by re-running the formula against weekends."""
-    # Saturday
-    sat = date(2026, 8, 15)  # known Saturday
-    assert sat.weekday() == 5
-    days_to_week_end = 6 - sat.weekday()
-    due = min(sat + timedelta(days=2), sat + timedelta(days=days_to_week_end))
-    assert due == date(2026, 8, 16)  # Sunday, not Monday 17
-    # Sunday
-    sun = date(2026, 8, 16)
-    days_to_week_end = 6 - sun.weekday()
-    due = min(sun + timedelta(days=2), sun + timedelta(days=days_to_week_end))
-    assert due == sun
+    test_f8_r3_due_date_clamped_to_iso_week()
+    test_f8_seed_r3_due_date_function_matches()
 
 
 class _W8Plane:
@@ -571,59 +466,68 @@ class _W8Plane:
         )
 
 
-def test_minor_w8_480_minutes_fails():
-    async def _go():
-        plane = _W8Plane([480])
-        ok, note = await verify_w8(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-        assert "120" in note
+def test_minor_behaviours():
+    def test_minor_w8_behaviours():
+        def test_minor_w8_480_minutes_fails():
+            async def _go():
+                plane = _W8Plane([480])
+                ok, note = await verify_w8(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
+                assert ok is False, note
+                assert "120" in note
 
-    return asyncio.run(_go())
+            return asyncio.run(_go())
 
+        def test_minor_w8_exactly_120_passes():
+            async def _go():
+                plane = _W8Plane([120])
+                ok, note = await verify_w8(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
+                assert ok is True, note
 
-def test_minor_w8_exactly_120_passes():
-    async def _go():
-        plane = _W8Plane([120])
-        ok, note = await verify_w8(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is True, note
+            # ---------------------------------------------------------------------------
+            # Minor R3 — all titles required; count alone insufficient
+            # ---------------------------------------------------------------------------
 
-    # ---------------------------------------------------------------------------
-    # Minor R3 — all titles required; count alone insufficient
-    # ---------------------------------------------------------------------------
+            return asyncio.run(_go())
 
-    return asyncio.run(_go())
+        test_minor_w8_480_minutes_fails()
+        test_minor_w8_exactly_120_passes()
 
+    def test_minor_r3_behaviours():
+        def test_minor_r3_count_without_titles_fails():
+            async def _go():
+                titles = ["Webhook secret rotation docs missing", "Onboarding email template stale"]
+                run = {"final_text": "There are 2 items due this week.", "calls": []}
+                ok, note = await verify_r3(
+                    object(),
+                    {"r3_due_titles": titles, "r3_due_count": 2},
+                    run,
+                )
+                assert ok is False, note
+                assert "item contract" in note.lower()
 
-def test_minor_r3_count_without_titles_fails():
-    async def _go():
-        titles = ["Webhook secret rotation docs missing", "Onboarding email template stale"]
-        run = {"final_text": "There are 2 items due this week.", "calls": []}
-        ok, note = await verify_r3(
-            object(),
-            {"r3_due_titles": titles, "r3_due_count": 2},
-            run,
-        )
-        assert ok is False, note
-        assert "item contract" in note.lower()
+            return asyncio.run(_go())
 
-    return asyncio.run(_go())
+        def test_minor_r3_exact_item_contract_passes_in_any_order():
+            async def _go():
+                titles = ["Webhook secret rotation docs missing", "Onboarding email template stale"]
+                run = {
+                    "final_text": ("item: Onboarding email template stale\nitem: Webhook secret rotation docs missing"),
+                    "calls": [],
+                }
+                ok, note = await verify_r3(
+                    object(),
+                    {"r3_due_titles": titles, "r3_due_count": 2},
+                    run,
+                )
+                assert ok is True, note
 
+            return asyncio.run(_go())
 
-def test_minor_r3_exact_item_contract_passes_in_any_order():
-    async def _go():
-        titles = ["Webhook secret rotation docs missing", "Onboarding email template stale"]
-        run = {
-            "final_text": ("item: Onboarding email template stale\nitem: Webhook secret rotation docs missing"),
-            "calls": [],
-        }
-        ok, note = await verify_r3(
-            object(),
-            {"r3_due_titles": titles, "r3_due_count": 2},
-            run,
-        )
-        assert ok is True, note
+        test_minor_r3_count_without_titles_fails()
+        test_minor_r3_exact_item_contract_passes_in_any_order()
 
-    return asyncio.run(_go())
+    test_minor_w8_behaviours()
+    test_minor_r3_behaviours()
 
 
 class _S5Plane:
@@ -653,55 +557,28 @@ class _S5Plane:
         )
 
 
-def test_s5_only_cycles_enabled_fails():
-    """Two-of-three: cycles on, worklogs off, customers on → fail."""
+def test_s5_requires_all_three_features_not_a_majority():
+    """Every two-of-three combination must fail; the task asks for all three."""
 
     async def _go():
-        plane = _S5Plane(cycle_view=True, time_tracking=False, customers=True)
-        ok, note = await verify_s5(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-        assert "is_time_tracking_enabled" in note
+        cases = [
+            ("cycles+customers, worklogs off", True, False, True, False, ("is_time_tracking_enabled",)),
+            ("worklogs+customers, cycles off", False, True, True, False, ("cycle_view",)),
+            ("customers only", False, False, True, False, ("cycle_view", "is_time_tracking_enabled")),
+            ("project flags only, customers off", True, True, False, True, ("customers",)),
+        ]
+        for label, cycle_view, tracking, customers, features_cycles, expect in cases:
+            plane = _S5Plane(
+                cycle_view=cycle_view,
+                time_tracking=tracking,
+                customers=customers,
+                features_cycles=features_cycles,
+            )
+            ok, note = await verify_s5(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
+            assert ok is False, f"{label}: {note}"
+            for s in expect:
+                assert s in note, f"{label}: {note}"
 
-    return asyncio.run(_go())
-
-
-def test_s5_only_worklogs_enabled_fails():
-    async def _go():
-        plane = _S5Plane(cycle_view=False, time_tracking=True, customers=True)
-        ok, note = await verify_s5(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-        assert "cycle_view" in note
-
-    return asyncio.run(_go())
-
-
-def test_s5_workspace_customers_on_but_project_flags_off_fails():
-    """Workspace customers alone is not enough — project gates must also pass."""
-
-    async def _go():
-        plane = _S5Plane(cycle_view=False, time_tracking=False, customers=True)
-        ok, note = await verify_s5(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-        assert "cycle_view" in note
-        assert "is_time_tracking_enabled" in note
-
-    return asyncio.run(_go())
-
-
-def test_s5_project_flags_on_but_customers_off_fails():
-    """Two-of-three: project ok, workspace customers off → fail."""
-
-    async def _go():
-        plane = _S5Plane(cycle_view=True, time_tracking=True, customers=False, features_cycles=True)
-        ok, note = await verify_s5(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-        assert "customers" in note
-
-    return asyncio.run(_go())
-
-
-def test_s5_all_three_enabled_passes():
-    async def _go():
         plane = _S5Plane(cycle_view=True, time_tracking=True, customers=True, features_cycles=True)
         ok, note = await verify_s5(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
         assert ok is True, note

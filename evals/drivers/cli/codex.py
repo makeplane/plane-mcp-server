@@ -1,4 +1,10 @@
-"""Codex CLI driver and JSONL/rollout parsers."""
+"""Codex CLI driver and JSONL/rollout parsers.
+
+Probed: codex exec --json emits JSONL on stdout; -c key=value overrides config.toml
+(including mcp_servers); -m selects the model; rollouts at
+~/.codex/sessions/**/rollout-*.jsonl carry response_item/function_call payloads.
+Experimental — live runs are opt-in because the quota is metered.
+"""
 
 from __future__ import annotations
 

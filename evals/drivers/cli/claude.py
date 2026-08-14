@@ -1,4 +1,11 @@
-"""Claude Code CLI driver and transcript/JSON parsers."""
+"""Claude Code CLI driver and transcript/JSON parsers.
+
+Probed (claude v2.1.228): -p headless; --mcp-config (repeatable) + --strict-mcp-config;
+--output-format json|text|stream-json; --max-turns (present but hidden from --help);
+--model; --permission-mode; transcript at
+~/.claude/projects/<cwd-with-/-as-->/<session_id>.jsonl, assistant rows carrying
+tool_use blocks; MCP tools appear as mcp__<server>__<tool>.
+"""
 
 from __future__ import annotations
 

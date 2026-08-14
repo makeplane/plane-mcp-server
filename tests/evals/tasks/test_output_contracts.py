@@ -71,23 +71,44 @@ class _W8Plane:
         )
 
 
-def test_r2_written_number_prose_fails_and_count_contract_passes():
-    async def _go():
-        state = SimpleNamespace(id="started", name="Started", group="started")
-        items = [SimpleNamespace(id=str(index), priority="urgent", state=state) for index in range(4)]
-        plane = SimpleNamespace(
-            states=SimpleNamespace(list=lambda **kwargs: _Page([state])),
-            work_items=SimpleNamespace(list=lambda **kwargs: _Page(items)),
-        )
-        ctx = {"workspace_slug": "ws", "project_id": "project"}
+def test_r2_behaviours():
+    def test_r2_written_number_prose_fails_and_count_contract_passes():
+        async def _go():
+            state = SimpleNamespace(id="started", name="Started", group="started")
+            items = [SimpleNamespace(id=str(index), priority="urgent", state=state) for index in range(4)]
+            plane = SimpleNamespace(
+                states=SimpleNamespace(list=lambda **kwargs: _Page([state])),
+                work_items=SimpleNamespace(list=lambda **kwargs: _Page(items)),
+            )
+            ctx = {"workspace_slug": "ws", "project_id": "project"}
 
-        prose_ok, _ = await verify_r2(plane, ctx, _run("There are four urgent open work items."))
-        contract_ok, note = await verify_r2(plane, ctx, _run("count: 4"))
+            prose_ok, _ = await verify_r2(plane, ctx, _run("There are four urgent open work items."))
+            contract_ok, note = await verify_r2(plane, ctx, _run("count: 4"))
 
-        assert prose_ok is False
-        assert contract_ok is True, note
+            assert prose_ok is False
+            assert contract_ok is True, note
 
-    return asyncio.run(_go())
+        return asyncio.run(_go())
+
+    def test_r2_rejects_a_count_that_disagrees_with_the_api():
+        async def _go():
+            from evals.tasks.read import verify_r2 as _vr2
+
+            urgent = [_item(str(i), "x", priority="urgent", state=SimpleNamespace(group="started")) for i in range(4)]
+
+            class Plane:
+                work_items = SimpleNamespace(list=lambda **kw: _Page(urgent))
+                states = SimpleNamespace(
+                    list=lambda **kw: _Page([SimpleNamespace(id="s", name="S", group="started", default=False)])
+                )
+
+            ok, note = await _vr2(Plane(), {"workspace_slug": "ws", "project_id": "p1"}, _run("0"))
+            assert ok is False, note
+
+        return asyncio.run(_go())
+
+    test_r2_written_number_prose_fails_and_count_contract_passes()
+    test_r2_rejects_a_count_that_disagrees_with_the_api()
 
 
 def test_r4_contract_requires_cycle_items_and_exact_overdue_title():
@@ -157,179 +178,79 @@ def test_r7_transition_contract_is_structural():
     return asyncio.run(_go())
 
 
-def test_c2_correct_changelog_prose_without_contract_fails():
+CHANGELOG = "Changelog entry one: OAuth login hardening. Changelog entry two: webhook retry backoff."
+R1_CTX = {
+    "workspace_slug": "ws",
+    "project_id": "p1",
+    "r1_state_name": "In Progress",
+    "state_names": ["In Progress", "Done", "Backlog"],
+}
+
+
+def test_r1_accepts_only_the_exact_state_contract():
     async def _go():
-        changelog = "Changelog entry one: OAuth login hardening. Changelog entry two: webhook retry backoff."
-        prose = "Release 1.2.0 shipped OAuth login hardening and webhook retry backoff."
-
-        ok, _ = await verify_c2(object(), {"release_changelog_text": changelog}, _run(prose))
-
-        assert ok is False
+        cases = [
+            ("untouched: empty answer", "", False),
+            ("names a different state", "Done", False),
+            ("exact contract line", "state: In Progress", True),
+        ]
+        for label, text, want in cases:
+            ok, note = await verify_r1(_R1Plane("In Progress"), dict(R1_CTX), _run(text))
+            assert ok is want, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_existing_r1_untouched_empty_text_fails():
+def test_w2_requires_the_done_group_specifically():
+    """Cancelled is also terminal, so a verifier keying on "not started" would pass it."""
+
     async def _go():
-        plane = _R1Plane("In Progress")
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "r1_state_name": "In Progress",
-            "state_names": ["In Progress", "Done", "Backlog"],
-        }
-        ok, note = await verify_r1(plane, ctx, _run(""))
-        assert ok is False, note
+        cases = [
+            ("untouched: still in progress", "started", "In Progress"),
+            ("cancelled, not done", "cancelled", "Cancelled"),
+        ]
+        for label, group, name in cases:
+            ok, note = await verify_w2(_W2Plane(group, name), {"workspace_slug": "ws", "project_id": "p1"}, _run())
+            assert ok is False, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_existing_r1_wrong_state_in_text_fails():
+def test_w4_requires_the_label_renamed_to_the_exact_target():
     async def _go():
-        plane = _R1Plane("In Progress")
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "r1_state_name": "In Progress",
-            "state_names": ["In Progress", "Done", "Backlog"],
-        }
-        ok, note = await verify_r1(plane, ctx, _run("Done"))
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_r1_exact_state_contract_passes():
-    async def _go():
-        plane = _R1Plane("In Progress")
-        ctx = {
-            "workspace_slug": "ws",
-            "project_id": "p1",
-            "r1_state_name": "In Progress",
-            "state_names": ["In Progress", "Done", "Backlog"],
-        }
-        ok, note = await verify_r1(plane, ctx, _run("state: In Progress"))
-        assert ok is True, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_r2_wrong_count_in_text_fails():
-    async def _go():
-        # verify_r2 counts open urgent via SDK; text must match that count.
-        from evals.tasks.read import verify_r2 as _vr2
-
-        class Plane:
-            def __init__(self):
-                self.work_items = SimpleNamespace(
-                    list=lambda **kw: _Page(
-                        [
-                            _item("1", "a", priority="urgent", state=SimpleNamespace(group="started")),
-                            _item("2", "b", priority="urgent", state=SimpleNamespace(group="started")),
-                            _item("3", "c", priority="urgent", state=SimpleNamespace(group="started")),
-                            _item("4", "d", priority="urgent", state=SimpleNamespace(group="started")),
-                        ]
-                    )
-                )
-                self.states = SimpleNamespace(
-                    list=lambda **kw: _Page([SimpleNamespace(id="s", name="S", group="started", default=False)])
-                )
-
-        # If verifier only checks text against live count, empty/wrong text fails.
-        ok, note = await _vr2(Plane(), {"workspace_slug": "ws", "project_id": "p1"}, _run("0"))
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_w2_untouched_not_done_fails():
-    async def _go():
-        plane = _W2Plane("started", "In Progress")
-        ok, note = await verify_w2(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_w2_wrong_cancelled_group_fails():
-    async def _go():
-        plane = _W2Plane("cancelled", "Cancelled")
-        ok, note = await verify_w2(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_w4_untouched_still_triage_fails():
-    async def _go():
-        plane = _W4Plane("triage")
         ctx = {"workspace_slug": "ws", "project_id": "p1", "labels": {"triage": "triage-id"}}
-        ok, note = await verify_w4(plane, ctx, _run())
-        assert ok is False, note
+        for label, name in [("untouched: still triage", "triage"), ("renamed to something else", "needs-review")]:
+            ok, note = await verify_w4(_W4Plane(name), dict(ctx), _run())
+            assert ok is False, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_existing_w4_wrong_name_needs_review_fails():
+def test_w8_requires_a_log_of_exactly_the_asked_duration():
     async def _go():
-        plane = _W4Plane("needs-review")
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "labels": {"triage": "triage-id"}}
-        ok, note = await verify_w4(plane, ctx, _run())
-        assert ok is False, note
+        for label, durations in [("untouched: no log", []), ("wrong duration", [60])]:
+            ok, note = await verify_w8(_W8Plane(durations), {"workspace_slug": "ws", "project_id": "p1"}, _run())
+            assert ok is False, f"{label}: {note}"
 
     return asyncio.run(_go())
 
 
-def test_existing_w8_untouched_no_log_fails():
+def test_c2_grades_the_release_contract_not_correct_prose():
+    """Prose naming the right release and entries still fails; the format is the task."""
+
     async def _go():
-        plane = _W8Plane([])
-        ok, note = await verify_w8(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_w8_wrong_duration_fails():
-    async def _go():
-        plane = _W8Plane([60])
-        ok, note = await verify_w8(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run())
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_c2_untouched_empty_text_fails():
-    async def _go():
-        ctx = {"release_changelog_text": "Changelog entry one: OAuth login hardening."}
-        ok, note = await verify_c2(object(), ctx, _run(""))
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_c2_wrong_release_name_fails():
-    async def _go():
-        ok, note = await verify_c2(
-            object(),
-            {"release_changelog_text": "Changelog entry one: OAuth login hardening."},
-            _run("Release 9.9.9 shipped nothing useful."),
-        )
-        assert ok is False, note
-
-    return asyncio.run(_go())
-
-
-def test_existing_c2_exact_release_and_shipped_contract_passes():
-    async def _go():
-        ok, note = await verify_c2(
-            object(),
-            {
-                "release_changelog_text": (
-                    "Changelog entry one: OAuth login hardening. Changelog entry two: webhook retry backoff."
-                )
-            },
-            _run("release: 1.2.0\nshipped: OAuth login hardening\nshipped: webhook retry backoff"),
-        )
-        assert ok is True, note
+        cases = [
+            ("untouched: empty answer", "", False),
+            ("wrong release name", "Release 9.9.9 shipped nothing useful.", False),
+            ("correct facts as prose", "Release 1.2.0 shipped OAuth login hardening and webhook retry backoff.", False),
+            (
+                "exact contract",
+                "release: 1.2.0\nshipped: OAuth login hardening\nshipped: webhook retry backoff",
+                True,
+            ),
+        ]
+        for label, text, want in cases:
+            ok, note = await verify_c2(object(), {"release_changelog_text": CHANGELOG}, _run(text))
+            assert ok is want, f"{label}: {note}"
 
     return asyncio.run(_go())
