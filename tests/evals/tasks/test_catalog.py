@@ -35,7 +35,7 @@ DESIGN_IDS = {
     "C2",
 }
 
-EXTRA_IDS = {"W9", "W10", "R7", "S5"}  # bulk, pages, transitions, features
+EXTRA_IDS = {"W9", "W10", "R7", "S5", "W11"}  # bulk, pages, transitions, features, gate recovery
 
 ID_IN_HAND_IDS = {"I1", "I2", "I3", "I4", "I5"}
 
@@ -60,6 +60,7 @@ CATALOG_ID_ORDER = (
     "W8",
     "W9",
     "W10",
+    "W11",
     "S1",
     "S2",
     "S3",
@@ -279,7 +280,7 @@ def test_fingerprint_records_the_revision_transition():
     from evals.tasks.catalog import CATALOG_REVISION
 
     assert CATALOG_REVISION == 2
-    assert battery_fingerprint() == "1e8b5c110b8b"
+    assert battery_fingerprint() == "4fb3a34a7231"
 
 
 def test_battery_fingerprint_catalog_is_nonempty():

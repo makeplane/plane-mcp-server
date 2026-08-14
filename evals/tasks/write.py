@@ -533,6 +533,89 @@ W8_TASK: dict[str, Any] = {
 }
 
 
+W11_TITLE = W8_TITLE
+
+
+def _time_tracking_enabled(plane: Any, workspace_slug: str, project_id: str) -> bool | None:
+    """Whether the project has time tracking on, or None when the read itself failed."""
+    try:
+        project = plane.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id)
+    except Exception:
+        return None
+    value = getattr(project, "is_time_tracking_enabled", None)
+    return None if value is None else bool(value)
+
+
+async def verify_w11(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
+    """W11: the work log lands even though the project shipped with time tracking off.
+
+    Same end state as W8, reached from an obstacle: the worklog endpoint 404s with
+    "Worklog is not enabled for the project" until the agent turns the feature on. The
+    prompt authorises that, so enabling and proceeding is the expected route rather than
+    an overreach the verifier would be rewarding.
+
+    The failure notes separate the ways it can go wrong, because "no work log" alone does
+    not say whether the agent gave up, half-finished, or claimed success it never earned.
+    """
+    workspace_slug = ctx["workspace_slug"]
+    project_id = ctx["project_id"]
+    item = find_item_by_name(plane, workspace_slug, project_id, W11_TITLE)
+    if item is None:
+        return False, f"item {W11_TITLE!r} not found"
+
+    durations: list[int] = []
+    try:
+        logs = plane.work_items.work_logs.list(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            work_item_id=item.id,
+        )
+    except Exception as exc:
+        # The list endpoint is gated by the same toggle, so this is the diagnosis itself.
+        if not is_not_found(exc):
+            raise
+        return False, f"work log list still refused, so time tracking was never enabled ({exc})"
+    rows = logs if isinstance(logs, list) else (logs.results if hasattr(logs, "results") else logs)
+    durations = [int(getattr(w, "duration", 0) or 0) for w in (rows or [])]
+    if 120 in durations:
+        return True, "work log duration=120 present; agent cleared the disabled feature"
+
+    enabled = _time_tracking_enabled(plane, workspace_slug, project_id)
+    if enabled:
+        return False, f"time tracking enabled but no 120-minute log; durations={durations}"
+
+    final_text = str(run.get("final_text") or "").lower()
+    mentioned = any(phrase in final_text for phrase in ("time tracking", "not enabled", "disabled"))
+    if mentioned:
+        return False, "reported the feature was off rather than enabling it, which the prompt allowed"
+    return False, "no work log, and the answer never mentions the disabled feature"
+
+
+W11_TASK: dict[str, Any] = {
+    "id": "W11",
+    "tags": {"write", "gate", "tier1"},
+    "prompt": (
+        f"In project {{project}}, log 2 hours of work on the item titled '{W11_TITLE}'. "
+        "Time tracking may be switched off for this project; you have permission to turn "
+        "it on if you need to."
+    ),
+    # enable time tracking → find the item → create the work log.
+    "optimal_calls": 3,
+    "optimal_tools": {"update_project", "list_work_items", "create_work_log"},
+    "alternate_tools": {
+        "update_project_features",
+        "get_features",
+        "retrieve_project",
+        "search_work_items",
+        "list_work_logs",
+        "retrieve_work_item",
+        "list_projects",
+    },
+    "needs": {"items", "leave_worklogs_off"},
+    "verify": verify_w11,
+}
+
+
 async def verify_w9(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
     """W9 (extra): bulk priority change — the three non-R1 urgent titles are now high."""
     workspace_slug = ctx["workspace_slug"]
@@ -630,10 +713,12 @@ WRITE_TASKS: list[dict[str, Any]] = [
     W8_TASK,
     W9_TASK,
     W10_TASK,
+    W11_TASK,
 ]
 
 
 __all__ = [
+    "W11_TITLE",
     "WRITE_TASKS",
     "verify_w1",
     "verify_w2",
@@ -645,4 +730,5 @@ __all__ = [
     "verify_w8",
     "verify_w9",
     "verify_w10",
+    "verify_w11",
 ]

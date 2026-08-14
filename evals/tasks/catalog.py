@@ -29,6 +29,7 @@ EXPECTED_TASK_IDS = (
     "W8",
     "W9",
     "W10",
+    "W11",
     "S1",
     "S2",
     "S3",

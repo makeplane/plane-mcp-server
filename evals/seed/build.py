@@ -168,6 +168,10 @@ def seed(plane: PlaneClient, run_id: str, needs: set[str], ctx: dict[str, Any]) 
         feature_exclude = {"cycles", "worklogs"}
         workspace_feature_exclude = {"customers"}
         ctx["s5_left_customers_off"] = True
+    if "leave_worklogs_off" in needs:
+        # W11: only time tracking is off, so the agent meets one obstacle rather than a
+        # project with several unrelated features disabled.
+        feature_exclude |= {"worklogs"}
     ctx["feature_exclude"] = sorted(feature_exclude)
     ctx["ws_feature_exclude"] = sorted(workspace_feature_exclude)
     # Prior values are captured before the write so teardown restores the workspace
