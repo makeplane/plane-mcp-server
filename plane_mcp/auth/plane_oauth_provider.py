@@ -22,8 +22,11 @@ Example:
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import os
 import time
+from dataclasses import dataclass
 
 import httpx
 from fastmcp.server.auth import TokenVerifier
@@ -46,6 +49,85 @@ LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
 
 
 DEFAULT_PLANE_BASE_URL = "https://api.plane.so"
+
+# Successful verifications are cached this long — a burst of MCP requests must
+# not become a burst of Plane API calls. Worst-case revocation latency = this TTL.
+VERIFY_CACHE_TTL_SECONDS = int(os.getenv("PLANE_VERIFY_CACHE_TTL_SECONDS", "60"))
+
+# When Plane is unreachable (timeout, 5xx, 429, deploy blip), a previously
+# verified token is served from cache for up to this long instead of being
+# reported as invalid — transient upstream failures must not flip connectors
+# to "needs authentication".
+VERIFY_STALE_TTL_SECONDS = int(os.getenv("PLANE_VERIFY_STALE_TTL_SECONDS", "900"))
+
+# Bound on the in-memory verification cache.
+VERIFY_CACHE_MAX_ENTRIES = 1024
+
+# Plane responses that definitively reject a token. Everything else that isn't
+# a 200 is treated as transient (5xx, 429, ...) and must never revoke auth.
+DEFINITIVE_REJECTION_STATUSES = frozenset({401, 403})
+
+# Refresh the upstream Plane token this many seconds before it actually
+# expires. Without a margin, every session/replica discovers expiry at the
+# same instant and races the refresh — with rotation enabled, the losers get
+# invalid_grant and force the user through interactive re-auth.
+DEFAULT_TOKEN_EXPIRY_THRESHOLD_SECONDS = 300
+
+
+class TransientVerificationError(Exception):
+    """Verification could not be completed — says nothing about token validity.
+
+    Raised for timeouts, connection errors, 429s, 5xxs, and unparseable
+    responses. Must never be treated as "token invalid".
+    """
+
+
+@dataclass
+class _CacheEntry:
+    access_token: AccessToken
+    verified_at: float
+
+
+class _VerificationCache:
+    """Bounded in-memory cache of successful token verifications.
+
+    Keys are SHA-256 hashes of the raw token, so bearer tokens are never held
+    as dict keys. A single stored entry serves both the fresh window and the
+    stale-if-error window — callers choose the max age per lookup.
+    """
+
+    def __init__(self, *, max_entries: int, evict_after_seconds: float) -> None:
+        self._max_entries = max_entries
+        self._evict_after_seconds = evict_after_seconds
+        self._entries: dict[str, _CacheEntry] = {}
+
+    @staticmethod
+    def _key(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def get(self, token: str, *, max_age_seconds: float) -> AccessToken | None:
+        entry = self._entries.get(self._key(token))
+        if entry and (time.time() - entry.verified_at) <= max_age_seconds:
+            return entry.access_token.model_copy(deep=True)
+        return None
+
+    def put(self, token: str, access_token: AccessToken) -> None:
+        if len(self._entries) >= self._max_entries:
+            self._evict()
+        self._entries[self._key(token)] = _CacheEntry(access_token=access_token, verified_at=time.time())
+
+    def discard(self, token: str) -> None:
+        """Drop any entry so a rejected token cannot be served stale later."""
+        self._entries.pop(self._key(token), None)
+
+    def _evict(self) -> None:
+        # Drop entries past the stale window first, then the oldest.
+        now = time.time()
+        for key in [k for k, v in self._entries.items() if now - v.verified_at > self._evict_after_seconds]:
+            del self._entries[key]
+        if len(self._entries) >= self._max_entries:
+            oldest = min(self._entries, key=lambda k: self._entries[k].verified_at)
+            del self._entries[oldest]
 
 
 class WorkspaceDetail(BaseModel):
@@ -96,6 +178,8 @@ class PlaneOAuthProviderSettings(BaseSettings):
     plane_base_url: str | None = None
     plane_internal_base_url: str | None = None  # Internal URL for server-to-server calls
     enable_cimd: bool = False
+    token_expiry_threshold_seconds: int | None = None
+    access_token_expiry_seconds: int | None = None
 
     @field_validator("required_scopes", mode="before")
     @classmethod
@@ -106,8 +190,17 @@ class PlaneOAuthProviderSettings(BaseSettings):
 class PlaneOAuthTokenVerifier(TokenVerifier):
     """Token verifier for Plane OAuth tokens.
 
-    Plane OAuth tokens are verified by calling Plane's API to check if they're
-    valid and get user info.
+    Plane OAuth tokens are verified by calling Plane's API. Two failure classes
+    are kept strictly apart:
+
+    - **Definitive**: Plane answered 401/403 (or the app has no installation) —
+      the token is invalid, return ``None`` so the caller responds 401.
+    - **Transient**: Plane could not be reached or answered 5xx/429 — the token
+      may be perfectly valid. Serve the last successful verification from cache
+      (up to ``VERIFY_STALE_TTL_SECONDS``), retry once, and only then give up.
+
+    Successful verifications are cached for ``VERIFY_CACHE_TTL_SECONDS`` so a
+    burst of MCP requests does not become a burst of Plane API calls.
     """
 
     def __init__(
@@ -116,6 +209,10 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
         required_scopes: list[str] | None = None,
         timeout_seconds: int = 10,
         plane_base_url: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        retry_delay_seconds: float = 0.5,
+        cache_ttl_seconds: float | None = None,
+        stale_ttl_seconds: float | None = None,
     ):
         """Initialize the Plane token verifier.
 
@@ -123,44 +220,95 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
             required_scopes: Required OAuth scopes (currently not enforced by Plane API)
             timeout_seconds: HTTP request timeout
             plane_base_url: Base URL for Plane API (defaults to https://api.plane.so)
+            transport: Optional httpx transport override (used by tests)
+            retry_delay_seconds: Delay before the single retry on transient failure
+            cache_ttl_seconds: How long a successful verification is served without
+                revalidating (defaults to ``VERIFY_CACHE_TTL_SECONDS``)
+            stale_ttl_seconds: How long a previous successful verification may be
+                served when Plane is unavailable (defaults to ``VERIFY_STALE_TTL_SECONDS``)
         """
         super().__init__(required_scopes=required_scopes)
         self.timeout_seconds = timeout_seconds
         self.plane_base_url = plane_base_url or os.getenv("PLANE_BASE_URL", DEFAULT_PLANE_BASE_URL)
+        self._transport = transport
+        self._retry_delay_seconds = retry_delay_seconds
+        self._cache_ttl_seconds = VERIFY_CACHE_TTL_SECONDS if cache_ttl_seconds is None else cache_ttl_seconds
+        self._stale_ttl_seconds = VERIFY_STALE_TTL_SECONDS if stale_ttl_seconds is None else stale_ttl_seconds
+        self._cache = _VerificationCache(
+            max_entries=VERIFY_CACHE_MAX_ENTRIES,
+            evict_after_seconds=self._stale_ttl_seconds,
+        )
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        """Verify Plane OAuth token by calling Plane API."""
-        logger.info(f"verify_token called, token_present={bool(token)}, token_length={len(token) if token else 0}")
-        try:
-            # Build the user endpoint URL
-            base_url = self.plane_base_url.rstrip("/")
-            user_url = f"{base_url}/api/v1/users/me/"
-            logger.info(f"Verifying token against: {user_url}")
+        """Verify a Plane OAuth token, with caching and transient-failure grace."""
+        if not token:
+            return None
 
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                # Get current user info to verify token
-                response = await client.get(
-                    user_url,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
+        cached = self._cache.get(token, max_age_seconds=self._cache_ttl_seconds)
+        if cached is not None:
+            logger.debug("verify_token cache hit")
+            return cached
+
+        try:
+            access_token = await self._verify_upstream(token)
+        except TransientVerificationError as exc:
+            stale = self._cache.get(token, max_age_seconds=self._stale_ttl_seconds)
+            if stale is not None:
+                logger.warning("Plane API unavailable during verification (%s) — serving cached verification", exc)
+                return stale
+            # No cache to fall back on — retry once before giving up.
+            logger.warning("Plane API unavailable during verification (%s) — retrying once", exc)
+            await asyncio.sleep(self._retry_delay_seconds)
+            try:
+                access_token = await self._verify_upstream(token)
+            except TransientVerificationError as retry_exc:
+                logger.error(
+                    "Plane token verification unavailable after retry (%s) — request will fail with 401",
+                    retry_exc,
                 )
+                return None
+
+        if access_token is None:
+            # Definitive rejection — make sure no stale entry can resurrect it.
+            self._cache.discard(token)
+            return None
+
+        self._cache.put(token, access_token)
+        return access_token
+
+    async def _verify_upstream(self, token: str) -> AccessToken | None:
+        """Call Plane to verify the token.
+
+        Returns the AccessToken on success, ``None`` when Plane definitively
+        rejected the token, and raises :class:`TransientVerificationError` when
+        the answer is unknowable right now.
+        """
+        base_url = self.plane_base_url.rstrip("/")
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            # A short-lived client per verification is deliberate: the success
+            # cache makes upstream calls rare, and a pooled client would tie
+            # connections to a single event loop's lifetime.
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, transport=self._transport) as client:
+                response = await client.get(f"{base_url}/api/v1/users/me/", headers=headers)
 
                 logger.info(f"Plane API response status: {response.status_code}")
-                if response.status_code != 200:
+                if response.status_code in DEFINITIVE_REJECTION_STATUSES:
                     logger.info(
-                        "Plane token verification failed: %s - %s",
+                        "Plane token definitively rejected: %s - %s",
                         response.status_code,
                         response.text[:200],
                     )
                     return None
+                if response.status_code != 200:
+                    raise TransientVerificationError(f"/users/me/ returned {response.status_code}")
 
-                # Parse user data
                 user_data = response.json()
                 user = UserLite.model_validate(user_data)
-
-                expires_at = int(time.time() + 3600)
 
                 # display_name is PII — only log it when explicitly opted in.
                 if LOG_USER_INFO:
@@ -168,27 +316,35 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                 else:
                     logger.info(f"User verified: ({user.id})")
 
-                installations_response = await client.get(
-                    f"{base_url}/auth/o/app-installation/",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                )
+                installations_response = await client.get(f"{base_url}/auth/o/app-installation/", headers=headers)
 
-                installations: list[PlaneOAuthAppInstallation] = installations_response.json()
+                if installations_response.status_code in DEFINITIVE_REJECTION_STATUSES:
+                    logger.info(
+                        "App installation lookup definitively rejected: %s",
+                        installations_response.status_code,
+                    )
+                    return None
+                if installations_response.status_code != 200:
+                    raise TransientVerificationError(
+                        f"/auth/o/app-installation/ returned {installations_response.status_code}"
+                    )
 
+                installations = installations_response.json()
+                if not isinstance(installations, list):
+                    raise TransientVerificationError("/auth/o/app-installation/ returned a non-list payload")
                 if not installations:
-                    raise ValueError("No app installations found")
+                    # Genuine state: the MCP app is not installed in any
+                    # workspace for this token — nothing to serve.
+                    logger.info("No app installations found for token — treating as invalid")
+                    return None
 
-                installation = installations[0]
+                workspace_detail = installations[0].get("workspace_detail") or {}
 
-                # Create AccessToken with Plane user info
                 return AccessToken(
                     token=token,
                     client_id=user.id or "unknown",
                     scopes=["read", "write"],  # Plane doesn't expose scopes in user endpoint
-                    expires_at=expires_at,
+                    expires_at=int(time.time() + 3600),
                     claims={
                         "auth_method": "oauth",
                         "sub": user.id or "unknown",
@@ -199,17 +355,21 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                         "avatar": user.avatar,
                         "avatar_url": user.avatar_url,
                         "plane_user_data": user_data,
-                        "workspace_slug": installation.get("workspace_detail", {}).get("slug"),
-                        "workspace": installation.get("workspace_detail", {}),
+                        "workspace_slug": workspace_detail.get("slug"),
+                        "workspace": workspace_detail,
                     },
                 )
 
+        except TransientVerificationError:
+            raise
         except httpx.RequestError as e:
-            logger.info(f"Failed to verify Plane token (request error): {e}")
-            return None
+            # Timeouts, DNS failures, connection resets — all transient.
+            raise TransientVerificationError(f"request error: {e}") from e
         except Exception as e:
-            logger.info(f"Failed to verify Plane token: {e}", exc_info=True)
-            return None
+            # Unparseable payloads and other surprises say nothing about the
+            # token itself — never convert them into an auth failure.
+            logger.info(f"Unexpected error verifying Plane token: {e}", exc_info=True)
+            raise TransientVerificationError(f"unexpected error: {type(e).__name__}: {e}") from e
 
 
 class PlaneOAuthProvider(OAuthProxy):
@@ -258,6 +418,8 @@ class PlaneOAuthProvider(OAuthProxy):
         plane_base_url: str | NotSetT = NotSet,
         plane_internal_base_url: str | NotSetT = NotSet,
         enable_cimd: bool | NotSetT = NotSet,
+        token_expiry_threshold_seconds: int | NotSetT = NotSet,
+        access_token_expiry_seconds: int | NotSetT = NotSet,
     ):
         """Initialize Plane OAuth provider.
 
@@ -297,6 +459,16 @@ class PlaneOAuthProvider(OAuthProxy):
                 (defaults to https://api.plane.so or PLANE_BASE_URL env var)
             enable_cimd: Whether to enable CIMD (Client ID Metadata Document) support.
                 Defaults to False. Can be set via the PLANE_OAUTH_PROVIDER_ENABLE_CIMD environment variable.
+            token_expiry_threshold_seconds: Refresh the upstream Plane token this
+                many seconds before expiry (default 300). Avoids concurrent
+                sessions racing the refresh at the expiry boundary. Env:
+                PLANE_OAUTH_PROVIDER_TOKEN_EXPIRY_THRESHOLD_SECONDS.
+            access_token_expiry_seconds: Lifetime of the FastMCP-issued access
+                token, decoupled from the upstream Plane token's expires_in.
+                Unset mirrors the upstream lifetime. Safe to raise: the FastMCP
+                JWT is a reference token — the upstream token is still validated
+                on every request, so revocation is unaffected. Env:
+                PLANE_OAUTH_PROVIDER_ACCESS_TOKEN_EXPIRY_SECONDS.
         """
 
         settings = PlaneOAuthProviderSettings.model_validate(
@@ -315,6 +487,8 @@ class PlaneOAuthProvider(OAuthProxy):
                     "plane_base_url": plane_base_url,
                     "plane_internal_base_url": plane_internal_base_url,
                     "enable_cimd": enable_cimd,
+                    "token_expiry_threshold_seconds": token_expiry_threshold_seconds,
+                    "access_token_expiry_seconds": access_token_expiry_seconds,
                 }.items()
                 if v is not NotSet
             }
@@ -365,6 +539,14 @@ class PlaneOAuthProvider(OAuthProxy):
             require_authorization_consent=require_authorization_consent,
             valid_scopes=["read", "write"],
             enable_cimd=settings.enable_cimd,
+            # Proactive upstream refresh: avoid the expiry-boundary refresh race.
+            token_expiry_threshold_seconds=(
+                settings.token_expiry_threshold_seconds
+                if settings.token_expiry_threshold_seconds is not None
+                else DEFAULT_TOKEN_EXPIRY_THRESHOLD_SECONDS
+            ),
+            # None mirrors the upstream token lifetime (current behavior).
+            fastmcp_access_token_expiry_seconds=settings.access_token_expiry_seconds,
         )
 
         logger.info(

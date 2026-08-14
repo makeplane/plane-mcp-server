@@ -90,8 +90,16 @@ class TestOAuthRedirectAttack:
     the proxy will redirect to after the upstream callback completes.
     """
 
-    def _register_client(self, client: TestClient, redirect_uri: str) -> dict:
-        """Register an OAuth client with the given redirect_uri."""
+    def _register_client(self, client: TestClient, redirect_uri: str) -> dict | None:
+        """Register an OAuth client with the given redirect_uri.
+
+        Returns the registration payload, or ``None`` when the server rejects
+        the redirect_uri at registration time. FastMCP >= 3.4.3 validates
+        redirect URIs during DCR (blocking the attack at step 1); older
+        versions accepted registration and blocked at /authorize instead.
+        Both outcomes are secure — the tests below assert the invariant that
+        holds in either case: the malicious URI never receives a redirect.
+        """
         response = client.post(
             "/register",
             json={
@@ -101,6 +109,8 @@ class TestOAuthRedirectAttack:
                 "token_endpoint_auth_method": "client_secret_post",
             },
         )
+        if response.status_code == 400 and "invalid_redirect_uri" in response.text:
+            return None
         assert response.status_code == 201, f"Registration failed: {response.text}"
         data = response.json()
         assert "client_id" in data
@@ -117,6 +127,10 @@ class TestOAuthRedirectAttack:
 
         # Step 1: Attacker registers malicious client
         reg = self._register_client(client, attacker_uri)
+        if reg is None:
+            # Attack blocked at registration (DCR redirect URI validation) —
+            # the strongest outcome; nothing further to exercise.
+            return
 
         # Step 2: Attacker crafts authorization URL for victim
         response = client.get(
@@ -162,6 +176,9 @@ class TestOAuthRedirectAttack:
     def test_malicious_uris_never_appear_in_redirects(self, client: TestClient, malicious_uri: str) -> None:
         """Verify various attack vectors never leak into redirect locations."""
         reg = self._register_client(client, malicious_uri)
+        if reg is None:
+            # Rejected at registration — the URI can never reach a redirect.
+            return
 
         response = client.get(
             "/authorize",
