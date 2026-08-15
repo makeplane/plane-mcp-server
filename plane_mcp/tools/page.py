@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastmcp import FastMCP
-from plane.models.pages import CreatePage, Page
+from plane.models.pages import CreatePage, Page, UpdatePage
 from plane.models.query_params import PaginatedQueryParams
 from plane.models.work_item_pages import CreateWorkItemPage, WorkItemPage
 
@@ -30,6 +30,25 @@ ACTIONS = (
         ("name", "description_html"),
         ("project_id", "access", "color", "is_locked", "external_source", "external_id"),
     ),
+    Action(
+        "update",
+        ("page_id",),
+        ("project_id", "name", "description_html"),
+        note="pass name, description_html, or both; a locked or archived page is refused",
+    ),
+    Action(
+        "archive",
+        ("page_id",),
+        ("project_id", "archive"),
+        note="archive defaults to true; pass archive=false to restore",
+    ),
+    Action(
+        "delete",
+        ("page_id",),
+        ("project_id",),
+        note="requires the page to be archived first",
+        destructive=True,
+    ),
     Action("list_workitem_pages", ("project_id", "workitem_id"), read=True),
     Action("attach_to_workitem", ("project_id", "workitem_id", "page_id")),
     Action(
@@ -42,6 +61,7 @@ ACTIONS = (
 
 FOOTER = (
     "description_html is the page body as HTML. access is the page access level. "
+    "update changes only the fields you pass. A page must be archived before it can be deleted. "
     "Omit project_id to work with workspace-level pages."
 )
 
@@ -66,6 +86,9 @@ def register(mcp: FastMCP) -> None:
             "list",
             "retrieve",
             "create",
+            "update",
+            "archive",
+            "delete",
             "list_workitem_pages",
             "attach_to_workitem",
             "detach_from_workitem",
@@ -80,6 +103,7 @@ def register(mcp: FastMCP) -> None:
         access: int | None = None,
         color: str = "",
         is_locked: bool | None = None,
+        archive: bool = True,
         external_source: str = "",
         external_id: str = "",
         cursor: str = "",
@@ -105,6 +129,36 @@ def register(mcp: FastMCP) -> None:
                     workspace_slug=workspace_slug, project_id=project_id, page_id=page_id
                 )
             return client.pages.retrieve_workspace_page(workspace_slug=workspace_slug, page_id=page_id)
+
+        if action == "archive":
+            if not page_id:
+                return missing(action, "page_id")
+            if project_id:
+                mover = client.pages.archive_project_page if archive else client.pages.unarchive_project_page
+                mover(workspace_slug=workspace_slug, project_id=project_id, page_id=page_id)
+            else:
+                mover = client.pages.archive_workspace_page if archive else client.pages.unarchive_workspace_page
+                mover(workspace_slug=workspace_slug, page_id=page_id)
+            # Plane answers nothing, and delete depends on this having happened.
+            return {"page_id": page_id, "archived": archive}
+
+        if action in ("update", "delete"):
+            if not page_id:
+                return missing(action, "page_id")
+            scope = {"project_id": project_id} if project_id else {}
+            if action == "delete":
+                deleter = client.pages.delete_project_page if project_id else client.pages.delete_workspace_page
+                deleter(workspace_slug=workspace_slug, page_id=page_id, **scope)
+                return None
+            if not (name or description_html):
+                return missing(action, "name or description_html")
+            updater = client.pages.update_project_page if project_id else client.pages.update_workspace_page
+            return updater(
+                workspace_slug=workspace_slug,
+                page_id=page_id,
+                **scope,
+                data=UpdatePage(name=opt(name), description_html=opt(description_html)),
+            )
 
         if action == "create":
             if error := needs(action, name=name, description_html=description_html):

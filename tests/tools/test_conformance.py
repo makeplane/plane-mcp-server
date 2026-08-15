@@ -52,6 +52,7 @@ CATALOGUE = [
     "release_label",
     "release_tag",
     "state",
+    "template",
     "work_log",
     "workitem",
     "workitem_activity",

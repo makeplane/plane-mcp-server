@@ -48,9 +48,12 @@ def get_allowed_client_redirect_uris() -> list[str]:
     return allowed
 
 
+LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "false").lower() == "true"
+
+
 def _configured(mcp: FastMCP) -> FastMCP:
     """The middleware stack and tools every transport shares."""
-    mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
+    mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=LOG_PAYLOADS))
     mcp.add_middleware(CoerceArguments())
     mcp.add_middleware(ValidateActionArguments())
     register_tools(mcp)

@@ -30,11 +30,16 @@ SAMPLES: dict[str, object] = {
     "network": 2,
     "timezone": "UTC",
     "workitem_identifier": "ENG-42",
+    "kind": "workitem",
+    "template_data": '{"name": "Spec"}',
 }
 
 # Actions that require *one of* several optional parameters -- a condition the
 # declaration cannot express, so the case is spelled out here.
 CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
+    # An update has to carry a field to change; page_id alone is refused.
+    ("page", "update"): {"name": "Renamed"},
+    ("template", "update"): {"name": "Renamed"},
     ("cycle", "manage_workitems"): {"add_ids": "id-1"},
     ("module", "manage_workitems"): {"add_ids": "id-1"},
     ("milestone", "manage_workitems"): {"add_ids": "id-1"},
