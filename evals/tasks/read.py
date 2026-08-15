@@ -2,91 +2,71 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
-from evals.seed import CYCLE_CURRENT, R1_TITLE, R5_COMMENT_PHRASES, R5_TITLE
+from evals.fixtures import R1_TITLE, R5_TITLE
+from evals.state_oracle import state_name_group_pairs
 from evals.tasks.answers import (
+    answer_with_provenance,
     contract_values,
     get_final_text,
     reports_contract_int,
     reports_contract_value,
     reports_contract_values,
 )
-from evals.tasks.lookups import count_open_urgent, find_item_by_name, state_name
 
 
 async def verify_r1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R1: final text must report the API-resolved state via ``state: NAME``."""
-    workspace_slug = ctx["workspace_slug"]
-    project_id = ctx["project_id"]
-    title = R1_TITLE
-    item = find_item_by_name(plane, workspace_slug, project_id, title)
-    if item is None:
-        return False, f"seeded item {title!r} not found"
-    detail = plane.work_items.retrieve(workspace_slug=workspace_slug, project_id=project_id, work_item_id=item.id)
-    expected = state_name(plane, workspace_slug, project_id, detail.state)
+    """R1: final text reports the API-confirmed seed state with call provenance."""
+    expected = str(ctx.get("r1_state_name") or "")
     if not expected:
-        # Prefer the seeded name when API is sparse.
-        expected = ctx.get("r1_state_name")
-    if not expected:
-        return False, "could not resolve expected state name from API"
+        return answer_with_provenance(False, "API-confirmed seed state missing", run)
 
     final_text = get_final_text(run)
-    if not reports_contract_value(final_text, "state", expected):
-        return False, f"final text must contain exactly 'state: {expected}'"
-    return True, f"final text reports state {expected!r} via contract"
+    answer_correct = reports_contract_value(final_text, "state", expected)
+    answer_note = (
+        f"final text reports state {expected!r} via contract"
+        if answer_correct
+        else f"state values={contract_values(final_text, 'state')!r}; want [{expected!r}]"
+    )
+    return answer_with_provenance(answer_correct, answer_note, run)
 
 
 R1_TASK: dict[str, Any] = {
     "id": "R1",
-    "tags": {"read", "tier1"},
+    "tags": {"read"},
     "prompt": (
         "In project {project}, what is the current state of the work item titled "
         f"'{R1_TITLE}'? Return exactly one line: 'state: <exact state name>'."
     ),
-    "optimal_calls": 1,
-    "optimal_tools": {"list_work_items"},
-    "alternate_tools": {
-        "search_work_items",
-        "list_archived_work_items",
-        "count_work_items",
-        "retrieve_work_item",
-        "retrieve_work_item_by_identifier",
-        "list_projects",
-        "list_states",
-    },
     "needs": {"items"},
     "verify": verify_r1,
 }
 
 
 async def verify_r2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R2: final text reports the urgent-open count via ``count: N``."""
-    workspace_slug = ctx["workspace_slug"]
-    project_id = ctx["project_id"]
-    expected = count_open_urgent(plane, workspace_slug, project_id)
+    """R2: final text reports the API-confirmed seed count with call provenance."""
+    expected = ctx.get("r2_urgent_open_count")
+    if not isinstance(expected, int):
+        return answer_with_provenance(False, "API-confirmed urgent-open seed count missing", run)
     final_text = get_final_text(run)
-    if not reports_contract_int(final_text, expected):
-        return False, f"final text missing contract count: {expected} (need 'count: {expected}')"
-    return True, f"final text reports urgent-open count {expected} via contract"
+    answer_correct = reports_contract_int(final_text, expected)
+    answer_note = (
+        f"final text reports urgent-open count {expected} via contract"
+        if answer_correct
+        else f"final text missing contract count: {expected} (need 'count: {expected}')"
+    )
+    return answer_with_provenance(answer_correct, answer_note, run)
 
 
 R2_TASK: dict[str, Any] = {
     "id": "R2",
-    "tags": {"read", "tier1"},
+    "tags": {"read"},
     "prompt": (
         "In project {project}, how many urgent open work items are there? "
         "Return exactly one line of the form 'count: N', where N is the integer count."
     ),
-    "optimal_calls": 1,
-    "optimal_tools": {"count_work_items"},
-    "alternate_tools": {
-        "list_work_items",
-        "search_work_items",
-        "list_projects",
-        "list_states",
-        "get_pql_reference",
-    },
     "needs": {"items"},
     "verify": verify_r2,
 }
@@ -96,30 +76,24 @@ async def verify_r3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     """R3: ``item: TITLE`` lines exactly match the seeded due-title set."""
     titles = list(ctx.get("r3_due_titles") or [])
     if not titles:
-        return False, "no R3 due titles in seed ctx"
+        return answer_with_provenance(False, "no API-confirmed R3 due titles in seed ctx", run)
     final_text = get_final_text(run)
-    if not reports_contract_values(final_text, "item", titles):
-        return False, f"item contract values={contract_values(final_text, 'item')!r}; want {titles!r}"
-    return True, f"final text reports exactly {len(titles)} due-this-week assigned items"
+    answer_correct = reports_contract_values(final_text, "item", titles)
+    answer_note = (
+        f"final text reports exactly {len(titles)} due-this-week assigned items"
+        if answer_correct
+        else f"item contract values={contract_values(final_text, 'item')!r}; want {titles!r}"
+    )
+    return answer_with_provenance(answer_correct, answer_note, run)
 
 
 R3_TASK: dict[str, Any] = {
     "id": "R3",
-    "tags": {"read", "tier1"},
+    "tags": {"read"},
     "prompt": (
         "In project {project}, list work items assigned to me that are due this week. "
         "Return one line per result as 'item: <exact work item title>' and no other 'item:' lines."
     ),
-    "optimal_calls": 2,
-    "optimal_tools": {"get_me", "list_work_items"},
-    "alternate_tools": {
-        "search_work_items",
-        "count_work_items",
-        "list_projects",
-        "get_workspace_members",
-        "get_pql_reference",
-        "retrieve_work_item",
-    },
     "needs": {"items"},
     "verify": verify_r3,
 }
@@ -130,14 +104,17 @@ async def verify_r4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     final_text = get_final_text(run)
     notes: list[str] = []
     ok = True
-    if not reports_contract_value(final_text, "cycle", CYCLE_CURRENT):
+    cycle_name = str(ctx.get("r4_cycle_name") or "")
+    if not cycle_name:
         ok = False
-        notes.append(f"cycle values={contract_values(final_text, 'cycle')!r}; want [{CYCLE_CURRENT!r}]")
+        notes.append("API-confirmed active-cycle name missing from seed ctx")
+    elif not reports_contract_value(final_text, "cycle", cycle_name):
+        ok = False
+        notes.append(f"cycle values={contract_values(final_text, 'cycle')!r}; want [{cycle_name!r}]")
     else:
-        notes.append(f"cycle={CYCLE_CURRENT!r}")
+        notes.append(f"cycle={cycle_name!r}")
 
-    active_ids = {str(value) for value in (ctx.get("r4_active_item_ids") or [])}
-    active_titles = [str(title) for title, item_id in (ctx.get("items") or {}).items() if str(item_id) in active_ids]
+    active_titles = [str(value) for value in (ctx.get("r4_active_titles") or [])]
     if not active_titles:
         ok = False
         notes.append("no active-cycle titles in seed ctx")
@@ -147,35 +124,26 @@ async def verify_r4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     else:
         notes.append(f"{len(active_titles)} active-cycle items")
 
-    overdue = str(ctx.get("r4_overdue_title") or "")
-    expected_overdue = [overdue] if overdue else ["none"]
+    overdue_titles = [str(value) for value in (ctx.get("r4_overdue_titles") or [])]
+    expected_overdue = overdue_titles or ["none"]
     if not reports_contract_values(final_text, "overdue", expected_overdue):
         ok = False
         notes.append(f"overdue values={contract_values(final_text, 'overdue')!r}; want {expected_overdue!r}")
     else:
         notes.append(f"overdue={expected_overdue!r}")
-    return ok, "; ".join(notes)
+    return answer_with_provenance(ok, "; ".join(notes), run)
 
 
 R4_TASK: dict[str, Any] = {
     "id": "R4",
-    "tags": {"read", "tier1"},
+    "tags": {"read"},
     "prompt": (
         "In project {project}, what is in the active cycle, and is anything overdue? "
-        f"Use these exact contract lines: one 'cycle: {CYCLE_CURRENT}' line, one "
+        "Use these exact contract lines: one 'cycle: <exact active cycle name>' line, one "
         "'item: <exact work item title>' line for every item in that cycle, and one "
         "'overdue: <exact work item title>' line for every overdue item. If none "
         "are overdue, use 'overdue: none'."
     ),
-    "optimal_calls": 2,
-    "optimal_tools": {"list_cycles", "list_work_items"},
-    "alternate_tools": {
-        "list_cycle_work_items",
-        "retrieve_cycle",
-        "search_work_items",
-        "list_projects",
-        "get_pql_reference",
-    },
     "needs": {"items", "cycles"},
     "verify": verify_r4,
 }
@@ -183,31 +151,28 @@ R4_TASK: dict[str, Any] = {
 
 async def verify_r5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
     """R5: ``comment: TEXT`` lines exactly match the seeded comments."""
-    phrases = list(ctx.get("r5_comment_phrases") or R5_COMMENT_PHRASES)
+    phrases = list(ctx.get("r5_comment_phrases") or [])
+    if not phrases:
+        return answer_with_provenance(False, "no API-confirmed R5 comments in seed ctx", run)
     final_text = get_final_text(run)
-    if not reports_contract_values(final_text, "comment", phrases):
-        return False, f"comment values={contract_values(final_text, 'comment')!r}; want {phrases!r}"
-    return True, f"final text reports exactly {len(phrases)} seeded comments"
+    answer_correct = reports_contract_values(final_text, "comment", phrases)
+    answer_note = (
+        f"final text reports exactly {len(phrases)} seeded comments"
+        if answer_correct
+        else f"comment values={contract_values(final_text, 'comment')!r}; want {phrases!r}"
+    )
+    return answer_with_provenance(answer_correct, answer_note, run)
 
 
 R5_TASK: dict[str, Any] = {
     "id": "R5",
-    "tags": {"read", "tier1"},
+    "tags": {"read"},
     "prompt": (
         f"In project {{project}}, summarize the discussion on the work item titled '{R5_TITLE}'. "
         "You may summarize in prose, but end with one contract line per comment: "
         "'comment: <exact comment text>'. Copy the comment text exactly and include "
         "no other 'comment:' lines."
     ),
-    "optimal_calls": 2,
-    "optimal_tools": {"list_work_items", "list_work_item_comments"},
-    "alternate_tools": {
-        "search_work_items",
-        "retrieve_work_item",
-        "retrieve_work_item_by_identifier",
-        "list_work_item_activities",
-        "list_projects",
-    },
     "needs": {"items"},
     "verify": verify_r5,
 }
@@ -215,78 +180,69 @@ R5_TASK: dict[str, Any] = {
 
 async def verify_r6(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
     """R6: final text reports the winning project via ``project: NAME``."""
-    expected = ctx.get("r6_more_bugs_project") or ctx.get("second_project_name")
+    expected = str(ctx.get("r6_more_bugs_project") or "")
     if not expected:
-        return False, "second project name missing from seed ctx"
+        return answer_with_provenance(False, "API-confirmed R6 winner missing from seed ctx", run)
     final_text = get_final_text(run)
-    if not reports_contract_value(final_text, "project", expected):
-        return False, f"project values={contract_values(final_text, 'project')!r}; want [{expected!r}]"
-    return True, f"final text reports project with more bugs {expected!r}"
+    answer_correct = reports_contract_value(final_text, "project", expected)
+    answer_note = (
+        f"final text reports project with more bugs {expected!r}"
+        if answer_correct
+        else f"project values={contract_values(final_text, 'project')!r}; want [{expected!r}]"
+    )
+    return answer_with_provenance(answer_correct, answer_note, run)
 
 
 R6_TASK: dict[str, Any] = {
     "id": "R6",
-    "tags": {"read", "tier1"},
+    "tags": {"read"},
     "prompt": (
         "Across the eval projects created for this run (main project {project} and its "
         "sibling 'B' project), which project has more open Bug-typed work items? "
         "Return exactly one line: 'project: <exact project name>'."
     ),
-    "optimal_calls": 3,
-    "optimal_tools": {"list_projects", "list_work_items", "resolve_work_item_type"},
-    "alternate_tools": {
-        "count_work_items",
-        "search_work_items",
-        "list_work_item_types",
-        "retrieve_project",
-        "get_pql_reference",
-    },
     "needs": {"items", "bug_type", "second_project"},
     "verify": verify_r6,
 }
 
 
 async def verify_r7(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R7 (extra): contract names project states or explicitly says unrestricted.
-
-    This preserves the verifier's existing semantic ceiling: the full surface
-    exposes project states, not authoritative workflow transition evaluation.
-    The output match itself is structural and exact.
-    """
+    """R7: report the immutable state/group baseline with target-response evidence."""
+    baseline = [str(value) for value in (ctx.get("r7_state_pairs") or [])]
+    if not baseline:
+        return answer_with_provenance(False, "R7 fixture error: seeded state baseline is empty", run)
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     page = plane.states.list(workspace_slug=workspace_slug, project_id=project_id)
-    names = [(s.name or "").strip() for s in (page.results or []) if (s.name or "").strip()]
+    states = list(page.results or [])
+    live = state_name_group_pairs(states)
+    if Counter(live) != Counter(baseline):
+        return answer_with_provenance(
+            False,
+            f"state oracle was mutated after seeding: live={live!r}; baseline={baseline!r}",
+            run,
+        )
+
     final_text = get_final_text(run)
-    reported = contract_values(final_text, "transition")
-    if reported == ["unrestricted"]:
-        return True, "agent reported unrestricted transitions"
-    if not reported:
-        return False, "final text has no 'transition: <state>' contract lines"
-    unknown = [value for value in reported if value not in names]
-    if unknown:
-        return False, f"transition values {unknown!r} are not exact project state names; have {names!r}"
-    return True, f"final text reports project state(s) {reported!r} via contract"
+    if not reports_contract_values(final_text, "state", baseline):
+        reported = contract_values(final_text, "state")
+        return answer_with_provenance(
+            False,
+            f"state values={reported!r}; want seeded state/group pairs {baseline!r}",
+            run,
+        )
+    return answer_with_provenance(True, f"final text reports all {len(baseline)} seeded state/group pairs", run)
 
 
 R7_TASK: dict[str, Any] = {
     "id": "R7",
-    "tags": {"read", "tier1", "extra"},
+    "tags": {"read", "extra"},
     "prompt": (
-        f"In project {{project}}, what states can the work item '{R1_TITLE}' "
-        "legally transition to under workflow rules? Return one line per state as "
-        "'transition: <exact state name>'. If transitions are unrestricted, return "
-        "exactly 'transition: unrestricted'."
+        "List every workflow state in project {project} and its group. Return exactly "
+        "one line per state as 'state: <exact state name> | group: <exact state group>'."
     ),
-    # Extra: exercises list_available_transitions.
-    "optimal_calls": 2,
-    "optimal_tools": {"list_work_items", "list_states"},
-    "alternate_tools": {
-        "retrieve_work_item",
-        "search_work_items",
-        "list_projects",
-    },
-    "needs": {"items"},
+    # Extra: exercises project state listing.
+    "needs": set(),
     "verify": verify_r7,
 }
 

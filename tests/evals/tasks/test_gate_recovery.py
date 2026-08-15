@@ -17,6 +17,7 @@ import pytest
 from plane.errors.errors import HttpError
 
 from evals.tasks.catalog import TASKS_BY_ID
+from evals.tasks.verification import VerifierReadError
 from evals.tasks.write import W11_TITLE, verify_w11
 
 WORKLOG_DISABLED = HttpError("Not found", 404, {"message": "Worklog is not enabled for the project"})
@@ -101,7 +102,7 @@ def test_a_do_nothing_agent_fails():
 def test_an_unexpected_error_is_not_swallowed_as_a_disabled_feature():
     """Only the 'worklog disabled' 404 is read as the obstacle; anything else is a bug."""
     plane = _plane(logs=HttpError("Server error", 500, {"error": "boom"}))
-    with pytest.raises(HttpError):
+    with pytest.raises(VerifierReadError, match="W11 verifier read failed while listing work logs"):
         asyncio.run(verify_w11(plane, dict(CTX), {"final_text": ""}))
 
 
@@ -112,4 +113,3 @@ def test_task_seeds_time_tracking_off_and_authorises_turning_it_on():
     # Without explicit permission, an agent that declines to change project-wide config is
     # arguably behaving better, and scoring the enable as success would reward overreach.
     assert "permission" in task["prompt"].lower()
-    assert task["optimal_calls"] > TASKS_BY_ID["W8"]["optimal_calls"], "recovery costs a call"

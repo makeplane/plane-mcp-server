@@ -1,12 +1,5 @@
-"""Task skip signal."""
+"""Backward-compatible task-skip import path."""
 
-
-class TaskSkipped(Exception):
-    """Verifier signals that this task-rep should be recorded as skipped, not failed."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
-
+from evals.errors import TaskSkipped as TaskSkipped
 
 __all__ = ["TaskSkipped"]

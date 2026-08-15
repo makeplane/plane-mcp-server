@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from plane.errors.errors import HttpError
@@ -23,6 +24,32 @@ def ids(items: Any) -> set[str]:
         if i:
             out.add(str(i))
     return out
+
+
+def collect_paginated(fetch_page: Callable[[str | None], Any]) -> list[Any]:
+    """Collect every result from a cursor-paginated SDK endpoint.
+
+    ``fetch_page`` receives ``None`` for the first request and the prior response's
+    ``next_cursor`` thereafter. Endpoints documented as unpaginated may return a bare
+    list; in that case the list is already complete.
+    """
+    rows: list[Any] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    while True:
+        page = fetch_page(cursor)
+        if isinstance(page, list):
+            rows.extend(page)
+            return rows
+        results = page.results if hasattr(page, "results") else page
+        rows.extend(list(results or []))
+        if not bool(getattr(page, "next_page_results", False)):
+            return rows
+        next_cursor = str(getattr(page, "next_cursor", None) or "")
+        if not next_cursor or next_cursor in seen_cursors:
+            raise RuntimeError("paginated API reported another page without a new next_cursor")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
 
 
 def find_items_by_name(plane: Any, workspace_slug: str, project_id: str, name: str) -> list[Any]:
@@ -89,7 +116,8 @@ def state_group(plane: Any, workspace_slug: str, project_id: str, state_ref: Any
     if not state_id:
         return None
     page = plane.states.list(workspace_slug=workspace_slug, project_id=project_id)
-    for s in page.results or []:
+    results = page.results if hasattr(page, "results") else page
+    for s in results or []:
         if str(s.id) == str(state_id):
             return getattr(s, "group", None)
     return None
@@ -123,6 +151,7 @@ def count_open_urgent(plane: Any, workspace_slug: str, project_id: str) -> int:
 
 __all__ = [
     "as_id",
+    "collect_paginated",
     "count_open_urgent",
     "find_item_by_name",
     "find_items_by_name",

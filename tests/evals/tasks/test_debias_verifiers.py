@@ -6,6 +6,7 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+from evals.evidence import TARGET_ENTITY_EVIDENCE
 from evals.seed import W2_TITLE
 from evals.tasks.debias import (
     I1_TITLE,
@@ -38,7 +39,18 @@ class _Page:
 
 
 def _run(text: str = "") -> dict[str, Any]:
-    return {"final_text": text, "calls": []}
+    return {
+        "final_text": text,
+        "calls": [
+            {
+                "tool": "plane_call",
+                "is_error": False,
+                "observed_sentinels": [TARGET_ENTITY_EVIDENCE],
+            }
+        ],
+        "call_source": "test",
+        "evidence_trace_available": True,
+    }
 
 
 def _item(id: str, name: str, **kw: Any) -> SimpleNamespace:
@@ -166,7 +178,12 @@ def test_i2_requires_the_state_contract_to_name_the_real_state():
         def plane_for(states):
             return _WIRetrievePlane(by_id={"wi-2": SimpleNamespace(id="wi-2", state=BACKLOG)}, states=states)
 
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {W2_TITLE: "wi-2"}}
+        ctx = {
+            "workspace_slug": "ws",
+            "project_id": "p1",
+            "items": {W2_TITLE: "wi-2"},
+            "i2_state_name": "Backlog",
+        }
         cases = [
             ("untouched: empty answer", [BACKLOG], "", False),
             ("names a different state", [BACKLOG, DONE], "Done", False),
@@ -242,7 +259,12 @@ def test_l1_grades_the_duration_contract_not_the_prose():
     """
 
     async def _go():
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L1_TITLE: "wi-l1"}}
+        ctx = {
+            "workspace_slug": "ws",
+            "project_id": "p1",
+            "items": {L1_TITLE: "wi-l1"},
+            "l1_expected_summary_ids": ["wi-l1"],
+        }
         cases = [
             ("untouched: no worklog", [], None, "", False, ()),
             ("wrong duration 120", [120], ["wi-l1"], "Logged 120 minutes; summary ok.", False, ("90",)),
@@ -280,12 +302,25 @@ def test_l1_grades_the_duration_contract_not_the_prose():
         )
         assert "duration" in note.lower() or "90" in note or "1.5" in note, note
 
+        mutated_ok, mutated_note = await verify_l1(
+            _L1Plane([90], summary_ids=["wi-l1", "agent-added"]),
+            dict(ctx),
+            _run("logged-minutes: 90\nsummary-work-item-id: wi-l1\nsummary-work-item-id: agent-added"),
+        )
+        assert mutated_ok is False
+        assert "mutated beyond the seeded oracle" in mutated_note
+
     return asyncio.run(_go())
 
 
 def test_l2_counts_activities_through_the_contract_only():
     async def _go():
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L2_TITLE: "wi-l2"}}
+        ctx = {
+            "workspace_slug": "ws",
+            "project_id": "p1",
+            "items": {L2_TITLE: "wi-l2"},
+            "l2_activity_count": 3,
+        }
         cases = [
             ("untouched: empty answer", "", False),
             ("contract matches truth 3", "Saw some history.\ncount: 3", True),
@@ -343,18 +378,23 @@ def test_l4_matches_the_property_on_name_type_and_value():
     return asyncio.run(_go())
 
 
-def test_l5_accepts_a_zero_count_only_through_the_contract():
+def test_l5_accepts_the_api_confirmed_count_only_through_the_contract():
     async def _go():
-        ctx = {"workspace_slug": "ws", "project_id": "p1", "items": {L5_TITLE: "wi-l5"}}
+        ctx = {
+            "workspace_slug": "ws",
+            "project_id": "p1",
+            "items": {L5_TITLE: "wi-l5"},
+            "l5_attachment_count": 2,
+        }
         cases = [
             ("untouched: empty answer", "", False),
-            ("bare zero as the whole answer", "0", True),
-            ("multiline ending in the contract", "No files on this work item.\ncount: 0", True),
-            ("prose without contract", "There are 0 attachments.", False),
+            ("bare count as the whole answer", "2", True),
+            ("multiline ending in the contract", "Two files on this work item.\ncount: 2", True),
+            ("prose without contract", "There are 2 attachments.", False),
             ("contract with the wrong count", "count: 10", False),
         ]
         for label, text, want in cases:
-            ok, note = await verify_l5(_L5Plane(0), dict(ctx), _run(text))
+            ok, note = await verify_l5(_L5Plane(2), dict(ctx), _run(text))
             assert ok is want, f"{label}: {note}"
 
     return asyncio.run(_go())

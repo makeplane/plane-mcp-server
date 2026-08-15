@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from html import unescape
 from typing import Any
+
+from evals.evidence import TARGET_ENTITY_EVIDENCE
 
 
 def word_boundary(value: str) -> re.Pattern[str]:
@@ -101,9 +104,86 @@ def get_final_text(run: dict[str, Any]) -> str:
     return run.get("final_text") or ""
 
 
+def normalize_rich_text(value: Any) -> str:
+    """Return exact comparable text from a rich-text API model, mapping, or string.
+
+    Prefer authoritative stripped fields when the API exposes them, then normalize HTML
+    entities, tags, and whitespace. Case and punctuation remain significant.
+    """
+
+    def field(name: str) -> Any:
+        return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+    candidates = (
+        value if isinstance(value, str) else None,
+        field("comment_stripped"),
+        field("description_stripped"),
+        field("comment_html"),
+        field("description_html"),
+    )
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            without_tags = re.sub(r"<[^>]*>", " ", candidate)
+            return " ".join(unescape(without_tags).split())
+    return ""
+
+
+def has_response_evidence(run: dict[str, Any], label: str = TARGET_ENTITY_EVIDENCE) -> bool:
+    """Return whether a successful Plane response exposed the target's hidden fact.
+
+    Tool identity is deliberately irrelevant. The transport records only non-sensitive
+    sentinel labels after matching the in-memory response; no response body is required.
+    """
+    calls = run.get("calls")
+    if not isinstance(calls, list):
+        return False
+    return any(
+        isinstance(call, dict) and not bool(call.get("is_error")) and label in (call.get("observed_sentinels") or [])
+        for call in calls
+    )
+
+
+def answer_with_provenance(
+    answer_correct: bool,
+    answer_note: str,
+    run: dict[str, Any],
+) -> tuple[bool, str]:
+    """Combine answer correctness with route-agnostic response evidence.
+
+    The two facts stay separate in the note. A successful unrelated call has no target
+    label and therefore cannot satisfy provenance.
+    """
+    calls = run.get("calls")
+    source = str(run.get("call_source") or "unknown")
+    driver_notes = run.get("driver_notes")
+    trace_incomplete = isinstance(driver_notes, list) and any(
+        isinstance(note, str) and note.startswith("proxy_sidecar_incomplete") for note in driver_notes
+    )
+    available = bool(run.get("evidence_trace_available"))
+    provenance = not trace_incomplete and has_response_evidence(run)
+    if trace_incomplete:
+        provenance_note = f"trace incomplete (source={source}; proxy sidecar was not authoritative)"
+    elif provenance:
+        provenance_note = f"observed target-entity response evidence (source={source})"
+    elif not available:
+        provenance_note = f"unavailable (source={source}; response-evidence matching was not active)"
+    elif isinstance(calls, list) and calls:
+        successful = sum(1 for call in calls if isinstance(call, dict) and not bool(call.get("is_error")))
+        provenance_note = (
+            f"missing (0 evidence-bearing of {successful} successful Plane calls; {len(calls)} total; source={source})"
+        )
+    else:
+        provenance_note = f"missing (0 Plane calls observed; source={source})"
+    note = f"answer_correct={str(bool(answer_correct)).lower()} ({answer_note}); provenance={provenance_note}"
+    return bool(answer_correct) and provenance, note
+
+
 __all__ = [
     "contract_values",
+    "answer_with_provenance",
     "get_final_text",
+    "has_response_evidence",
+    "normalize_rich_text",
     "reports_contract_int",
     "reports_contract_value",
     "reports_contract_values",

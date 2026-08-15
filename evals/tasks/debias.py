@@ -6,7 +6,7 @@ from typing import Any
 
 from plane.models.query_params import RetrieveQueryParams
 
-from evals.seed import (
+from evals.fixtures import (
     CUSTOMER_NAME,
     CYCLE_CURRENT,
     DEBIAS_CUSTOMER_PROP_DISPLAY,
@@ -18,13 +18,15 @@ from evals.seed import (
     W8_TITLE,
 )
 from evals.tasks.answers import (
+    answer_with_provenance,
     contract_values,
     get_final_text,
     reports_contract_int,
     reports_contract_value,
     reports_contract_values,
 )
-from evals.tasks.lookups import ids, state_name
+from evals.tasks.lookups import collect_paginated, ids
+from evals.tasks.verification import raise_verifier_read_error
 
 I1_TITLE = R1_TITLE
 
@@ -101,56 +103,38 @@ async def verify_i1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 I1_TASK: dict[str, Any] = {
     "id": "I1",
     "author": "post-hoc-debias",
-    "tags": {"write", "tier1", "id_in_hand", "debias"},
+    "tags": {"write", "id_in_hand", "debias"},
     "prompt": ("In project {project}, update work item {work_item_id}: set its priority to high."),
     "prompt_bind": _bind_item_uuid(I1_TITLE),
-    "optimal_calls": 1,
-    "optimal_tools": {"update_work_item"},
-    "alternate_tools": {
-        "retrieve_work_item",
-        "list_work_items",
-        "search_work_items",
-        "retrieve_work_item_by_identifier",
-    },
     "needs": {"items"},
     "verify": verify_i1,
 }
 
 
 async def verify_i2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """I2: final text reports the identifier-target state via ``state: NAME``."""
-    workspace_slug = ctx["workspace_slug"]
-    project_id = ctx["project_id"]
-    wid = (ctx.get("items") or {}).get(I2_TITLE)
-    if not wid:
-        return False, f"seed item {I2_TITLE!r} missing"
-    detail = plane.work_items.retrieve(workspace_slug=workspace_slug, project_id=project_id, work_item_id=wid)
-    name = state_name(plane, workspace_slug, project_id, detail.state)
+    """I2: final text reports the API-confirmed seed state with call provenance."""
+    name = str(ctx.get("i2_state_name") or "")
     if not name:
-        return False, "target state name unresolved"
+        return answer_with_provenance(False, "API-confirmed target state missing from seed ctx", run)
     final_text = get_final_text(run)
-    if reports_contract_value(final_text, "state", name):
-        return True, f"final text reports state {name!r} via contract"
-    return False, f"state values={contract_values(final_text, 'state')!r}; want [{name!r}]"
+    answer_correct = reports_contract_value(final_text, "state", name)
+    answer_note = (
+        f"final text reports state {name!r} via contract"
+        if answer_correct
+        else f"state values={contract_values(final_text, 'state')!r}; want [{name!r}]"
+    )
+    return answer_with_provenance(answer_correct, answer_note, run)
 
 
 I2_TASK: dict[str, Any] = {
     "id": "I2",
     "author": "post-hoc-debias",
-    "tags": {"read", "tier1", "id_in_hand", "debias"},
+    "tags": {"read", "id_in_hand", "debias"},
     "prompt": (
         "In project {project}, what is the current state of work item "
         "{work_item_identifier}? Return exactly one line: 'state: <exact state name>'."
     ),
     "prompt_bind": _bind_item_identifier(I2_TITLE),
-    "optimal_calls": 1,
-    "optimal_tools": {"retrieve_work_item_by_identifier"},
-    "alternate_tools": {
-        "retrieve_work_item",
-        "list_work_items",
-        "search_work_items",
-        "list_states",
-    },
     "needs": {"items"},
     "verify": verify_i2,
 }
@@ -181,17 +165,9 @@ async def verify_i3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 I3_TASK: dict[str, Any] = {
     "id": "I3",
     "author": "post-hoc-debias",
-    "tags": {"write", "tier1", "id_in_hand", "debias"},
+    "tags": {"write", "id_in_hand", "debias"},
     "prompt": ("In project {project}, add work item {work_item_id} to cycle {cycle_id}."),
     "prompt_bind": _bind_i3,
-    "optimal_calls": 1,
-    "optimal_tools": {"manage_cycle_work_items"},
-    "alternate_tools": {
-        "list_cycles",
-        "list_cycle_work_items",
-        "list_work_items",
-        "retrieve_cycle",
-    },
     "needs": {"items", "cycles"},
     "verify": verify_i3,
 }
@@ -220,17 +196,9 @@ async def verify_i4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 I4_TASK: dict[str, Any] = {
     "id": "I4",
     "author": "post-hoc-debias",
-    "tags": {"write", "tier1", "id_in_hand", "debias"},
+    "tags": {"write", "id_in_hand", "debias"},
     "prompt": ("In project {project}, attach label {label_id} to work item {work_item_id}."),
     "prompt_bind": _bind_i4,
-    "optimal_calls": 1,
-    "optimal_tools": {"manage_work_item_label"},
-    "alternate_tools": {
-        "update_work_item",
-        "list_labels",
-        "retrieve_work_item",
-        "list_work_items",
-    },
     "needs": {"items", "labels"},
     "verify": verify_i4,
 }
@@ -253,41 +221,41 @@ async def verify_i5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 I5_TASK: dict[str, Any] = {
     "id": "I5",
     "author": "post-hoc-debias",
-    "tags": {"write", "tier1", "id_in_hand", "debias"},
+    "tags": {"write", "id_in_hand", "debias"},
     "prompt": ("In project {project}, set the priority of work item {work_item_id} to low."),
     "prompt_bind": _bind_item_uuid(I3_TITLE),  # footer item; not high-traffic elsewhere
-    "optimal_calls": 1,
-    "optimal_tools": {"update_work_item"},
-    "alternate_tools": {
-        "retrieve_work_item",
-        "list_work_items",
-        "search_work_items",
-    },
     "needs": {"items"},
     "verify": verify_i5,
 }
 
 
 async def verify_l1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """L1: 90-minute log exists and exact contract lines report the API summary."""
+    """L1: 90-minute log exists and reporting uses an immutable target-id oracle."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     wid = (ctx.get("items") or {}).get(L1_TITLE)
     if not wid:
-        return False, f"seed item {L1_TITLE!r} missing"
+        return answer_with_provenance(False, f"seed item {L1_TITLE!r} missing", run)
+    expected_summary_ids = [str(value) for value in (ctx.get("l1_expected_summary_ids") or [])]
+    if expected_summary_ids != [str(wid)]:
+        return answer_with_provenance(
+            False,
+            f"L1 fixture oracle mismatch: summary ids={expected_summary_ids!r}; target={wid!r}",
+            run,
+        )
     # SDK: 90m log must be on THIS work item (list is already scoped to work_item_id).
     logs = plane.work_items.work_logs.list(workspace_slug=workspace_slug, project_id=project_id, work_item_id=wid)
     rows = logs if isinstance(logs, list) else (logs.results if hasattr(logs, "results") else logs)
     durations = [int(getattr(w, "duration", 0) or 0) for w in (rows or [])]
     if 90 not in durations:
-        return False, f"no 90-minute work log on target item {wid}; durations={durations}"
+        return answer_with_provenance(False, f"no 90-minute work log on target item {wid}; durations={durations}", run)
 
     try:
         summary = plane.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
         raw = summary if isinstance(summary, list) else (getattr(summary, "results", None) or summary or [])
         sum_rows = list(raw or [])
     except Exception as exc:
-        return False, f"project worklog summary failed: {exc}"
+        raise_verifier_read_error("L1", "reading the project worklog summary", exc)
 
     summary_ids: list[str] = []
     for row in sum_rows:
@@ -299,22 +267,44 @@ async def verify_l1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
         if item_id and item_id not in summary_ids:
             summary_ids.append(item_id)
     if str(wid) not in summary_ids:
-        return False, f"target item {wid} missing from project worklog summary ids={summary_ids!r}"
+        return answer_with_provenance(
+            False,
+            f"target item {wid} missing from project worklog summary ids={summary_ids!r}",
+            run,
+        )
+    if sorted(summary_ids) != sorted(expected_summary_ids):
+        return answer_with_provenance(
+            False,
+            f"worklog summary was mutated beyond the seeded oracle: live={summary_ids!r}; "
+            f"expected={expected_summary_ids!r}",
+            run,
+        )
 
     final_text = get_final_text(run)
     if not reports_contract_value(final_text, "logged-minutes", "90"):
-        return False, f"logged-minutes values={contract_values(final_text, 'logged-minutes')!r}; want ['90']"
-    if not reports_contract_values(final_text, "summary-work-item-id", summary_ids):
-        return False, (
-            f"summary-work-item-id values={contract_values(final_text, 'summary-work-item-id')!r}; want {summary_ids!r}"
+        return answer_with_provenance(
+            False,
+            f"logged-minutes values={contract_values(final_text, 'logged-minutes')!r}; want ['90']",
+            run,
         )
-    return True, f"90m log on {wid} + exact contract for {len(summary_ids)} summary row(s)"
+    if not reports_contract_values(final_text, "summary-work-item-id", expected_summary_ids):
+        return answer_with_provenance(
+            False,
+            f"summary-work-item-id values={contract_values(final_text, 'summary-work-item-id')!r}; "
+            f"want {expected_summary_ids!r}",
+            run,
+        )
+    return answer_with_provenance(
+        True,
+        f"90m log on {wid} + exact contract for {len(expected_summary_ids)} immutable summary row(s)",
+        run,
+    )
 
 
 L1_TASK: dict[str, Any] = {
     "id": "L1",
     "author": "post-hoc-debias",
-    "tags": {"write", "read", "tier1", "long_tail", "debias"},
+    "tags": {"write", "read", "long_tail", "debias"},
     "prompt": (
         f"In project {{project}}, log 1.5 hours (90 minutes) of work on the item titled "
         f"'{L1_TITLE}', then report the project's worklog summary. End with exactly "
@@ -322,58 +312,36 @@ L1_TASK: dict[str, Any] = {
         "'summary-work-item-id: <exact work item UUID>' line for every row returned "
         "by the project worklog summary. Include no other lines with those prefixes."
     ),
-    "optimal_calls": 3,
-    "optimal_tools": {"list_work_items", "create_work_log", "get_project_worklog_summary"},
-    "alternate_tools": {
-        "search_work_items",
-        "list_work_logs",
-        "retrieve_work_item",
-        "list_projects",
-    },
     "needs": {"items"},
     "verify": verify_l1,
 }
 
 
 async def verify_l2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """L2: target has activities; final text reports the count via ``count: N`` contract."""
-    workspace_slug = ctx["workspace_slug"]
-    project_id = ctx["project_id"]
-    wid = (ctx.get("items") or {}).get(L2_TITLE)
-    if not wid:
-        return False, f"seed item {L2_TITLE!r} missing"
-    try:
-        page = plane.work_items.activities.list(workspace_slug=workspace_slug, project_id=project_id, work_item_id=wid)
-    except Exception as exc:
-        return False, f"activities.list failed: {exc}"
-    rows = page.results if hasattr(page, "results") else page
-    n = len(list(rows or []))
-    if n < 1:
-        return False, "no activities on target (seed comments should create some)"
+    """L2: final text reports the API-confirmed seed activity count with provenance."""
+    n = ctx.get("l2_activity_count")
+    if not isinstance(n, int) or n < 1:
+        return answer_with_provenance(False, "API-confirmed activity count missing from seed ctx", run)
     final_text = get_final_text(run)
-    if not reports_contract_int(final_text, n):
-        return False, f"final text missing contract count: {n} (need 'count: {n}' or bare integer)"
-    return True, f"final text reports activity count {n} via contract"
+    answer_correct = reports_contract_int(final_text, n)
+    answer_note = (
+        f"final text reports activity count {n} via contract"
+        if answer_correct
+        else f"final text missing contract count: {n} (need 'count: {n}' or bare integer)"
+    )
+    return answer_with_provenance(answer_correct, answer_note, run)
 
 
 L2_TASK: dict[str, Any] = {
     "id": "L2",
     "author": "post-hoc-debias",
-    "tags": {"read", "tier1", "long_tail", "debias"},
+    "tags": {"read", "long_tail", "debias"},
     "prompt": (
         f"In project {{project}}, list the activity history for the work item titled "
         f"'{L2_TITLE}'. Summarize how many activities there are and mention any "
         "notable comment phrases you see. End your answer with a line of the form "
         "'count: N' where N is the number of activities."
     ),
-    "optimal_calls": 2,
-    "optimal_tools": {"list_work_items", "list_work_item_activities"},
-    "alternate_tools": {
-        "search_work_items",
-        "retrieve_work_item",
-        "list_work_item_comments",
-        "retrieve_work_item_activity",
-    },
     "needs": {"items", "activity_feed"},
     "verify": verify_l2,
 }
@@ -383,10 +351,14 @@ async def verify_l3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     """L3: workspace has a release tag with version eval-rc1."""
     workspace_slug = ctx["workspace_slug"]
     try:
-        page = plane.releases.tags.list(workspace_slug=workspace_slug)
+        rows = collect_paginated(
+            lambda cursor: plane.releases.tags.list(
+                workspace_slug=workspace_slug,
+                params={"per_page": 100, **({"cursor": cursor} if cursor else {})},
+            )
+        )
     except Exception as exc:
-        return False, f"list release tags failed: {exc}"
-    rows = page.results if hasattr(page, "results") else page
+        raise_verifier_read_error("L3", "listing workspace release tags", exc)
     versions = {(getattr(t, "version", None) or "").strip() for t in (rows or [])}
     if L3_TAG_VERSION in versions:
         # Track for teardown if id available.
@@ -405,16 +377,8 @@ async def verify_l3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 L3_TASK: dict[str, Any] = {
     "id": "L3",
     "author": "post-hoc-debias",
-    "tags": {"write", "tier1", "long_tail", "debias"},
+    "tags": {"write", "long_tail", "debias"},
     "prompt": (f"Create a release tag with version '{L3_TAG_VERSION}' (a version marker for the eval run)."),
-    "optimal_calls": 1,
-    "optimal_tools": {"create_release_tag"},
-    "alternate_tools": {
-        "list_release_tags",
-        "retrieve_release_tag",
-        "list_releases",
-        "update_release_tag",
-    },
     "needs": set(),  # workspace-level tag; no project fixture required
     "verify": verify_l3,
 }
@@ -445,10 +409,14 @@ async def verify_l4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     if not customer_id:
         return False, "customer missing from seed"
     try:
-        props = plane.customers.properties.list(workspace_slug=workspace_slug)
+        prop_rows = collect_paginated(
+            lambda cursor: plane.customers.properties.list(
+                workspace_slug=workspace_slug,
+                params={"per_page": 100, **({"cursor": cursor} if cursor else {})},
+            )
+        )
     except Exception as exc:
-        return False, f"list customer properties failed: {exc}"
-    prop_rows = props.results if hasattr(props, "results") else props
+        raise_verifier_read_error("L4", "listing workspace customer properties", exc)
     target_prop: Any | None = None
     for p in prop_rows or []:
         # Exact display_name match only (case-insensitive full match) — not substring "Industry".
@@ -471,7 +439,7 @@ async def verify_l4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     try:
         values = plane.customers.property_values.list(workspace_slug=workspace_slug, customer_id=customer_id)
     except Exception as exc:
-        return False, f"get property values failed: {exc}"
+        raise_verifier_read_error("L4", f"reading property values for customer {customer_id}", exc)
     if not isinstance(values, dict):
         return False, f"unexpected property_values shape: {type(values)}"
     vals = values.get(pid) or values.get(str(pid)) or []
@@ -484,63 +452,40 @@ async def verify_l4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 L4_TASK: dict[str, Any] = {
     "id": "L4",
     "author": "post-hoc-debias",
-    "tags": {"write", "tier1", "long_tail", "debias"},
+    "tags": {"write", "long_tail", "debias"},
     "prompt": (
         f"For customer '{CUSTOMER_NAME}', ensure there is a text customer property "
         f"named '{L4_PROP_DISPLAY}' and set its value to '{L4_PROP_VALUE}'."
     ),
-    "optimal_calls": 3,
-    "optimal_tools": {
-        "list_customers",
-        "create_customer_property",
-        "set_customer_property_values",
-    },
-    "alternate_tools": {
-        "list_customer_properties",
-        "get_customer_property_values",
-        "retrieve_customer",
-        "update_customer_property",
-    },
     "needs": {"customer"},
     "verify": verify_l4,
 }
 
 
 async def verify_l5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """L5: final text reports the attachment count via ``count: N`` contract."""
-    workspace_slug = ctx["workspace_slug"]
-    project_id = ctx["project_id"]
-    wid = (ctx.get("items") or {}).get(L5_TITLE)
-    if not wid:
-        return False, f"seed item {L5_TITLE!r} missing"
-    try:
-        page = plane.work_items.attachments.list(workspace_slug=workspace_slug, project_id=project_id, work_item_id=wid)
-    except Exception as exc:
-        return False, f"attachments.list failed: {exc}"
-    rows = page.results if hasattr(page, "results") else page
-    n = len(list(rows or []))
+    """L5: final text reports the API-confirmed seed attachment count with provenance."""
+    n = ctx.get("l5_attachment_count")
+    if not isinstance(n, int):
+        return answer_with_provenance(False, "API-confirmed attachment count missing from seed ctx", run)
     final_text = get_final_text(run)
-    if not reports_contract_int(final_text, n):
-        return False, f"final text missing contract count: {n} (need 'count: {n}' or bare integer)"
-    return True, f"final text reports attachment count {n} via contract"
+    answer_correct = reports_contract_int(final_text, n)
+    answer_note = (
+        f"final text reports attachment count {n} via contract"
+        if answer_correct
+        else f"final text missing contract count: {n} (need 'count: {n}' or bare integer)"
+    )
+    return answer_with_provenance(answer_correct, answer_note, run)
 
 
 L5_TASK: dict[str, Any] = {
     "id": "L5",
     "author": "post-hoc-debias",
-    "tags": {"read", "tier1", "long_tail", "debias"},
+    "tags": {"read", "long_tail", "debias"},
     "prompt": (
         f"In project {{project}}, how many file attachments does the work item titled "
         f"'{L5_TITLE}' have? End your answer with a line of the form 'count: N' "
         "where N is the number of file attachments."
     ),
-    "optimal_calls": 2,
-    "optimal_tools": {"list_work_items", "list_work_item_attachments"},
-    "alternate_tools": {
-        "search_work_items",
-        "retrieve_work_item",
-        "get_work_item_attachment_download_url",
-    },
     "needs": {"items"},
     "verify": verify_l5,
 }

@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from plane.errors.errors import HttpError
-from plane.models.query_params import RetrieveQueryParams, WorkItemQueryParams
+from plane.models.query_params import PaginatedQueryParams, RetrieveQueryParams, WorkItemQueryParams
 
-from evals.seed import (
+from evals.fixtures import (
     CYCLE_CURRENT,
     CYCLE_PAST,
     MODULE_COMPLETED_TITLES,
@@ -19,15 +19,19 @@ from evals.seed import (
     W7_URL,
     W8_TITLE,
 )
-from evals.tasks.answers import word_boundary
+from evals.tasks.answers import normalize_rich_text
 from evals.tasks.lookups import (
+    collect_paginated,
     find_item_by_name,
     find_items_by_name,
     ids,
-    is_not_found,
-    state_group,
     state_name,
 )
+from evals.tasks.verification import is_verifier_not_found, raise_verifier_read_error
+
+W3_COMMENT_TEXT = "Reviewed contrast tokens — needs design pass"
+W10_PAGE_NAME = "Eval Runbook"
+W10_PAGE_BODY = "Rollback steps for eval harness"
 
 
 async def verify_w1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
@@ -84,62 +88,41 @@ async def verify_w1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
 W1_TASK: dict[str, Any] = {
     "id": "W1",
-    "tags": {"write", "tier1"},
+    "tags": {"write"},
     "prompt": (
         "Create a work item in project {project}: title 'Login page 500s on empty "
         "password', priority urgent, assign it to me, and add the 'auth' label."
     ),
-    "optimal_calls": 4,
-    "optimal_tools": {"get_me", "list_projects", "list_labels", "create_work_item"},
-    "alternate_tools": {
-        "search_work_items",
-        "list_states",
-        "retrieve_project",
-        "get_workspace_members",
-        "manage_work_item_assignee",
-        "manage_work_item_label",
-        "update_work_item",
-        "list_work_items",
-    },
     "needs": {"labels"},
     "verify": verify_w1,
 }
 
 
 async def verify_w2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """W2: target item is in a completed-group state (prefer name Done)."""
+    """W2: target item is in the exact state named by the prompt: Done."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     item = find_item_by_name(plane, workspace_slug, project_id, W2_TITLE)
     if item is None:
         return False, f"item {W2_TITLE!r} not found"
     detail = plane.work_items.retrieve(workspace_slug=workspace_slug, project_id=project_id, work_item_id=item.id)
-    name = state_name(plane, workspace_slug, project_id, detail.state)
-    group = state_group(plane, workspace_slug, project_id, detail.state)
-    if group == "completed" or (name and name.casefold() == "done"):
-        return True, f"state={name!r} group={group!r}"
-    return False, f"state={name!r} group={group!r} (want completed/Done)"
+    name = (state_name(plane, workspace_slug, project_id, detail.state) or "").strip()
+    if name == "Done":
+        return True, f"state exactly matches {name!r}"
+    return False, f"state={name!r} (want exact 'Done')"
 
 
 W2_TASK: dict[str, Any] = {
     "id": "W2",
-    "tags": {"write", "tier1"},
+    "tags": {"write"},
     "prompt": (f"In project {{project}}, move the work item titled '{W2_TITLE}' to the Done state."),
-    "optimal_calls": 3,
-    "optimal_tools": {"list_work_items", "list_states", "update_work_item"},
-    "alternate_tools": {
-        "search_work_items",
-        "retrieve_work_item",
-        "retrieve_state",
-        "list_projects",
-    },
     "needs": {"items"},
     "verify": verify_w2,
 }
 
 
 async def verify_w3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """W3: target item has a comment containing the prompt phrase 'contrast tokens'."""
+    """W3: target item has a comment whose normalized text exactly matches the ask."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     item = find_item_by_name(plane, workspace_slug, project_id, W3_TITLE)
@@ -153,33 +136,21 @@ async def verify_w3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     results = list(resp.results if hasattr(resp, "results") else resp or [])
     if not results:
         return False, "no comments on target item"
-    phrase = "contrast tokens"
-    pat = word_boundary(phrase)
+    expected = normalize_rich_text(W3_COMMENT_TEXT)
     for c in results:
-        html = getattr(c, "comment_html", None) or ""
-        stripped = getattr(c, "comment_stripped", None) or ""
-        # Some APIs expose plain text under comment_stripped; fall back to html.
-        blob = f"{stripped}\n{html}"
-        if pat.search(blob):
-            return True, f"comment matches {phrase!r}"
-    return False, f"no comment contains {phrase!r} ({len(results)} comment(s))"
+        actual = normalize_rich_text(c)
+        if actual == expected:
+            return True, f"comment text exactly matches {expected!r}"
+    actual_texts = [normalize_rich_text(comment) for comment in results]
+    return False, f"no exact normalized comment {expected!r}; have {actual_texts!r}"
 
 
 W3_TASK: dict[str, Any] = {
     "id": "W3",
-    "tags": {"write", "tier1"},
+    "tags": {"write"},
     "prompt": (
-        f"In project {{project}}, add a comment on the work item titled '{W3_TITLE}' "
-        "saying 'Reviewed contrast tokens — needs design pass'."
+        f"In project {{project}}, add a comment on the work item titled '{W3_TITLE}' saying '{W3_COMMENT_TEXT}'."
     ),
-    "optimal_calls": 2,
-    "optimal_tools": {"list_work_items", "create_work_item_comment"},
-    "alternate_tools": {
-        "search_work_items",
-        "retrieve_work_item",
-        "list_work_item_comments",
-        "list_projects",
-    },
     "needs": {"items"},
     "verify": verify_w3,
 }
@@ -197,37 +168,30 @@ async def verify_w4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     if triage_id:
         try:
             lb = plane.labels.retrieve(workspace_slug=workspace_slug, project_id=project_id, label_id=triage_id)
-            name = (lb.name or "").strip().casefold()
-            if name in ("needs-triage", "needs triage"):
+            name = (lb.name or "").strip()
+            if name == "needs-triage":
                 return True, f"label id {triage_id} now named {lb.name!r}"
-            return False, f"label id {triage_id} still named {lb.name!r}"
+            return False, f"label id {triage_id} named {lb.name!r} (want exact 'needs-triage')"
         except HttpError as exc:
-            if not is_not_found(exc):
-                raise
+            if not is_verifier_not_found(exc):
+                raise_verifier_read_error("W4", f"retrieving seeded triage label {triage_id}", exc)
+            # The seed ID returning 404 proves the requested rename end state does not exist.
             return False, f"seeded triage label id {triage_id} not found (deleted?)"
 
     # Fallback only when seed id is absent from ctx.
     page = plane.labels.list(workspace_slug=workspace_slug, project_id=project_id)
-    names = {(lb.name or "").strip().casefold(): (lb.name or "").strip() for lb in (page.results or [])}
-    if "needs-triage" in names or "needs triage" in names:
+    names = {(lb.name or "").strip() for lb in (page.results or [])}
+    if "needs-triage" in names:
         if "triage" in names:
             return False, "both triage and needs-triage still present"
         return True, "label renamed to needs-triage (no seed id; name-scan fallback)"
-    return False, f"needs-triage not found; labels={sorted(names.values())}"
+    return False, f"exact needs-triage label not found; labels={sorted(names)}"
 
 
 W4_TASK: dict[str, Any] = {
     "id": "W4",
-    "tags": {"write", "tier1"},
+    "tags": {"write"},
     "prompt": ("In project {project}, rename the label 'triage' to 'needs-triage'."),
-    "optimal_calls": 2,
-    "optimal_tools": {"list_labels", "update_label"},
-    "alternate_tools": {
-        "retrieve_label",
-        "create_label",
-        "delete_label",
-        "list_projects",
-    },
     "needs": {"labels"},
     "verify": verify_w4,
 }
@@ -253,11 +217,11 @@ async def verify_w5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
         try:
             detail = plane.work_items.retrieve(workspace_slug=workspace_slug, project_id=project_id, work_item_id=wid)
         except HttpError as exc:
-            if is_not_found(exc):
-                # Deleted OR archived-as-404 — require confirmation via list_archived.
+            if is_verifier_not_found(exc):
+                # Retrieve 404 is ambiguous by design; the archived list is an authoritative fallback.
                 need_archive_list.append(str(wid))
                 continue
-            raise
+            raise_verifier_read_error("W5", f"retrieving module work item {wid}", exc)
         archived_at = getattr(detail, "archived_at", None)
         if not archived_at:
             not_archived.append(str(wid))
@@ -265,15 +229,23 @@ async def verify_w5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     arch_ids: set[str] = set()
     if need_archive_list or not_archived:
         try:
-            arch = plane.work_items.list_archived(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                params=WorkItemQueryParams(per_page=100),
+            archived_rows = collect_paginated(
+                lambda cursor: plane.work_items.list_archived(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    params=(
+                        WorkItemQueryParams(cursor=cursor, per_page=100)
+                        if cursor
+                        else WorkItemQueryParams(per_page=100)
+                    ),
+                )
             )
-            arch_ids = {str(i.id) for i in (arch.results or [])}
+            arch_ids = {str(i.id) for i in archived_rows}
         except Exception as exc:
             if need_archive_list:
-                return False, f"list_archived failed while confirming 404 items: {exc}"
+                raise_verifier_read_error("W5", "listing archived items to resolve retrieve 404s", exc)
+            # Optional cross-check only: successful retrieves already prove these rows are unarchived.
+            pass
 
     # 404s only count as archived if present on the archived list (deletes fail).
     for wid in need_archive_list:
@@ -288,20 +260,8 @@ async def verify_w5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
 W5_TASK: dict[str, Any] = {
     "id": "W5",
-    "tags": {"write", "tier1"},
+    "tags": {"write"},
     "prompt": (f"In project {{project}}, archive all completed work items in the module '{MODULE_NAME}'."),
-    "optimal_calls": 5,  # list_modules + list_module_work_items + 3× archive
-    "optimal_tools": {
-        "list_modules",
-        "list_module_work_items",
-        "manage_work_item_archive",
-    },
-    "alternate_tools": {
-        "list_work_items",
-        "retrieve_module",
-        "list_projects",
-        "list_states",
-    },
     "needs": {"module"},
     "verify": verify_w5,
 }
@@ -321,7 +281,12 @@ async def verify_w6(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     past_id = ctx.get("cycle_past_id") or (ctx.get("cycles") or {}).get(CYCLE_PAST)
     cur_id = ctx.get("cycle_current_id") or (ctx.get("cycles") or {}).get(CYCLE_CURRENT)
     if not past_id:
-        return False, "Sprint 12 id missing from seed"
+        raise RuntimeError(f"W6 fixture error: {CYCLE_PAST} id missing from seed")
+    if not cur_id:
+        raise RuntimeError(f"W6 fixture error: {CYCLE_CURRENT} id missing from seed")
+    unfinished = list(ctx.get("w6_unfinished_titles") or [])
+    if not unfinished:
+        raise RuntimeError(f"W6 fixture error: expected unfinished items for {CYCLE_CURRENT} are empty")
     notes: list[str] = []
     ok = True
     past = plane.cycles.retrieve(workspace_slug=workspace_slug, project_id=project_id, cycle_id=past_id)
@@ -356,47 +321,34 @@ async def verify_w6(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
             f"(want end_date={today!r} or archived_at or progress_snapshot)"
         )
 
-    unfinished = list(ctx.get("w6_unfinished_titles") or [])
-    if cur_id and unfinished:
-        try:
-            on13 = plane.cycles.list_work_items(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                cycle_id=cur_id,
-                params=WorkItemQueryParams(per_page=100),
-            )
-            names = {(i.name or "").strip() for i in (on13.results or [])}
-            missing = [t for t in unfinished if t not in names]
-            if missing:
-                ok = False
-                notes.append(f"unfinished not on Sprint 13: {missing}")
-            else:
-                notes.append(f"{len(unfinished)} unfinished on Sprint 13")
-        except Exception as exc:
-            notes.append(f"list Sprint 13 items failed: {exc}")
+    try:
+        on13 = plane.cycles.list_work_items(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            cycle_id=cur_id,
+            params=WorkItemQueryParams(per_page=100),
+        )
+        names = {(i.name or "").strip() for i in (on13.results or [])}
+    except Exception as exc:
+        if is_verifier_not_found(exc):
+            return False, f"{CYCLE_CURRENT} not found while checking unfinished-item rollover"
+        raise_verifier_read_error("W6", f"listing {CYCLE_CURRENT} work items", exc)
+    missing = [t for t in unfinished if t not in names]
+    if missing:
+        ok = False
+        notes.append(f"unfinished not on Sprint 13: {missing}")
+    else:
+        notes.append(f"{len(unfinished)} unfinished on Sprint 13")
     return ok, "; ".join(notes)
 
 
 W6_TASK: dict[str, Any] = {
     "id": "W6",
-    "tags": {"write", "tier1"},
+    "tags": {"write"},
     "prompt": (
         f"In project {{project}}, '{CYCLE_PAST}' is wrapping up. Close it and make sure "
         f"its unfinished work items end up on '{CYCLE_CURRENT}'."
     ),
-    "optimal_calls": 4,
-    "optimal_tools": {
-        "list_cycles",
-        "transfer_cycle_work_items",
-        "complete_cycle",
-    },
-    "alternate_tools": {
-        "list_cycle_work_items",
-        "manage_cycle_work_items",
-        "update_cycle",
-        "list_work_items",
-        "list_projects",
-    },
     # cycles_open_past: Sprint 12 must still be open, or "close it" is impossible —
     # Plane rejects every edit to an ended cycle. See _seed_cycles.
     "needs": {"items", "cycles", "cycles_open_past"},
@@ -444,8 +396,7 @@ async def verify_w7(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
         else:
             notes.append("blocking relation present")
     except Exception as exc:
-        ok = False
-        notes.append(f"dependencies list failed: {exc}")
+        raise_verifier_read_error("W7", f"listing dependencies for source item {src.id}", exc)
 
     # Links
     try:
@@ -462,43 +413,25 @@ async def verify_w7(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
         else:
             notes.append("reference URL present")
     except Exception as exc:
-        ok = False
-        notes.append(f"links list failed: {exc}")
+        raise_verifier_read_error("W7", f"listing links for source item {src.id}", exc)
 
     return ok, "; ".join(notes)
 
 
 W7_TASK: dict[str, Any] = {
     "id": "W7",
-    "tags": {"write", "tier1"},
+    "tags": {"write"},
     "prompt": (
         f"In project {{project}}, mark the work item '{W7_SOURCE_TITLE}' as blocking "
         f"'{W7_TARGET_TITLE}', and add the reference URL {W7_URL} on the blocking item."
     ),
-    "optimal_calls": 3,
-    "optimal_tools": {
-        "list_work_items",
-        "create_work_item_relation",
-        "create_work_item_link",
-    },
-    "alternate_tools": {
-        "search_work_items",
-        "list_work_item_relations",
-        "list_work_item_relation_definitions",
-        "list_work_item_links",
-        "retrieve_work_item",
-    },
     "needs": {"items"},
     "verify": verify_w7,
 }
 
 
 async def verify_w8(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """W8: work log of exactly 120 minutes exists on the target item.
-
-    Note: plane-sdk Create work log has no logged-date field — 'yesterday' in the
-    prompt cannot be asserted; only duration is verified.
-    """
+    """W8: work log of exactly 120 minutes exists on the target item."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     item = find_item_by_name(plane, workspace_slug, project_id, W8_TITLE)
@@ -518,16 +451,8 @@ async def verify_w8(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
 W8_TASK: dict[str, Any] = {
     "id": "W8",
-    "tags": {"write", "tier1"},
-    "prompt": (f"In project {{project}}, log 2 hours of work on the item titled '{W8_TITLE}' for yesterday."),
-    "optimal_calls": 2,
-    "optimal_tools": {"list_work_items", "create_work_log"},
-    "alternate_tools": {
-        "search_work_items",
-        "list_work_logs",
-        "retrieve_work_item",
-        "list_projects",
-    },
+    "tags": {"write"},
+    "prompt": (f"In project {{project}}, log 2 hours of work on the item titled '{W8_TITLE}'."),
     "needs": {"items"},
     "verify": verify_w8,
 }
@@ -541,6 +466,7 @@ def _time_tracking_enabled(plane: Any, workspace_slug: str, project_id: str) -> 
     try:
         project = plane.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id)
     except Exception:
+        # Optional diagnosis only: the already-successful worklog read determines failure.
         return None
     value = getattr(project, "is_time_tracking_enabled", None)
     return None if value is None else bool(value)
@@ -569,8 +495,9 @@ async def verify_w11(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tu
         )
     except Exception as exc:
         # The list endpoint is gated by the same toggle, so this is the diagnosis itself.
-        if not is_not_found(exc):
-            raise
+        if not is_verifier_not_found(exc):
+            raise_verifier_read_error("W11", f"listing work logs for item {item.id}", exc)
+        # This endpoint's documented gate is a 404, which proves time tracking remains disabled.
         return False, f"work log list still refused, so time tracking was never enabled ({exc})"
     rows = logs if isinstance(logs, list) else (logs.results if hasattr(logs, "results") else logs)
     durations = [int(getattr(w, "duration", 0) or 0) for w in (rows or [])]
@@ -590,24 +517,13 @@ async def verify_w11(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tu
 
 W11_TASK: dict[str, Any] = {
     "id": "W11",
-    "tags": {"write", "gate", "tier1"},
+    "tags": {"write", "gate"},
     "prompt": (
         f"In project {{project}}, log 2 hours of work on the item titled '{W11_TITLE}'. "
         "Time tracking may be switched off for this project; you have permission to turn "
         "it on if you need to."
     ),
     # enable time tracking → find the item → create the work log.
-    "optimal_calls": 3,
-    "optimal_tools": {"update_project", "list_work_items", "create_work_log"},
-    "alternate_tools": {
-        "update_project_features",
-        "get_features",
-        "retrieve_project",
-        "search_work_items",
-        "list_work_logs",
-        "retrieve_work_item",
-        "list_projects",
-    },
     "needs": {"items", "leave_worklogs_off"},
     "verify": verify_w11,
 }
@@ -641,59 +557,70 @@ async def verify_w9(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
 W9_TASK: dict[str, Any] = {
     "id": "W9",
-    "tags": {"write", "tier1", "extra"},
+    "tags": {"write", "extra"},
     "prompt": (
-        "In project {project}, set priority to high on these three work items in one "
-        "batch: 'Checkout times out on 3DS challenge', "
+        "In project {project}, set priority to high on these three work items: "
+        "'Checkout times out on 3DS challenge', "
         "'Session cookie not rotated after login', "
         "'Inventory count goes negative under load'."
     ),
-    # Extra: exercises bulk_update_work_items (not in original DESIGN 20).
-    "optimal_calls": 4,
-    "optimal_tools": {
-        "list_work_items",
-        "update_work_item",
-    },
-    "alternate_tools": {
-        "search_work_items",
-        "list_projects",
-        "retrieve_work_item",
-    },
+    # Extra: call distributions describe whether agents batch this multi-item mutation.
     "needs": {"items"},
     "verify": verify_w9,
 }
 
 
 async def verify_w10(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """W10 (extra): project page named Eval Runbook exists."""
+    """W10 (extra): named project page has the exact normalized requested body."""
     workspace_slug = ctx["workspace_slug"]
     project_id = ctx["project_id"]
     try:
-        resp = plane.pages.list_project_pages(workspace_slug=workspace_slug, project_id=project_id)
-        rows = resp.results if hasattr(resp, "results") else resp
+        rows = collect_paginated(
+            lambda cursor: plane.pages.list_project_pages(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                params=(
+                    PaginatedQueryParams(cursor=cursor, per_page=100) if cursor else PaginatedQueryParams(per_page=100)
+                ),
+            )
+        )
     except Exception as exc:
-        return False, f"list pages failed: {exc}"
-    names = {(getattr(p, "name", None) or "").strip() for p in (rows or [])}
-    if "Eval Runbook" not in names:
-        return False, f"page 'Eval Runbook' missing; have {sorted(names)}"
-    return True, "page Eval Runbook present"
+        raise_verifier_read_error("W10", "listing project pages", exc)
+    candidates = [page for page in rows if (getattr(page, "name", None) or "").strip() == W10_PAGE_NAME]
+    if not candidates:
+        names = sorted({(getattr(page, "name", None) or "").strip() for page in rows})
+        return False, f"page {W10_PAGE_NAME!r} missing; have {names}"
+    actual_bodies: list[str] = []
+    for page in candidates:
+        page_id = getattr(page, "id", None)
+        if not page_id:
+            actual_bodies.append("<missing page id>")
+            continue
+        try:
+            detail = plane.pages.retrieve_project_page(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                page_id=page_id,
+            )
+        except Exception as exc:
+            if is_verifier_not_found(exc):
+                actual_bodies.append(f"<page {page_id} not found after listing>")
+                continue
+            raise_verifier_read_error("W10", f"retrieving project page {page_id}", exc)
+        actual = normalize_rich_text(detail)
+        actual_bodies.append(actual)
+        if actual == W10_PAGE_BODY:
+            return True, f"page {W10_PAGE_NAME!r} has exact normalized body"
+    return False, f"page {W10_PAGE_NAME!r} body mismatch: have {actual_bodies!r}; want {W10_PAGE_BODY!r}"
 
 
 W10_TASK: dict[str, Any] = {
     "id": "W10",
-    "tags": {"write", "tier1", "extra"},
+    "tags": {"write", "extra"},
     "prompt": (
-        "In project {project}, create a project page named 'Eval Runbook' with body "
-        "text 'Rollback steps for eval harness'."
+        f"In project {{project}}, create a project page named '{W10_PAGE_NAME}' with body text '{W10_PAGE_BODY}'."
     ),
     # Extra: exercises pages family (create_page / get_page).
-    "optimal_calls": 2,
-    "optimal_tools": {"list_projects", "create_page"},
-    "alternate_tools": {
-        "list_pages",
-        "retrieve_page",
-        "attach_page_to_work_item",
-    },
     "needs": set(),
     "verify": verify_w10,
 }
@@ -715,6 +642,9 @@ WRITE_TASKS: list[dict[str, Any]] = [
 
 
 __all__ = [
+    "W3_COMMENT_TEXT",
+    "W10_PAGE_BODY",
+    "W10_PAGE_NAME",
     "W11_TITLE",
     "WRITE_TASKS",
     "verify_w1",

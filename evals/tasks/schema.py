@@ -7,9 +7,10 @@ from typing import Any
 from plane.errors.errors import HttpError
 from plane.models.enums import PropertyType
 
-from evals.seed import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE, W8_TITLE
-from evals.tasks.lookups import as_id, find_item_by_name, is_not_found
+from evals.fixtures import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE, W8_TITLE
+from evals.tasks.lookups import as_id, find_item_by_name
 from evals.tasks.skip import TaskSkipped
+from evals.tasks.verification import is_verifier_not_found, raise_verifier_read_error
 
 
 async def verify_s1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
@@ -36,9 +37,10 @@ async def verify_s1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
             or []
         )
     except HttpError as exc:
-        if is_not_found(exc):
+        if is_verifier_not_found(exc):
+            # A type-scoped 404 is authoritative absence, so it is evidence of a failed end state.
             return False, "Severity property not found on Bug type (type-scoped list empty/404)"
-        raise
+        raise_verifier_read_error("S1", "listing Bug type properties", exc)
 
     severity = None
     for p in props:
@@ -71,8 +73,9 @@ async def verify_s1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
             )
             option_names = {(getattr(o, "name", None) or "").strip() for o in (opts or [])}
         except HttpError as exc:
-            if not is_not_found(exc):
-                raise
+            if not is_verifier_not_found(exc):
+                raise_verifier_read_error("S1", "listing Severity options", exc)
+            # A missing options collection definitively cannot contain the required choices.
             option_names = set()
 
     required = {"critical", "major", "minor"}
@@ -85,28 +88,11 @@ async def verify_s1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
 S1_TASK: dict[str, Any] = {
     "id": "S1",
-    "tags": {"setup", "tier1"},
+    "tags": {"setup"},
     "prompt": (
         "In project {project}, add a Severity dropdown property (options: Critical, "
         "Major, Minor) to the Bug work item type."
     ),
-    "optimal_calls": 3,
-    "optimal_tools": {
-        "list_projects",
-        "resolve_work_item_type",
-        "create_work_item_property",
-    },
-    "alternate_tools": {
-        "list_work_item_types",
-        "create_work_item_property_option",
-        "retrieve_work_item_type",
-        "list_work_item_properties",
-        "retrieve_work_item_property",
-        "manage_work_item_type_properties",
-        "create_work_item_type",
-        "import_work_item_types_to_project",
-        "update_project_features",
-    },
     "needs": {"bug_type"},
     "verify": verify_s1,
 }
@@ -123,7 +109,9 @@ async def verify_s2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     try:
         est = plane.estimates.retrieve(workspace_slug=workspace_slug, project_id=project_id)
     except Exception as exc:
-        return False, f"no project estimate: {exc}"
+        if is_verifier_not_found(exc):
+            return False, "project estimate not found; requested Fibonacci scale was not created"
+        raise_verifier_read_error("S2", "retrieving the project estimate", exc)
     est_id = getattr(est, "id", None) or as_id(est)
     points = plane.estimates.list_points(workspace_slug=workspace_slug, project_id=project_id, estimate_id=est_id)
     point_rows = points if isinstance(points, list) else (points.results if hasattr(points, "results") else points)
@@ -157,26 +145,11 @@ async def verify_s2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
 S2_TASK: dict[str, Any] = {
     "id": "S2",
-    "tags": {"setup", "tier1"},
+    "tags": {"setup"},
     "prompt": (
         f"In project {{project}}, add a Fibonacci estimate scale (points 1,2,3,5,8) "
         f"and set the work item '{W8_TITLE}' to 5 points."
     ),
-    "optimal_calls": 5,
-    "optimal_tools": {
-        "list_projects",
-        "create_project_estimate",
-        "create_project_estimate_points",
-        "link_estimate_to_project",
-        "update_work_item",
-    },
-    "alternate_tools": {
-        "get_project_estimate",
-        "list_project_estimate_points",
-        "list_work_items",
-        "search_work_items",
-        "update_project_estimate",
-    },
     "needs": {"items"},
     "verify": verify_s2,
 }
@@ -200,14 +173,14 @@ async def verify_s3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
             features = plane.workspaces.get_features(workspace_slug=workspace_slug)
             dump = features.model_dump() if hasattr(features, "model_dump") else {}
             workspace_owns = bool(dump.get("is_work_item_types_enabled"))
-        except Exception:
-            workspace_owns = False
+        except Exception as exc:
+            raise_verifier_read_error("S3", "reading workspace work-item-type ownership", exc)
         if workspace_owns:
             try:
                 wtypes = list(plane.workspace_work_item_types.list(workspace_slug=workspace_slug) or [])
                 incident = next((t for t in wtypes if (t.name or "").strip().casefold() == "incident"), None)
-            except Exception:
-                pass
+            except Exception as exc:
+                raise_verifier_read_error("S3", "listing workspace work-item types", exc)
     if incident is None:
         return False, "Incident work item type not found"
 
@@ -221,9 +194,10 @@ async def verify_s3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
             or []
         )
     except HttpError as exc:
-        if is_not_found(exc):
+        if is_verifier_not_found(exc):
+            # A type-scoped 404 is authoritative absence, not an unavailable read.
             return False, "no properties on Incident type"
-        raise
+        raise_verifier_read_error("S3", "listing Incident type properties", exc)
 
     required_text = None
     for p in props:
@@ -242,25 +216,11 @@ async def verify_s3(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
 S3_TASK: dict[str, Any] = {
     "id": "S3",
-    "tags": {"setup", "tier1"},
+    "tags": {"setup"},
     "prompt": (
         "In project {project}, create a work item type named 'Incident' and add a "
         "required text property (e.g. 'Impact summary') on it."
     ),
-    "optimal_calls": 3,
-    "optimal_tools": {
-        "list_projects",
-        "resolve_work_item_type",
-        "create_work_item_property",
-    },
-    "alternate_tools": {
-        "create_work_item_type",
-        "list_work_item_types",
-        "import_work_item_types_to_project",
-        "list_work_item_properties",
-        "manage_work_item_type_properties",
-        "update_project_features",
-    },
     "needs": set(),
     "verify": verify_s3,
 }
@@ -283,7 +243,7 @@ async def verify_s4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
             row = plane.intake.retrieve(workspace_slug=workspace_slug, project_id=project_id, work_item_id=issue_id)
             return getattr(row, "status", None)
         except Exception:
-            # Fall back to list + match title
+            # Retrieve is optional because the independently authoritative list can resolve the same row.
             try:
                 rows = plane.intake.list(workspace_slug=workspace_slug, project_id=project_id)
                 results = rows.results if hasattr(rows, "results") else rows
@@ -292,8 +252,8 @@ async def verify_s4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
                     name = getattr(detail, "name", None) if detail is not None else None
                     if name and name.strip() == title:
                         return getattr(r, "status", None)
-            except Exception:
-                return None
+            except Exception as exc:
+                raise_verifier_read_error("S4", f"listing intake while resolving {title!r}", exc)
         return None
 
     b_status = _status_of(billing.get("issue_id"), INTAKE_BILLING_TITLE)
@@ -314,23 +274,12 @@ async def verify_s4(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
 S4_TASK: dict[str, Any] = {
     "id": "S4",
-    "tags": {"setup", "tier1"},
+    "tags": {"setup"},
     "prompt": (
         f"In project {{project}}, triage intake: accept the billing request "
         f"'{INTAKE_BILLING_TITLE}' and reject/decline the spam item "
         f"'{INTAKE_SPAM_TITLE}'."
     ),
-    "optimal_calls": 3,
-    "optimal_tools": {
-        "list_intake_work_items",
-        "update_intake_work_item",
-    },
-    "alternate_tools": {
-        "retrieve_intake_work_item",
-        "list_work_items",
-        "list_projects",
-        "create_intake_work_item",
-    },
     "needs": {"intake"},
     "verify": verify_s4,
 }
@@ -373,8 +322,7 @@ async def verify_s5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
         else:
             notes.append("features.cycles=True")
     except Exception as exc:
-        ok = False
-        notes.append(f"project get_features failed: {exc}")
+        raise_verifier_read_error("S5", "reading project feature flags", exc)
 
     # Workspace customers toggle (is_customer_enabled behind API field ``customers``).
     try:
@@ -397,15 +345,14 @@ async def verify_s5(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
         else:
             notes.append("workspace.customers=True")
     except Exception as exc:
-        ok = False
-        notes.append(f"workspace get_features failed: {exc}")
+        raise_verifier_read_error("S5", "reading workspace customer feature flags", exc)
 
     return ok, "; ".join(notes)
 
 
 S5_TASK: dict[str, Any] = {
     "id": "S5",
-    "tags": {"setup", "tier1"},
+    "tags": {"setup"},
     "prompt": (
         "Enable cycles and time tracking (worklogs) for project {project}, "
         "and enable the customers feature for the workspace."
@@ -414,14 +361,6 @@ S5_TASK: dict[str, Any] = {
     #   1. update_project(cycle_view=True, is_time_tracking_enabled=True)
     #   2. update_workspace_features(customers=True)
     # (features PATCH can set cycles→cycle_view but cannot set worklogs.)
-    "optimal_calls": 2,
-    "optimal_tools": {"update_project", "update_workspace_features"},
-    "alternate_tools": {
-        "update_project_features",
-        "list_projects",
-        "retrieve_project",
-        "get_features",
-    },
     # Seed leaves project cycles+worklogs and workspace customers off.
     "needs": {"leave_cycles_worklogs_off"},
     "verify": verify_s5,

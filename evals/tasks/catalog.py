@@ -80,28 +80,30 @@ def task_author(task: dict[str, Any]) -> str:
     return str(task.get("author") or "claude")
 
 
-CATALOG_REVISION = 2
+CATALOG_REVISION = 7
 """Bumped when a deliberate change to a fixture or verifier redefines what a task asks.
 
-The hash below covers prompts and tool sets, not ``needs`` or verifier bodies, because
-prompt drift is the signal it was built to catch. That leaves a hole: correcting a seeder
-changes the question a task puts to the agent while the fingerprint keeps asserting the
-results are comparable. Bumping this closes the hole by making the redefinition visible.
-
-Revision 1 covers batteries 6-8. Revision 2 is the workspace/project feature-exclusion
-correction: excluding a feature now writes it ``False`` instead of omitting the write, so
-S5 is graded on three conditions the agent must actually satisfy rather than two plus one
-the workspace already happened to be in.
+Revision 7 makes read tasks require response evidence bound to the target entity and gives
+C2/R7 randomised, immutable seed-time oracles; pre-revision read results are not comparable.
+Revision 6 stops W8 and W9 asking for unverifiable logged-date and batching properties;
+it also tightens W3/W10 end-state contracts and paginates affected verifier reads. Revision
+5 makes R1-R6, I2, L2, and L5 require observed successful Plane tool-call provenance and
+randomises their hidden truth. Read results across either transition are not comparable.
+Revision 4 rewrote R7 into an exact live state-and-group listing. Revision 3 removed
+declared per-task tool sets and call floors and added fixture names. Fixture names being
+covered means swapping a task's fixtures no longer needs a manual bump; changing a seeder's
+behaviour under the same name still does.
 """
 
 
 def battery_fingerprint(tasks: list[dict[str, Any]] | None = None) -> str:
-    """Stable short hash (SHA-256/12) of CATALOG_REVISION plus each task's id, prompt,
-    tool sets and optimal_calls.
+    """Stable short hash of the revision and each task's ID, prompt and fixture names.
 
-    Fixtures and verifier bodies are deliberately excluded — prompt drift is the signal —
-    so bump CATALOG_REVISION when they redefine the question. A --tasks subset hashes
-    differently from the full catalog.
+    Everything hashed is a fact about what the agent was asked — never an expectation
+    about how it should answer. Fixture *names* are covered, so swapping a task's
+    fixtures is caught mechanically; seeder and verifier *bodies* are not, which is the
+    hole CATALOG_REVISION exists to close by hand. A --tasks subset hashes differently
+    from the full catalog.
     """
     src = list(TASKS if tasks is None else tasks)
     payload: list[dict[str, Any]] = []
@@ -110,9 +112,7 @@ def battery_fingerprint(tasks: list[dict[str, Any]] | None = None) -> str:
             {
                 "id": t.get("id"),
                 "prompt": t.get("prompt"),
-                "optimal_tools": sorted(t.get("optimal_tools") or []),
-                "alternate_tools": sorted(t.get("alternate_tools") or []),
-                "optimal_calls": t.get("optimal_calls"),
+                "needs": sorted(t.get("needs") or []),
             }
         )
     document = {"revision": CATALOG_REVISION, "tasks": payload}
