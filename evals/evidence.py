@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping, Sequence
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -53,11 +54,86 @@ def normalize_evidence_targets(value: Any) -> dict[str, tuple[str, ...]]:
     return normalize_evidence_sentinels(value)
 
 
-def configured_evidence_labels(sentinels: Any, targets: Any) -> tuple[str, ...]:
+def normalize_evidence_aggregates(value: Any) -> dict[str, tuple[dict[str, Any], ...]]:
+    """Validate the two narrow aggregate response shapes used by R2 and R6."""
+    if not isinstance(value, Mapping):
+        return {}
+    normalized: dict[str, tuple[dict[str, Any], ...]] = {}
+    for raw_label, raw_specs in value.items():
+        label = str(raw_label or "").strip()
+        if not label or not isinstance(raw_specs, Sequence) or isinstance(raw_specs, (str, bytes, bytearray)):
+            continue
+        specs: list[dict[str, Any]] = []
+        for raw_spec in raw_specs:
+            if not isinstance(raw_spec, Mapping):
+                continue
+            kind = raw_spec.get("kind")
+            if kind == "total_count":
+                try:
+                    specs.append({"kind": kind, "value": int(raw_spec["value"])})
+                except (KeyError, TypeError, ValueError):
+                    continue
+            elif kind == "grouped_counts" and isinstance(raw_spec.get("values"), Mapping):
+                try:
+                    values = {str(key): int(count) for key, count in raw_spec["values"].items()}
+                except (TypeError, ValueError):
+                    continue
+                if values:
+                    specs.append({"kind": kind, "values": values})
+        if specs:
+            normalized[label] = tuple(specs)
+    return normalized
+
+
+def configured_evidence_labels(sentinels: Any, targets: Any, aggregates: Any = None) -> tuple[str, ...]:
     """Return labels that have both response values and target entity IDs."""
     values_by_label = normalize_evidence_sentinels(sentinels)
     targets_by_label = normalize_evidence_targets(targets)
-    return tuple(sorted(values_by_label.keys() & targets_by_label.keys()))
+    aggregate_labels = normalize_evidence_aggregates(aggregates)
+    return tuple(sorted((values_by_label.keys() | aggregate_labels.keys()) & targets_by_label.keys()))
+
+
+def fingerprint_evidence_sentinels(value: Any) -> dict[str, tuple[tuple[int, str], ...]]:
+    """Replace raw values with character lengths and one-way SHA-256 fingerprints."""
+    return {
+        label: tuple((len(item), sha256(item.encode("utf-8")).hexdigest()) for item in values)
+        for label, values in normalize_evidence_sentinels(value).items()
+    }
+
+
+def normalize_evidence_fingerprints(value: Any) -> dict[str, tuple[tuple[int, str], ...]]:
+    """Validate serialized response-value fingerprints, dropping malformed entries."""
+    if not isinstance(value, Mapping):
+        return {}
+    normalized: dict[str, tuple[tuple[int, str], ...]] = {}
+    for raw_label, raw_specs in value.items():
+        label = str(raw_label or "").strip()
+        if not label or not isinstance(raw_specs, Sequence) or isinstance(raw_specs, (str, bytes, bytearray)):
+            continue
+        specs: list[tuple[int, str]] = []
+        for raw_spec in raw_specs:
+            if isinstance(raw_spec, Mapping):
+                raw_length = raw_spec.get("length")
+                raw_digest = raw_spec.get("sha256")
+            elif (
+                isinstance(raw_spec, Sequence)
+                and not isinstance(raw_spec, (str, bytes, bytearray))
+                and len(raw_spec) == 2
+            ):
+                raw_length, raw_digest = raw_spec
+            else:
+                continue
+            try:
+                length = int(raw_length)
+            except (TypeError, ValueError):
+                continue
+            digest = str(raw_digest or "").strip().lower()
+            if length > 0 and len(digest) == 64 and all(char in "0123456789abcdef" for char in digest):
+                specs.append((length, digest))
+        clean = tuple(dict.fromkeys(specs))
+        if clean:
+            normalized[label] = clean
+    return normalized
 
 
 def encode_evidence_sentinels(value: Any) -> str:
@@ -77,50 +153,68 @@ def decode_evidence_sentinels(value: str | None) -> dict[str, tuple[str, ...]]:
     return normalize_evidence_sentinels(raw)
 
 
-def encode_evidence_config(sentinels: Any, targets: Any) -> str:
-    """Serialize the proxy-only matching configuration."""
+def encode_evidence_config(sentinels: Any, targets: Any, aggregates: Any = None) -> str:
+    """Serialize targets plus one-way value fingerprints, never raw sentinels."""
+    fingerprints = fingerprint_evidence_sentinels(sentinels)
     return json.dumps(
         {
-            "sentinels": normalize_evidence_sentinels(sentinels),
+            "fingerprints": {
+                label: [{"length": length, "sha256": digest} for length, digest in specs]
+                for label, specs in fingerprints.items()
+            },
             "targets": normalize_evidence_targets(targets),
+            "aggregates": normalize_evidence_aggregates(aggregates),
         },
         ensure_ascii=True,
         separators=(",", ":"),
     )
 
 
-def decode_evidence_config(value: str | None) -> tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]]:
+def decode_evidence_config(
+    value: str | None,
+) -> tuple[
+    dict[str, tuple[tuple[int, str], ...]],
+    dict[str, tuple[str, ...]],
+    dict[str, tuple[dict[str, Any], ...]],
+]:
     """Decode proxy-only matching configuration, failing closed on malformed input."""
     if not value:
-        return {}, {}
+        return {}, {}, {}
     try:
         raw = json.loads(value)
     except (TypeError, ValueError):
-        return {}, {}
+        return {}, {}, {}
     if not isinstance(raw, Mapping):
-        return {}, {}
+        return {}, {}, {}
     return (
-        normalize_evidence_sentinels(raw.get("sentinels")),
+        normalize_evidence_fingerprints(raw.get("fingerprints")),
         normalize_evidence_targets(raw.get("targets")),
+        normalize_evidence_aggregates(raw.get("aggregates")),
     )
 
 
-def write_evidence_config(path: Path, sentinels: Any, targets: Any) -> None:
+def write_evidence_config(path: Path, sentinels: Any, targets: Any, aggregates: Any = None) -> None:
     """Create a private, one-shot proxy configuration outside the agent cwd."""
-    payload = encode_evidence_config(sentinels, targets)
+    payload = encode_evidence_config(sentinels, targets, aggregates)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         stream.write(payload)
 
 
-def consume_evidence_config(path: Path | None) -> tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]]:
+def consume_evidence_config(
+    path: Path | None,
+) -> tuple[
+    dict[str, tuple[tuple[int, str], ...]],
+    dict[str, tuple[str, ...]],
+    dict[str, tuple[dict[str, Any], ...]],
+]:
     """Read and unlink a one-shot proxy configuration, failing closed."""
     if path is None:
-        return {}, {}
+        return {}, {}, {}
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
-        return {}, {}
+        return {}, {}, {}
     finally:
         try:
             path.unlink()
@@ -137,7 +231,10 @@ def _request_targets(request_args: Any, target_ids: Sequence[str]) -> bool:
             return any(contains(item) for item in value.values())
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
             return any(contains(item) for item in value)
-        return value is not None and str(value) in targets
+        if value is None:
+            return False
+        text = str(value)
+        return any(target == text or target in text for target in targets)
 
     return contains(request_args)
 
@@ -164,6 +261,112 @@ def observed_sentinel_labels(
     )
 
 
+def observed_fingerprint_labels(
+    response_text: str,
+    fingerprints: Any,
+    *,
+    request_args: Any,
+    evidence_targets: Any,
+) -> list[str]:
+    """Match target-bound value fingerprints without ever receiving the raw values."""
+    text = str(response_text or "")
+    if not text:
+        return []
+    normalized = normalize_evidence_fingerprints(fingerprints)
+    targets = normalize_evidence_targets(evidence_targets)
+    eligible = {
+        label: specs
+        for label, specs in normalized.items()
+        if label in targets and _request_targets(request_args, targets[label])
+    }
+    if not eligible:
+        return []
+
+    expected_by_length: dict[int, set[str]] = {}
+    labels_by_spec: dict[tuple[int, str], set[str]] = {}
+    for label, specs in eligible.items():
+        for length, digest in specs:
+            expected_by_length.setdefault(length, set()).add(digest)
+            labels_by_spec.setdefault((length, digest), set()).add(label)
+
+    matched: set[str] = set()
+    for length, expected in expected_by_length.items():
+        if length > len(text):
+            continue
+        remaining = set(expected)
+        for start in range(len(text) - length + 1):
+            digest = sha256(text[start : start + length].encode("utf-8")).hexdigest()
+            if digest not in remaining:
+                continue
+            matched.update(labels_by_spec[(length, digest)])
+            remaining.remove(digest)
+            if not remaining:
+                break
+    return sorted(matched)
+
+
+def _decoded_documents(response_text: str) -> list[Any]:
+    """Decode JSON-RPC/MCP wrappers and JSON strings embedded inside them."""
+    documents: list[Any] = []
+    pending: list[Any] = [response_text]
+    seen_strings: set[str] = set()
+    while pending:
+        value = pending.pop()
+        documents.append(value)
+        if isinstance(value, Mapping):
+            pending.extend(value.values())
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            pending.extend(value)
+        elif isinstance(value, str):
+            text = value.strip()
+            if text in seen_strings or not text or text[0] not in "[{":
+                continue
+            seen_strings.add(text)
+            try:
+                pending.append(json.loads(text))
+            except (TypeError, ValueError):
+                continue
+    return documents
+
+
+def observed_aggregate_labels(
+    response_text: str,
+    aggregates: Any,
+    *,
+    request_args: Any,
+    evidence_targets: Any,
+) -> list[str]:
+    """Match exact aggregate result fields while retaining seeded target binding."""
+    specs_by_label = normalize_evidence_aggregates(aggregates)
+    targets_by_label = normalize_evidence_targets(evidence_targets)
+    documents = _decoded_documents(response_text)
+    matched: list[str] = []
+    for label, specs in specs_by_label.items():
+        targets = targets_by_label.get(label, ())
+        for spec in specs:
+            if spec["kind"] == "total_count":
+                if not _request_targets(request_args, targets):
+                    continue
+                if any(isinstance(value, Mapping) and value.get("total_count") == spec["value"] for value in documents):
+                    matched.append(label)
+                    break
+            elif spec["kind"] == "grouped_counts":
+                expected = spec["values"]
+                for value in documents:
+                    if not isinstance(value, Mapping) or not isinstance(value.get("grouped_counts"), Mapping):
+                        continue
+                    grouped = value["grouped_counts"]
+                    if all(
+                        isinstance(grouped.get(target), Mapping) and grouped[target].get("count") == expected_count
+                        for target, expected_count in expected.items()
+                    ):
+                        matched.append(label)
+                        break
+                if label in matched:
+                    break
+    return sorted(set(matched))
+
+
 def set_target_evidence(context: dict[str, Any], values: Sequence[Any], *, target_ids: Sequence[Any]) -> None:
     """Register API-confirmed values and the entity IDs whose reads may prove them."""
     clean_values: list[str] = []
@@ -176,11 +379,35 @@ def set_target_evidence(context: dict[str, Any], values: Sequence[Any], *, targe
     clean = tuple(dict.fromkeys(clean_values))
     if not clean:
         raise RuntimeError("target evidence has no API-confirmed sentinel values")
-    clean_targets = tuple(dict.fromkeys(str(value).strip() for value in target_ids if str(value).strip()))
+    clean_targets = tuple(
+        dict.fromkeys(str(value).strip() for value in target_ids if value is not None and str(value).strip())
+    )
     if not clean_targets:
         raise RuntimeError("target evidence has no seeded target entity ids")
     context["evidence_sentinels"] = {TARGET_ENTITY_EVIDENCE: clean}
     context["evidence_targets"] = {TARGET_ENTITY_EVIDENCE: clean_targets}
+
+
+def set_target_count_evidence(context: dict[str, Any], count: int, *, target_ids: Sequence[Any]) -> None:
+    """Allow an exact ``total_count`` response whose request names the seeded target."""
+    clean_targets = tuple(str(value).strip() for value in target_ids if value is not None and str(value).strip())
+    if not clean_targets:
+        raise RuntimeError("target count evidence has no seeded target entity ids")
+    context.setdefault("evidence_targets", {})[TARGET_ENTITY_EVIDENCE] = clean_targets
+    context.setdefault("evidence_aggregates", {})[TARGET_ENTITY_EVIDENCE] = (
+        {"kind": "total_count", "value": int(count)},
+    )
+
+
+def set_target_grouped_count_evidence(context: dict[str, Any], values: Mapping[Any, int]) -> None:
+    """Allow grouped counts only when every seeded target id has its exact count."""
+    clean = {str(target): int(count) for target, count in values.items() if str(target).strip()}
+    if not clean:
+        raise RuntimeError("target grouped-count evidence has no seeded targets")
+    context.setdefault("evidence_targets", {})[TARGET_ENTITY_EVIDENCE] = tuple(clean)
+    context.setdefault("evidence_aggregates", {})[TARGET_ENTITY_EVIDENCE] = (
+        {"kind": "grouped_counts", "values": clean},
+    )
 
 
 __all__ = [
@@ -192,9 +419,16 @@ __all__ = [
     "decode_evidence_sentinels",
     "encode_evidence_config",
     "encode_evidence_sentinels",
+    "fingerprint_evidence_sentinels",
+    "normalize_evidence_fingerprints",
+    "normalize_evidence_aggregates",
     "normalize_evidence_sentinels",
     "normalize_evidence_targets",
     "observed_sentinel_labels",
+    "observed_fingerprint_labels",
+    "observed_aggregate_labels",
+    "set_target_count_evidence",
     "set_target_evidence",
+    "set_target_grouped_count_evidence",
     "write_evidence_config",
 ]

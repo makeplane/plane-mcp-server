@@ -30,6 +30,7 @@ from evals.drivers.api.backend import (
 )
 from evals.drivers.cli.process import note_timeout_kill, run_cli_subprocess
 from evals.drivers.cli.sidecar import (
+    ProxySidecarResult,
     apply_proxy_sidecar,
     ensure_proxy_pythonpath,
     harvest_proxy_after_cli_timeout,
@@ -38,13 +39,16 @@ from evals.drivers.cli.sidecar import (
 )
 from evals.evidence import (
     configured_evidence_labels,
+    normalize_evidence_aggregates,
     normalize_evidence_sentinels,
     normalize_evidence_targets,
+    observed_aggregate_labels,
     observed_sentinel_labels,
     write_evidence_config,
 )
 from evals.results import AgentRun, Usage
 from evals.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
+from evals.tool_manifest import ToolManifestCapture, tools_page
 
 DEFAULT_MAX_TOKENS = 8192
 
@@ -172,7 +176,12 @@ class ApiDriver:
         )
 
     @asynccontextmanager
-    async def _mcp_session(self, params: StdioServerParameters):
+    async def _mcp_session(
+        self,
+        params: StdioServerParameters,
+        *,
+        manifest_state: dict[str, bool],
+    ):
         if self.mcp_session_factory is not None:
             context = self.mcp_session_factory(params)
             if inspect.isawaitable(context):
@@ -185,8 +194,33 @@ class ApiDriver:
             return
 
         async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
+
+            async def message_handler(message: Any) -> None:
+                notification = getattr(message, "root", message)
+                if getattr(notification, "method", None) == "notifications/tools/list_changed":
+                    manifest_state["stale"] = True
+
+            async with ClientSession(read, write, message_handler=message_handler) as session:
                 yield session
+
+    @staticmethod
+    async def _list_all_tools(mcp_client: Any) -> tuple[list[Any], str | None]:
+        """Aggregate every tools/list page and fingerprint the complete snapshot."""
+        capture = ToolManifestCapture()
+        tools: list[Any] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            page = await mcp_client.list_tools(cursor=cursor) if cursor is not None else await mcp_client.list_tools()
+            capture.observe_page(page, request_cursor=cursor)
+            page_tools, next_cursor = tools_page(page)
+            tools.extend(page_tools)
+            if next_cursor is None:
+                return tools, capture.fingerprint
+            if next_cursor in seen_cursors:
+                raise RuntimeError(f"tools/list pagination repeated cursor {next_cursor!r}")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
 
     def run_task(
         self,
@@ -199,6 +233,7 @@ class ApiDriver:
         cwd: Path | None = None,
         evidence_sentinels: dict[str, Any] | None = None,
         evidence_targets: dict[str, Any] | None = None,
+        evidence_aggregates: dict[str, Any] | None = None,
     ) -> AgentRun:
         if not model:
             raise ValueError("the API driver requires a model ID")
@@ -214,6 +249,7 @@ class ApiDriver:
                 cwd=cwd,
                 evidence_sentinels=evidence_sentinels,
                 evidence_targets=evidence_targets,
+                evidence_aggregates=evidence_aggregates,
             )
         )
 
@@ -228,11 +264,13 @@ class ApiDriver:
         cwd: Path | None,
         evidence_sentinels: dict[str, Any] | None,
         evidence_targets: dict[str, Any] | None,
+        evidence_aggregates: dict[str, Any] | None,
     ) -> AgentRun:
         backend = self._make_backend(model)
         evidence = normalize_evidence_sentinels(evidence_sentinels)
         targets = normalize_evidence_targets(evidence_targets)
-        evidence_active = bool(configured_evidence_labels(evidence, targets))
+        aggregates = normalize_evidence_aggregates(evidence_aggregates)
+        evidence_active = bool(configured_evidence_labels(evidence, targets, aggregates))
         calls: list[dict[str, Any]] = []
         pending_results: list[tuple[int, str]] = []
         usage_per_iteration: list[Usage] = []
@@ -248,12 +286,11 @@ class ApiDriver:
         provider_stop_reason: str | None = None
 
         params = self._server_params(mcp_env, cwd)
-        async with self._mcp_session(params) as mcp_client:
+        manifest_state = {"stale": False}
+        tool_manifest_fingerprint: str | None = None
+        async with self._mcp_session(params, manifest_state=manifest_state) as mcp_client:
             await mcp_client.initialize()
-            tools_result = await mcp_client.list_tools()
-            raw_tools = (
-                tools_result.get("tools", []) if isinstance(tools_result, dict) else getattr(tools_result, "tools", [])
-            )
+            raw_tools, tool_manifest_fingerprint = await self._list_all_tools(mcp_client)
             backend.start(system, prompt, [tool_spec_from_mcp(tool) for tool in raw_tools])
 
             # Match the historical metric: model/tool loop only, after list_tools.
@@ -321,11 +358,23 @@ class ApiDriver:
                         calls[idx]["is_error"] = result.is_error
                         calls[idx]["duration_ms"] = duration_ms
                         if evidence_active:
-                            calls[idx]["observed_sentinels"] = observed_sentinel_labels(
-                                result.text,
-                                evidence,
-                                request_args=calls[idx]["args"],
-                                evidence_targets=targets,
+                            calls[idx]["observed_sentinels"] = sorted(
+                                set(
+                                    observed_sentinel_labels(
+                                        result.text,
+                                        evidence,
+                                        request_args=calls[idx]["args"],
+                                        evidence_targets=targets,
+                                    )
+                                )
+                                | set(
+                                    observed_aggregate_labels(
+                                        result.text,
+                                        aggregates,
+                                        request_args=calls[idx]["args"],
+                                        evidence_targets=targets,
+                                    )
+                                )
                             )
                         pending_results.append((idx, result.text))
                     if matched_ids != set(call_indices) or len(call_indices) != len(turn.tool_calls):
@@ -374,6 +423,8 @@ class ApiDriver:
             "cache_creation_input_tokens": total_cache_creation_input_tokens,
             "source": "iterations",
         }
+        if manifest_state["stale"]:
+            tool_manifest_fingerprint = None
         return AgentRun(
             calls=calls,
             final_text=final_text,
@@ -388,6 +439,9 @@ class ApiDriver:
             usage_per_iteration=usage_per_iteration,
             cum_input_tokens=total_input_tokens,
             result_pair_mismatch=result_pair_mismatch,
+            trace_integrity=not result_pair_mismatch,
+            trace_integrity_reason="result_pair_mismatch" if result_pair_mismatch else None,
+            tool_manifest_fingerprint=tool_manifest_fingerprint,
             token_count_failures=token_count_failures,
             result_tokens_estimated=result_tokens_estimated,
             evidence_trace_available=evidence_active,
@@ -423,6 +477,16 @@ class CliOutput:
 
 class CliOutputError(RuntimeError):
     """Signal that vendor output could not produce a valid ``AgentRun``."""
+
+
+class CliRunError(RuntimeError):
+    """CLI failure retaining typed sidecar observations for the result row."""
+
+    def __init__(self, message: str, sidecar: ProxySidecarResult | None = None) -> None:
+        super().__init__(message)
+        self.trace_integrity = sidecar.trace_integrity if sidecar is not None else True
+        self.trace_integrity_reason = sidecar.trace_integrity_reason if sidecar is not None else None
+        self.tool_manifest_fingerprint = sidecar.tool_manifest_fingerprint if sidecar is not None else None
 
 
 class CliDriver(ABC):
@@ -534,6 +598,7 @@ class CliDriver(ABC):
         cwd: Path | None = None,
         evidence_sentinels: dict[str, Any] | None = None,
         evidence_targets: dict[str, Any] | None = None,
+        evidence_aggregates: dict[str, Any] | None = None,
     ) -> AgentRun:
         """Run one CLI task using the shared configuration/proxy/timeout flow."""
         task_cwd = (cwd or REPO_ROOT).resolve()
@@ -541,7 +606,10 @@ class CliDriver(ABC):
         self.validate_run()
         temp_parent = str(task_cwd) if self.temp_dir_in_cwd else None
 
-        with tempfile.TemporaryDirectory(prefix=self.temp_dir_prefix, dir=temp_parent) as td:
+        with (
+            tempfile.TemporaryDirectory(prefix=self.temp_dir_prefix, dir=temp_parent) as td,
+            tempfile.TemporaryDirectory(prefix="plane-eval-evidence-") as evidence_td,
+        ):
             temp_dir = Path(td)
             sidecar = temp_dir / "proxy-sidecar.jsonl"
             child_env = {
@@ -549,7 +617,8 @@ class CliDriver(ABC):
             }
             evidence = normalize_evidence_sentinels(evidence_sentinels)
             targets = normalize_evidence_targets(evidence_targets)
-            evidence_active = bool(configured_evidence_labels(evidence, targets))
+            aggregates = normalize_evidence_aggregates(evidence_aggregates)
+            evidence_active = bool(configured_evidence_labels(evidence, targets, aggregates))
             real_command = (
                 list(self.server_command) if self.server_command else [self.python_bin, "-m", "plane_mcp", "stdio"]
             )
@@ -557,8 +626,8 @@ class CliDriver(ABC):
             if self.use_proxy:
                 evidence_path = None
                 if evidence_active:
-                    evidence_path = temp_dir / "proxy-evidence.json"
-                    write_evidence_config(evidence_path, evidence, targets)
+                    evidence_path = Path(evidence_td) / "proxy-evidence.json"
+                    write_evidence_config(evidence_path, evidence, targets, aggregates)
                 server_command = proxy_wrap_server_command(
                     real_command,
                     sidecar_path=sidecar,
@@ -594,13 +663,20 @@ class CliDriver(ABC):
                 calls: list[dict[str, Any]] = []
                 client_calls: list[dict[str, Any]] = []
                 call_source = self.default_call_source
+                trace_integrity = True
+                trace_integrity_reason = None
+                tool_manifest_fingerprint = None
                 if self.use_proxy:
-                    calls, client_calls, call_source = harvest_proxy_after_cli_timeout(
+                    sidecar_result = harvest_proxy_after_cli_timeout(
                         calls,
                         client_calls,
                         sidecar,
                         notes,
                     )
+                    calls, client_calls, call_source = sidecar_result
+                    trace_integrity = sidecar_result.trace_integrity
+                    trace_integrity_reason = sidecar_result.trace_integrity_reason
+                    tool_manifest_fingerprint = sidecar_result.tool_manifest_fingerprint
                 evidence_available = False
                 if evidence_active and call_source == "proxy":
                     _proxy_calls, status = load_proxy_sidecar(sidecar)
@@ -624,6 +700,9 @@ class CliDriver(ABC):
                     hit_max_turns=False,
                     wall_time_s=round(wall, 3),
                     evidence_trace_available=evidence_available,
+                    trace_integrity=trace_integrity,
+                    trace_integrity_reason=trace_integrity_reason,
+                    tool_manifest_fingerprint=tool_manifest_fingerprint,
                     experimental=self.experimental,
                     notes=notes,
                 )
@@ -637,20 +716,28 @@ class CliDriver(ABC):
                     notes=notes,
                 )
             except CliOutputError as exc:
+                sidecar_result = None
                 if self.use_proxy:
-                    apply_proxy_sidecar([], [], sidecar, notes)
+                    sidecar_result = apply_proxy_sidecar([], [], sidecar, notes)
                 detail = "; ".join(notes)
-                raise RuntimeError(f"{exc}: {detail}") from None
+                raise CliRunError(f"{exc}: {detail}", sidecar_result) from None
 
+            trace_integrity = True
+            trace_integrity_reason = None
+            tool_manifest_fingerprint = None
             if self.use_proxy:
-                calls, client_calls, proxy_source = apply_proxy_sidecar(
+                sidecar_result = apply_proxy_sidecar(
                     output.calls,
                     output.client_tool_calls,
                     sidecar,
                     notes,
                 )
+                calls, client_calls, proxy_source = sidecar_result
                 output.calls = calls
                 output.client_tool_calls = client_calls
+                trace_integrity = sidecar_result.trace_integrity
+                trace_integrity_reason = sidecar_result.trace_integrity_reason
+                tool_manifest_fingerprint = sidecar_result.tool_manifest_fingerprint
                 if proxy_source == "proxy":
                     output.call_source = "proxy"
 
@@ -680,6 +767,9 @@ class CliDriver(ABC):
                 hit_max_turns=output.hit_max_turns,
                 wall_time_s=round(wall, 3),
                 evidence_trace_available=evidence_available,
+                trace_integrity=trace_integrity,
+                trace_integrity_reason=trace_integrity_reason,
+                tool_manifest_fingerprint=tool_manifest_fingerprint,
                 experimental=self.experimental,
                 notes=notes,
             )
@@ -694,6 +784,7 @@ __all__ = [
     "CliLaunch",
     "CliOutput",
     "CliOutputError",
+    "CliRunError",
     "McpSessionFactory",
     "tool_result_from_mcp",
     "tool_spec_from_mcp",

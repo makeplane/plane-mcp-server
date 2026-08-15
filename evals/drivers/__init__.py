@@ -42,7 +42,7 @@ from evals.drivers.cli.sidecar import (
     proxy_wrap_server_command,
     wait_for_proxy_meta,
 )
-from evals.drivers.driver import ApiDriver, CliDriver
+from evals.drivers.driver import ApiDriver, CliDriver, CliRunError
 
 # Registry
 # ---------------------------------------------------------------------------
@@ -72,6 +72,7 @@ __all__ = [
     "ApiDriver",
     "ClaudeCliDriver",
     "CliDriver",
+    "CliRunError",
     "CodexCliDriver",
     "OpencodeCliDriver",
     "apply_proxy_sidecar",
