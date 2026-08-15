@@ -170,6 +170,8 @@ def register(mcp: FastMCP) -> None:
             return missing(action, "template_id")
 
         if action == "update":
+            if body == {}:
+                return "Error: template_data must contain at least one field."
             if not (name or description or body):
                 return missing(action, "name, description or template_data")
             return namespace.update(
