@@ -21,12 +21,16 @@ from typing import Any
 
 from evals.evidence import (
     EVIDENCE_SENTINELS_ENV,
-    configured_evidence_labels,
     consume_evidence_config,
+    fingerprint_evidence_sentinels,
+    normalize_evidence_aggregates,
+    normalize_evidence_fingerprints,
     normalize_evidence_sentinels,
     normalize_evidence_targets,
-    observed_sentinel_labels,
+    observed_aggregate_labels,
+    observed_fingerprint_labels,
 )
+from evals.tool_manifest import ToolManifestCapture
 
 # Single post-EOF / child-exit deadline for the whole shutdown sequence.
 SHUTDOWN_DEADLINE_S = 10.0
@@ -137,19 +141,34 @@ class SidecarRecorder:
         *,
         record_result_payloads: bool = False,
         evidence_sentinels: dict[str, Any] | None = None,
+        evidence_fingerprints: dict[str, Any] | None = None,
         evidence_targets: dict[str, Any] | None = None,
+        evidence_aggregates: dict[str, Any] | None = None,
     ) -> None:
         self.log_path = log_path
         self.record_result_payloads = record_result_payloads
-        self.evidence_sentinels = normalize_evidence_sentinels(evidence_sentinels)
+        raw_sentinels = normalize_evidence_sentinels(evidence_sentinels)
+        self.evidence_fingerprints = normalize_evidence_fingerprints(evidence_fingerprints)
+        if not self.evidence_fingerprints and raw_sentinels:
+            self.evidence_fingerprints = fingerprint_evidence_sentinels(raw_sentinels)
         self.evidence_targets = normalize_evidence_targets(evidence_targets)
-        self.evidence_active = bool(configured_evidence_labels(self.evidence_sentinels, self.evidence_targets))
+        self.evidence_aggregates = normalize_evidence_aggregates(evidence_aggregates)
+        self.evidence_active = bool(
+            (self.evidence_fingerprints.keys() | self.evidence_aggregates.keys()) & self.evidence_targets.keys()
+        )
         self._lock = threading.Lock()
+        self._error_lock = threading.Lock()
         self._pending: dict[Any, dict[str, Any]] = {}
+        self._non_tool_pending: dict[Any, dict[str, Any]] = {}
+        self._tool_manifest = ToolManifestCapture()
         self._seq = 0
         self.relayed_lines = 0
         self.unparsed_lines = 0
+        self.non_json_lines = 0
+        self.malformed_jsonrpc = 0
+        self.recorder_errors = 0
         self.unmatched_responses = 0
+        self.non_tool_responses = 0
         self.notifications = 0
         self.server_requests = 0
         self.child_killed = False
@@ -173,10 +192,19 @@ class SidecarRecorder:
         with self._lock:
             self.relayed_lines += 1
 
-    def note_unparsed(self) -> None:
+    def note_unparsed(self, *, malformed_jsonrpc: bool = False) -> None:
         with self._lock:
             self.unparsed_lines += 1
+            if malformed_jsonrpc:
+                self.malformed_jsonrpc += 1
+            else:
+                self.non_json_lines += 1
             self.relayed_lines += 1
+
+    def note_recorder_error(self) -> None:
+        """Count a swallowed callback failure without depending on recorder state."""
+        with self._error_lock:
+            self.recorder_errors += 1
 
     def on_client_message(self, obj: dict[str, Any]) -> None:
         """Handle a parsed JSON-RPC message from the client (parent → child)."""
@@ -189,7 +217,15 @@ class SidecarRecorder:
         if not has_method:
             return
         method = obj.get("method")
+        req_id = obj.get("id")
         if method != "tools/call":
+            params = obj.get("params")
+            cursor = params.get("cursor") if isinstance(params, dict) else None
+            with self._lock:
+                self._non_tool_pending[req_id] = {
+                    "method": str(method),
+                    "cursor": str(cursor) if cursor is not None else None,
+                }
             return
         params = obj.get("params") or {}
         if not isinstance(params, dict):
@@ -198,7 +234,6 @@ class SidecarRecorder:
         arguments = params.get("arguments")
         if arguments is None:
             arguments = {}
-        req_id = obj.get("id")
         with self._lock:
             self._seq += 1
             self._pending[req_id] = {
@@ -216,6 +251,8 @@ class SidecarRecorder:
         if has_method and not has_id:
             with self._lock:
                 self.notifications += 1
+                if obj.get("method") == "notifications/tools/list_changed":
+                    self._tool_manifest.invalidate()
             return
         if has_method and has_id:
             with self._lock:
@@ -227,6 +264,16 @@ class SidecarRecorder:
         req_id = obj.get("id")
         with self._lock:
             pending = self._pending.pop(req_id, None)
+            non_tool_pending = self._non_tool_pending.pop(req_id, None) if pending is None else None
+        if non_tool_pending is not None:
+            with self._lock:
+                self.non_tool_responses += 1
+                if non_tool_pending["method"] == "tools/list" and isinstance(obj.get("result"), dict):
+                    self._tool_manifest.observe_page(
+                        obj["result"],
+                        request_cursor=non_tool_pending["cursor"],
+                    )
+            return
         if pending is None:
             with self._lock:
                 self.unmatched_responses += 1
@@ -255,11 +302,23 @@ class SidecarRecorder:
         }
         if self.evidence_active:
             # Persist labels only. The matching values and result body stay in memory.
-            row["observed_sentinels"] = observed_sentinel_labels(
-                result_text,
-                self.evidence_sentinels,
-                request_args=pending["args"],
-                evidence_targets=self.evidence_targets,
+            row["observed_sentinels"] = sorted(
+                set(
+                    observed_fingerprint_labels(
+                        result_text,
+                        self.evidence_fingerprints,
+                        request_args=pending["args"],
+                        evidence_targets=self.evidence_targets,
+                    )
+                )
+                | set(
+                    observed_aggregate_labels(
+                        result_text,
+                        self.evidence_aggregates,
+                        request_args=pending["args"],
+                        evidence_targets=self.evidence_targets,
+                    )
+                )
             )
         if self.record_result_payloads:
             row["result_text"] = result_text
@@ -271,17 +330,27 @@ class SidecarRecorder:
             if self.finalized:
                 self.post_finalize_appends += 1
                 return
+            with self._error_lock:
+                recorder_errors = self.recorder_errors
             row = {
                 "row_type": "proxy_meta",
                 "relayed_lines": self.relayed_lines,
                 "unparsed_lines": self.unparsed_lines,
+                "non_json_lines": self.non_json_lines,
+                "malformed_jsonrpc": self.malformed_jsonrpc,
+                "recorder_errors": recorder_errors,
                 "unmatched_responses": self.unmatched_responses,
+                "non_tool_responses": self.non_tool_responses,
                 "notifications": self.notifications,
                 "server_requests": self.server_requests,
                 "pending_left": len(self._pending),
+                "non_tool_pending_left": len(self._non_tool_pending),
+                "last_seq": self._seq,
+                "tool_request_count": self._seq,
                 "child_killed": self.child_killed,
                 "pumps_alive": self.pumps_alive,
                 "evidence_trace_available": self.evidence_active,
+                "tool_manifest_fingerprint": self._tool_manifest.fingerprint,
             }
             line = json.dumps(row, default=str, ensure_ascii=False) + "\n"
             with self.log_path.open("a", encoding="utf-8") as fh:
@@ -289,8 +358,34 @@ class SidecarRecorder:
             self.finalized = True
 
 
+def _valid_jsonrpc_object(obj: dict[str, Any]) -> bool:
+    """Validate the JSON-RPC 2.0 message envelope used by MCP stdio."""
+    if obj.get("jsonrpc") != "2.0":
+        return False
+    has_method = "method" in obj
+    has_id = "id" in obj
+    if has_id and (isinstance(obj.get("id"), bool) or not isinstance(obj.get("id"), (str, int, float, type(None)))):
+        return False
+    if has_method:
+        if not isinstance(obj.get("method"), str) or "result" in obj or "error" in obj:
+            return False
+        params = obj.get("params")
+        return params is None or isinstance(params, (dict, list))
+    if not has_id or ("result" in obj) == ("error" in obj):
+        return False
+    if "error" not in obj:
+        return True
+    error = obj.get("error")
+    return bool(
+        isinstance(error, dict)
+        and isinstance(error.get("code"), int)
+        and not isinstance(error.get("code"), bool)
+        and isinstance(error.get("message"), str)
+    )
+
+
 def try_parse_json_line(line: bytes) -> dict[str, Any] | None:
-    """Parse a JSON object line; return None on failure (never raises)."""
+    """Parse a valid JSON-RPC object line; return None on failure (never raises)."""
     try:
         text = line.decode("utf-8").strip()
     except UnicodeDecodeError:
@@ -301,7 +396,24 @@ def try_parse_json_line(line: bytes) -> dict[str, Any] | None:
         obj = json.loads(text)
     except json.JSONDecodeError:
         return None
-    return obj if isinstance(obj, dict) else None
+    return obj if isinstance(obj, dict) and _valid_jsonrpc_object(obj) else None
+
+
+def classify_jsonrpc_line(line: bytes) -> tuple[str, dict[str, Any] | None]:
+    """Classify a framed line as blank, non-JSON, malformed JSON-RPC, or valid."""
+    try:
+        text = line.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return "non_json", None
+    if not text:
+        return "blank", None
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        return "non_json", None
+    if not isinstance(obj, dict) or not _valid_jsonrpc_object(obj):
+        return "malformed_jsonrpc", None
+    return "valid", obj
 
 
 def process_buffer_lines(
@@ -327,9 +439,11 @@ def process_buffer_lines(
         line = bytes(buf[: idx + 1])
         del buf[: idx + 1]
         if record_jsonrpc and recorder is not None:
-            obj = try_parse_json_line(line)
-            if obj is None:
-                recorder.note_unparsed()
+            classification, obj = classify_jsonrpc_line(line)
+            if classification == "blank":
+                recorder.note_relayed()
+            elif obj is None:
+                recorder.note_unparsed(malformed_jsonrpc=classification == "malformed_jsonrpc")
             else:
                 recorder.note_relayed()
                 try:
@@ -338,7 +452,7 @@ def process_buffer_lines(
                     else:
                         recorder.on_server_message(obj)
                 except Exception:
-                    pass
+                    recorder.note_recorder_error()
         # Forward only after recording so the opposite endpoint cannot race.
         write_all_fd(forward_fd, line)
 
@@ -404,7 +518,7 @@ def pump_raw(
             except (BrokenPipeError, OSError):
                 pass
             if record_jsonrpc and recorder is not None:
-                recorder.note_unparsed()
+                recorder.note_unparsed(malformed_jsonrpc=True)
             buf.clear()
     finally:
         done.set()
@@ -432,7 +546,9 @@ def run_proxy(
     *,
     record_result_payloads: bool = False,
     evidence_sentinels: dict[str, Any] | None = None,
+    evidence_fingerprints: dict[str, Any] | None = None,
     evidence_targets: dict[str, Any] | None = None,
+    evidence_aggregates: dict[str, Any] | None = None,
 ) -> int:
     """Spawn ``command`` as the real MCP server and relay with recording.
 
@@ -445,7 +561,9 @@ def run_proxy(
         log_path,
         record_result_payloads=record_result_payloads,
         evidence_sentinels=evidence_sentinels,
+        evidence_fingerprints=evidence_fingerprints,
         evidence_targets=evidence_targets,
+        evidence_aggregates=evidence_aggregates,
     )
     child: subprocess.Popen[bytes] | None = None
     # Scrub repo PYTHONPATH so the real server does not import from this tree.
@@ -630,13 +748,14 @@ def main(argv: list[str] | None = None) -> int:
         # Already a session leader, or platform forbids setsid — continue.
         pass
     args = parse_args(argv)
-    evidence_sentinels, evidence_targets = consume_evidence_config(args.evidence_file)
+    evidence_fingerprints, evidence_targets, evidence_aggregates = consume_evidence_config(args.evidence_file)
     return run_proxy(
         list(args.command),
         Path(args.log),
         record_result_payloads=bool(args.record_result_payloads),
-        evidence_sentinels=evidence_sentinels,
+        evidence_fingerprints=evidence_fingerprints,
         evidence_targets=evidence_targets,
+        evidence_aggregates=evidence_aggregates,
     )
 
 

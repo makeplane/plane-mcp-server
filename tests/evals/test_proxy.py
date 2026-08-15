@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
 import textwrap
@@ -16,7 +18,7 @@ from evals.drivers import (
     load_proxy_sidecar,
     load_proxy_sidecar_calls,
 )
-from evals.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE
+from evals.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE, write_evidence_config
 from evals.proxy import (
     SHUTDOWN_DEADLINE_S,
     SidecarRecorder,
@@ -27,9 +29,24 @@ from evals.proxy import (
     write_all_fd,
 )
 from evals.proxy import main as proxy_main
+from evals.report.summary import summarize
+from evals.results import AgentRun, TaskResult, agent_run_to_task_result
+from evals.runner.live import _record_trace_infra
 from tests.evals.conftest import case_params
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+def _request(request_id: int, method: str, params: dict | None = None) -> dict:
+    message = {"jsonrpc": "2.0", "id": request_id, "method": method}
+    if params is not None:
+        message["params"] = params
+    return message
+
+
+def _response(request_id: int, result: object) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
 
 FAKE_SERVER = textwrap.dedent(
     r"""
@@ -549,13 +566,29 @@ def _sidecar_recorder_unit(tmp_path):
     rec = SidecarRecorder(
         tmp_path / "a.jsonl",
         evidence_sentinels={TARGET_ENTITY_EVIDENCE: [sentinel]},
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target-1"]},
+    )
+    rec.on_client_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {"name": "t", "arguments": {"work_item_id": "non-target"}},
+        }
+    )
+    rec.on_server_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "result": {"content": [{"type": "text", "text": f"target={sentinel}"}], "isError": False},
+        }
     )
     rec.on_client_message(
         {
             "jsonrpc": "2.0",
             "id": 9,
             "method": "tools/call",
-            "params": {"name": "t", "arguments": {"a": 1}},
+            "params": {"name": "t", "arguments": {"work_item_id": "target-1"}},
         }
     )
     rec.on_server_message(
@@ -568,17 +601,56 @@ def _sidecar_recorder_unit(tmp_path):
     rec.write_meta()
     calls = load_proxy_sidecar_calls(tmp_path / "a.jsonl")
     raw_rows = [json.loads(line) for line in (tmp_path / "a.jsonl").read_text().splitlines()]
-    raw_call = next(row for row in raw_rows if row.get("row_type") != "proxy_meta")
-    assert len(calls) == 1
+    raw_calls = [row for row in raw_rows if row.get("row_type") != "proxy_meta"]
+    assert len(calls) == 2
     assert calls[0]["tool"] == "t"
-    assert calls[0]["args"] == {"a": 1}
+    assert calls[0]["args"] == {"work_item_id": "non-target"}
+    assert calls[1]["args"] == {"work_item_id": "target-1"}
     assert calls[0]["origin"] == "plane"
     assert "result_text" not in calls[0]
-    assert "result_text" not in raw_call
-    assert calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
-    assert raw_call["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert all("result_text" not in row for row in raw_calls)
+    assert calls[0]["observed_sentinels"] == []
+    assert calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert raw_calls[0]["observed_sentinels"] == []
+    assert raw_calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert sentinel not in (tmp_path / "a.jsonl").read_text(encoding="utf-8")
     assert rec.finalized is True
+
+
+def test_proxy_records_exact_target_bound_aggregate_evidence_without_payload(tmp_path):
+    path = tmp_path / "aggregate.jsonl"
+    rec = SidecarRecorder(
+        path,
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["project-1"]},
+        evidence_aggregates={
+            TARGET_ENTITY_EVIDENCE: [{"kind": "total_count", "value": 4}],
+        },
+    )
+    rec.on_client_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "count_work_items",
+                "arguments": {"pql": 'project = "project-1"'},
+            },
+        }
+    )
+    rec.on_server_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"content": [{"type": "text", "text": '{"total_count": 4}'}]},
+        }
+    )
+    rec.write_meta()
+
+    calls = load_proxy_sidecar_calls(path)
+    assert calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    persisted = path.read_text(encoding="utf-8")
+    assert "result_text" not in persisted
+    assert '"total_count"' not in persisted
 
 
 def _sidecar_result_payload_round_trips_only_when_enabled(tmp_path):
@@ -869,6 +941,42 @@ def test_scrub_child_pythonpath_removes_repo():
     assert "PYTHONPATH" not in only
 
 
+def test_proxy_consumes_private_evidence_file_before_starting_mcp(tmp_path: Path, monkeypatch):
+    sentinel = "hidden-target-fact-7b0a1f9c"
+    evidence_file = tmp_path / "evidence.json"
+    write_evidence_config(
+        evidence_file,
+        {TARGET_ENTITY_EVIDENCE: [sentinel]},
+        {TARGET_ENTITY_EVIDENCE: ["target-1"]},
+    )
+    assert stat.S_IMODE(evidence_file.stat().st_mode) == 0o600
+    assert sentinel not in evidence_file.read_text(encoding="utf-8")
+    captured = {}
+
+    def fake_run_proxy(command, log_path, **kwargs):
+        assert not evidence_file.exists(), "proxy must unlink evidence before starting Plane MCP"
+        captured.update({"command": command, "log_path": log_path, **kwargs})
+        return 0
+
+    monkeypatch.setattr("evals.proxy.os.setsid", lambda: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr("evals.proxy.run_proxy", fake_run_proxy)
+    rc = proxy_main(
+        [
+            "--log",
+            str(tmp_path / "calls.jsonl"),
+            "--evidence-file",
+            str(evidence_file),
+            "--",
+            "fake-plane-mcp",
+        ]
+    )
+
+    assert rc == 0
+    assert set(captured["evidence_fingerprints"]) == {TARGET_ENTITY_EVIDENCE}
+    assert captured["evidence_targets"] == {TARGET_ENTITY_EVIDENCE: ("target-1",)}
+    assert captured["evidence_aggregates"] == {}
+
+
 def test_rapid_response_pairing(tmp_path: Path):
     """Record-before-forward: fast child responses must pair with requests (no unmatched).
 
@@ -1074,3 +1182,298 @@ def test_bounded_shutdown_wall_clock(tmp_path: Path):
     assert elapsed < SHUTDOWN_DEADLINE_S + 2.0
     rows = [json.loads(ln) for ln in sidecar.read_text().splitlines() if ln.strip()]
     assert rows[-1].get("row_type") == "proxy_meta"
+
+
+def test_clean_protocol_session_is_complete_and_has_no_unmatched_responses(tmp_path: Path):
+    path = tmp_path / "clean.jsonl"
+    recorder = SidecarRecorder(path)
+    recorder.on_client_message(_request(1, "initialize"))
+    recorder.on_server_message(_response(1, {"protocolVersion": "2025-06-18"}))
+    recorder.on_client_message(_request(2, "tools/list"))
+    recorder.on_server_message(_response(2, {"tools": [{"name": "lookup", "inputSchema": {"type": "object"}}]}))
+    recorder.on_client_message(_request(3, "tools/call", {"name": "lookup", "arguments": {"query": "x"}}))
+    recorder.on_server_message(_response(3, {"content": [], "isError": False}))
+    recorder.write_meta()
+
+    calls, status = load_proxy_sidecar(path)
+    notes: list[str] = []
+    applied = apply_proxy_sidecar([], [], path, notes)
+    agent = agent_run_to_task_result(
+        AgentRun(
+            calls=applied.calls,
+            final_text="done",
+            usage=None,
+            stopped_reason="end_turn",
+            trace_integrity=applied.trace_integrity,
+            trace_integrity_reason=applied.trace_integrity_reason,
+        )
+    )
+    row = TaskResult(task_id="R1", expected_rows=1, success=True)
+    row.apply_agent_result(agent)
+
+    assert status["state"] == "complete"
+    assert status["meta"]["unmatched_responses"] == 0
+    assert status["meta"]["non_tool_responses"] == 2
+    assert status["meta"]["non_tool_pending_left"] == 0
+    assert status["tool_manifest_fingerprint"]
+    assert [call["tool"] for call in calls] == ["lookup"]
+    assert summarize([row], expected_rows=1).complete is True
+
+
+def test_genuinely_lossy_trace_makes_summary_incomplete(tmp_path: Path, capsys):
+    path = tmp_path / "lossy.jsonl"
+    recorder = SidecarRecorder(path)
+    recorder.on_server_message(_response(404, {"content": []}))
+    recorder.write_meta()
+    notes: list[str] = []
+
+    applied = apply_proxy_sidecar([], [], path, notes)
+    agent = agent_run_to_task_result(
+        AgentRun(
+            calls=[],
+            final_text="done",
+            usage=None,
+            stopped_reason="end_turn",
+            trace_integrity=applied.trace_integrity,
+            trace_integrity_reason=applied.trace_integrity_reason,
+            notes=notes,
+        )
+    )
+    row = TaskResult(task_id="R1", expected_rows=1)
+    row.apply_agent_result(agent)
+    assert _record_trace_infra(row, agent, task={"id": "R1"}, repetition=0) is True
+
+    summary = summarize([row], expected_rows=1)
+    assert row.error_class == "infra_trace"
+    assert summary.infra_errors == 1
+    assert summary.complete is False
+    assert "unmatched_responses=1" in row.error
+    capsys.readouterr()
+
+
+def test_lost_tools_list_response_is_non_tool_pending_loss(tmp_path: Path):
+    path = tmp_path / "lost-list.jsonl"
+    recorder = SidecarRecorder(path)
+    recorder.on_client_message(_request(1, "tools/list"))
+    recorder.write_meta()
+
+    _, status = load_proxy_sidecar(path)
+    notes: list[str] = []
+    apply_proxy_sidecar([], [], path, notes)
+
+    assert status["state"] == "incomplete"
+    assert status["non_tool_pending_left"] == 1
+    assert "non_tool_pending_left=1" in notes[0]
+
+
+def test_deleting_final_call_row_is_caught_by_last_seq(tmp_path: Path):
+    path = tmp_path / "deleted-final.jsonl"
+    recorder = SidecarRecorder(path)
+    for request_id in (1, 2):
+        recorder.on_client_message(_request(request_id, "tools/call", {"name": f"tool-{request_id}", "arguments": {}}))
+        recorder.on_server_message(_response(request_id, {"content": []}))
+    recorder.write_meta()
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    path.write_text(
+        "\n".join(json.dumps(row) for row in rows if row.get("seq") != 2) + "\n",
+        encoding="utf-8",
+    )
+
+    _, status = load_proxy_sidecar(path)
+    notes: list[str] = []
+    apply_proxy_sidecar([], [], path, notes)
+
+    assert status["state"] == "incomplete"
+    assert status["missing_seq"] == 1
+    assert "missing_seq=1" in notes[0]
+
+
+@pytest.mark.parametrize(
+    ("sequences", "last_seq", "status_key"),
+    [
+        pytest.param([0], 0, "invalid_seq", id="nonpositive"),
+        pytest.param([1, 1], 1, "duplicate_seq", id="duplicate"),
+        pytest.param([1, 3], 3, "missing_seq", id="gap"),
+        pytest.param([1, 2], 1, "unexpected_seq", id="past-last-seq"),
+    ],
+)
+def test_sidecar_rejects_invalid_duplicate_and_gapped_sequences(
+    tmp_path: Path,
+    sequences: list[int],
+    last_seq: int,
+    status_key: str,
+):
+    path = tmp_path / f"{status_key}.jsonl"
+    rows = [{"tool": "t", "args": {}, "seq": seq} for seq in sequences]
+    rows.append(
+        {
+            "row_type": "proxy_meta",
+            "pending_left": 0,
+            "last_seq": last_seq,
+            "tool_request_count": last_seq,
+        }
+    )
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    _, status = load_proxy_sidecar(path)
+    notes: list[str] = []
+    apply_proxy_sidecar([], [], path, notes)
+
+    assert status["state"] == "incomplete"
+    assert status[status_key] > 0
+    assert f"{status_key}={status[status_key]}" in notes[0]
+
+
+@pytest.mark.parametrize("case", ["duplicate", "not-final"])
+def test_sidecar_requires_exactly_one_final_proxy_meta(tmp_path: Path, case: str):
+    path = tmp_path / f"meta-{case}.jsonl"
+    meta = {"row_type": "proxy_meta", "pending_left": 0, "last_seq": 0, "tool_request_count": 0}
+    if case == "duplicate":
+        rows = [meta, meta]
+    else:
+        meta.update({"last_seq": 1, "tool_request_count": 1})
+        rows = [meta, {"tool": "late", "args": {}, "seq": 1}]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    _, status = load_proxy_sidecar(path)
+    notes: list[str] = []
+    apply_proxy_sidecar([], [], path, notes)
+
+    assert status["state"] == "incomplete"
+    if case == "duplicate":
+        assert status["proxy_meta_count"] == 2
+        assert "proxy_meta_count=2" in notes[0]
+    else:
+        assert status["proxy_meta_not_final"] is True
+        assert "proxy_meta_not_final=1" in notes[0]
+
+
+@pytest.mark.parametrize("case", ["missing-last-seq", "request-count-mismatch"])
+def test_sidecar_requires_consistent_sequence_metadata(tmp_path: Path, case: str):
+    path = tmp_path / f"sequence-meta-{case}.jsonl"
+    meta = {"row_type": "proxy_meta", "pending_left": 0, "tool_request_count": 0}
+    if case == "request-count-mismatch":
+        meta.update({"last_seq": 0, "tool_request_count": 1})
+    path.write_text(json.dumps(meta) + "\n", encoding="utf-8")
+
+    _, status = load_proxy_sidecar(path)
+    notes: list[str] = []
+    apply_proxy_sidecar([], [], path, notes)
+
+    assert status["state"] == "incomplete"
+    assert status["invalid_meta_fields"] > 0
+    assert f"invalid_meta_fields={status['invalid_meta_fields']}" in notes[0]
+
+
+def test_protocol_noise_and_malformed_jsonrpc_are_distinct_and_fatal(tmp_path: Path):
+    path = tmp_path / "protocol.jsonl"
+    recorder = SidecarRecorder(path)
+    read_fd, write_fd = os.pipe()
+    try:
+        buf = bytearray(
+            b'  \nserver banner\n{"jsonrpc":"2.0"}\n{"jsonrpc":"2.0","method":"notifications/initialized"}\n'
+        )
+        process_buffer_lines(
+            buf,
+            forward_fd=write_fd,
+            recorder=recorder,
+            is_client=False,
+            record_jsonrpc=True,
+        )
+    finally:
+        os.close(write_fd)
+        os.close(read_fd)
+    recorder.write_meta()
+    notes: list[str] = []
+    applied = apply_proxy_sidecar([], [], path, notes)
+
+    assert applied.trace_integrity is False
+    assert applied.trace_integrity_reason == "protocol_violation"
+    assert applied.status["unparsed_lines"] == 2
+    assert applied.status["non_json_lines"] == 1
+    assert applied.status["malformed_jsonrpc"] == 1
+    assert "unparsed_lines=2" in notes[0]
+    agent = agent_run_to_task_result(
+        AgentRun(
+            calls=[],
+            final_text="",
+            usage=None,
+            stopped_reason="end_turn",
+            trace_integrity=applied.trace_integrity,
+            trace_integrity_reason=applied.trace_integrity_reason,
+            notes=notes,
+        )
+    )
+    row = TaskResult(task_id="R1")
+    row.apply_agent_result(agent)
+    assert _record_trace_infra(row, agent, task={"id": "R1"}, repetition=0) is True
+    assert row.error_class == "infra_protocol"
+
+
+def test_recorder_callback_failure_is_counted_and_invalidates_trace(tmp_path: Path, monkeypatch):
+    path = tmp_path / "recorder-error.jsonl"
+    recorder = SidecarRecorder(path)
+
+    def fail(_obj):
+        raise RuntimeError("append failed")
+
+    monkeypatch.setattr(recorder, "on_client_message", fail)
+    read_fd, write_fd = os.pipe()
+    try:
+        process_buffer_lines(
+            bytearray(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n'),
+            forward_fd=write_fd,
+            recorder=recorder,
+            is_client=True,
+            record_jsonrpc=True,
+        )
+    finally:
+        os.close(write_fd)
+        os.close(read_fd)
+    recorder.write_meta()
+
+    _, status = load_proxy_sidecar(path)
+    notes: list[str] = []
+    apply_proxy_sidecar([], [], path, notes)
+
+    assert status["state"] == "incomplete"
+    assert status["recorder_errors"] == 1
+    assert "recorder_errors=1" in notes[0]
+
+
+def test_tools_list_changed_invalidates_proxy_manifest_snapshot(tmp_path: Path):
+    path = tmp_path / "stale-manifest.jsonl"
+    recorder = SidecarRecorder(path)
+    recorder.on_client_message(_request(1, "tools/list"))
+    recorder.on_server_message(_response(1, {"tools": [{"name": "lookup", "inputSchema": {"type": "object"}}]}))
+    recorder.on_server_message({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+    recorder.write_meta()
+
+    _, status = load_proxy_sidecar(path)
+
+    assert status["state"] == "complete"
+    assert status["tool_manifest_fingerprint"] is None
+
+
+def test_cli_fallback_does_not_restore_trace_integrity(tmp_path: Path):
+    path = tmp_path / "fallback.jsonl"
+    recorder = SidecarRecorder(path)
+    recorder.on_client_message(_request(0, "tools/list"))
+    recorder.on_server_message(_response(0, {"tools": [{"name": "proxy-only", "inputSchema": {}}]}))
+    recorder.on_client_message(_request(1, "tools/call", {"name": "proxy-only", "arguments": {}}))
+    recorder.write_meta()
+    cli_calls = [
+        {"tool": "cli-one", "args": {}, "origin": "plane"},
+        {"tool": "cli-two", "args": {}, "origin": "plane"},
+    ]
+    notes: list[str] = []
+
+    applied = apply_proxy_sidecar(cli_calls, [], path, notes)
+    calls, _, source = applied
+
+    assert source == "json"
+    assert calls == cli_calls
+    assert applied.trace_integrity is False
+    assert applied.trace_integrity_reason == "recorder_loss"
+    assert applied.tool_manifest_fingerprint is None
+    assert "proxy_sidecar_deferred_to_cli_trace" in notes
