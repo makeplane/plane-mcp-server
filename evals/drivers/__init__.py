@@ -39,6 +39,7 @@ from evals.drivers.cli.sidecar import (
     harvest_proxy_after_cli_timeout,
     load_proxy_sidecar,
     load_proxy_sidecar_calls,
+    proxy_pid_path,
     proxy_wrap_server_command,
     wait_for_proxy_meta,
 )
@@ -91,6 +92,7 @@ __all__ = [
     "parse_codex_jsonl_events",
     "parse_codex_rollout_calls",
     "prepare_antigravity_fake_home",
+    "proxy_pid_path",
     "proxy_wrap_server_command",
     "run_cli_subprocess",
     "wait_for_proxy_meta",

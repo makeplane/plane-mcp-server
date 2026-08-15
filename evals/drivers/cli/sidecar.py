@@ -9,10 +9,12 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from evals import REPO_ROOT
 from evals.results import TraceIntegrityReason
+
+ProxyMetaWaitOutcome = Literal["meta_present", "proxy_exited", "proxy_not_observed", "timeout"]
 
 
 @dataclass(slots=True)
@@ -76,22 +78,27 @@ def ensure_proxy_pythonpath(env: dict[str, str]) -> dict[str, str]:
 def load_proxy_sidecar(
     path: Path,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Load sidecar call rows (sorted by seq) plus a status dict.
+    """Load and validate the sidecar as independently finalized proxy sessions.
 
     Status keys:
       - missing / empty / complete / incomplete
       - torn_line: final line failed to parse
       - skipped_rows: non-final rows that could not produce a call or metadata row
-      - meta: proxy_meta row if present
-      - pending_left / non_tool_pending_left: unmatched requests from meta
-      - sequence_errors: invalid, duplicate, missing, or unexpected call sequence values
-      - proxy_meta_count / proxy_meta_not_final: metadata framing integrity
+      - meta / metas / sessions: final metadata plus per-session validation
+      - pending_left / non_tool_pending_left: sums across sessions
+      - sequence errors: sums of per-session invalid/duplicate/missing/unexpected values
+      - proxy_meta_not_final: a trailing session lacks its terminating metadata
+      - tool_manifest_disagreement: finalized sessions advertised different surfaces
     """
     status: dict[str, Any] = {
         "state": "missing",
         "torn_line": False,
         "skipped_rows": 0,
         "meta": None,
+        "metas": [],
+        "sessions": [],
+        "session_count": 0,
+        "unfinalized_sessions": 0,
         "pending_left": None,
         "non_tool_pending_left": None,
         "proxy_meta_count": 0,
@@ -101,6 +108,9 @@ def load_proxy_sidecar(
         "missing_seq": 0,
         "unexpected_seq": 0,
         "invalid_meta_fields": 0,
+        "tool_manifest_disagreement": False,
+        "tool_manifest_fingerprints": [],
+        "tool_manifest_missing_sessions": 0,
     }
     if not path.is_file():
         return [], status
@@ -112,39 +122,39 @@ def load_proxy_sidecar(
         status["state"] = "empty"
         return [], status
 
-    # Decode with replacement so invalid UTF-8 does not crash the loader.
-    text = raw.decode("utf-8", errors="replace")
-    lines = text.splitlines()
-    calls: list[dict[str, Any]] = []
-    meta: dict[str, Any] | None = None
-    meta_positions: list[int] = []
-    nonblank_position = 0
-    torn = False
-    skipped_rows = 0
+    # Each proxy process restarts seq at 1 and terminates its segment with
+    # proxy_meta. Validate and order calls within those boundaries, never over
+    # the whole file where healthy sessions can have colliding seq values.
+    lines = raw.decode("utf-8", errors="replace").splitlines()
+    raw_segments: list[dict[str, Any]] = []
+    current: dict[str, Any] = {"calls": [], "meta": None, "torn_line": False, "skipped_rows": 0}
+    current_has_rows = False
     for i, line in enumerate(lines):
         s = line.strip()
         if not s:
             continue
-        nonblank_position += 1
+        current_has_rows = True
         try:
             row = json.loads(s)
         except json.JSONDecodeError:
             # Tolerate a torn final line (crash mid-write); stop there.
             if i == len(lines) - 1:
-                torn = True
+                current["torn_line"] = True
                 break
-            skipped_rows += 1
+            current["skipped_rows"] += 1
             continue
         if not isinstance(row, dict):
-            skipped_rows += 1
+            current["skipped_rows"] += 1
             continue
         if row.get("row_type") == "proxy_meta":
-            meta = row
-            meta_positions.append(nonblank_position)
+            current["meta"] = row
+            raw_segments.append(current)
+            current = {"calls": [], "meta": None, "torn_line": False, "skipped_rows": 0}
+            current_has_rows = False
             continue
         tool = row.get("tool")
         if not tool:
-            skipped_rows += 1
+            current["skipped_rows"] += 1
             continue
         call = {
             "tool": str(tool),
@@ -160,60 +170,23 @@ def load_proxy_sidecar(
             call["result_text"] = row["result_text"]
         if isinstance(row.get("observed_sentinels"), list):
             call["observed_sentinels"] = [str(value) for value in row["observed_sentinels"]]
-        calls.append(call)
+        current["calls"].append(call)
 
-    valid_sequences = [call["seq"] for call in calls if _nonnegative_int(call.get("seq")) not in (None, 0)]
-    invalid_seq = len(calls) - len(valid_sequences)
-    duplicate_seq = len(valid_sequences) - len(set(valid_sequences))
-    last_seq = _nonnegative_int(meta.get("last_seq")) if meta is not None else None
-    tool_request_count = _nonnegative_int(meta.get("tool_request_count")) if meta is not None else None
-    invalid_meta_fields = int(meta is not None and last_seq is None) + int(
-        meta is not None and tool_request_count is None
+    if current_has_rows:
+        raw_segments.append(current)
+    if not raw_segments:
+        status["state"] = "empty"
+        return [], status
+
+    counter_keys = (
+        "pending_left",
+        "non_tool_pending_left",
+        "unmatched_responses",
+        "unparsed_lines",
+        "non_json_lines",
+        "malformed_jsonrpc",
+        "recorder_errors",
     )
-    if last_seq is not None and tool_request_count is not None and tool_request_count != last_seq:
-        invalid_meta_fields += 1
-    expected_sequences = set(range(1, last_seq + 1)) if last_seq is not None else set()
-    observed_sequences = set(valid_sequences)
-    missing_seq = len(expected_sequences - observed_sequences)
-    unexpected_seq = len(observed_sequences - expected_sequences) if last_seq is not None else 0
-
-    # Score order must match request seq, not response-append order. Invalid seq
-    # rows remain available for diagnostics but can never make the trace valid.
-    calls.sort(
-        key=lambda call: (
-            _nonnegative_int(call.get("seq")) in (None, 0),
-            _nonnegative_int(call.get("seq")) or 0,
-        )
-    )
-
-    status["torn_line"] = torn
-    status["skipped_rows"] = skipped_rows
-    status["meta"] = meta
-    status["proxy_meta_count"] = len(meta_positions)
-    status["proxy_meta_not_final"] = bool(meta_positions and meta_positions[-1] != nonblank_position)
-    status["invalid_seq"] = invalid_seq
-    status["duplicate_seq"] = duplicate_seq
-    status["missing_seq"] = missing_seq
-    status["unexpected_seq"] = unexpected_seq
-    status["invalid_meta_fields"] = invalid_meta_fields
-    if meta is not None:
-        counter_keys = (
-            "pending_left",
-            "non_tool_pending_left",
-            "unmatched_responses",
-            "unparsed_lines",
-            "non_json_lines",
-            "malformed_jsonrpc",
-            "recorder_errors",
-        )
-        for key in counter_keys:
-            value = _nonnegative_int(meta.get(key))
-            if meta.get(key) is not None and value is None:
-                status["invalid_meta_fields"] += 1
-            status[key] = value
-        status["pumps_alive"] = bool(meta.get("pumps_alive"))
-        fingerprint = meta.get("tool_manifest_fingerprint")
-        status["tool_manifest_fingerprint"] = str(fingerprint) if isinstance(fingerprint, str) else None
     fatal_counts = (
         "pending_left",
         "non_tool_pending_left",
@@ -226,20 +199,107 @@ def load_proxy_sidecar(
         "unexpected_seq",
         "invalid_meta_fields",
     )
-    incomplete = bool(
-        torn
-        or skipped_rows > 0
-        or len(meta_positions) != 1
-        or status["proxy_meta_not_final"]
-        or any((status.get(key) or 0) > 0 for key in fatal_counts)
-        or (meta is not None and bool(meta.get("pumps_alive")))
+    calls: list[dict[str, Any]] = []
+    session_statuses: list[dict[str, Any]] = []
+    manifests: list[str] = []
+    for index, raw_segment in enumerate(raw_segments):
+        segment_calls = raw_segment["calls"]
+        meta = raw_segment["meta"]
+        valid_sequences = [call["seq"] for call in segment_calls if _nonnegative_int(call.get("seq")) not in (None, 0)]
+        last_seq = _nonnegative_int(meta.get("last_seq")) if meta is not None else None
+        tool_request_count = _nonnegative_int(meta.get("tool_request_count")) if meta is not None else None
+        segment: dict[str, Any] = {
+            "index": index,
+            "meta": meta,
+            "call_count": len(segment_calls),
+            "torn_line": bool(raw_segment["torn_line"]),
+            "skipped_rows": int(raw_segment["skipped_rows"]),
+            "invalid_seq": len(segment_calls) - len(valid_sequences),
+            "duplicate_seq": len(valid_sequences) - len(set(valid_sequences)),
+            "missing_seq": 0,
+            "unexpected_seq": 0,
+            "invalid_meta_fields": 0,
+            "pumps_alive": bool(meta.get("pumps_alive")) if meta is not None else False,
+            "last_seq": last_seq,
+            "tool_request_count": tool_request_count,
+        }
+        if meta is not None:
+            segment["invalid_meta_fields"] = int(last_seq is None) + int(tool_request_count is None)
+            if last_seq is not None and tool_request_count is not None and tool_request_count != last_seq:
+                segment["invalid_meta_fields"] += 1
+            expected_sequences = set(range(1, last_seq + 1)) if last_seq is not None else set()
+            observed_sequences = set(valid_sequences)
+            segment["missing_seq"] = len(expected_sequences - observed_sequences)
+            segment["unexpected_seq"] = len(observed_sequences - expected_sequences) if last_seq is not None else 0
+            for key in counter_keys:
+                value = _nonnegative_int(meta.get(key))
+                if meta.get(key) is not None and value is None:
+                    segment["invalid_meta_fields"] += 1
+                segment[key] = value
+            fingerprint = meta.get("tool_manifest_fingerprint")
+            if isinstance(fingerprint, str):
+                manifests.append(fingerprint)
+        else:
+            for key in counter_keys:
+                segment[key] = None
+
+        segment["state"] = (
+            "incomplete"
+            if meta is None
+            or segment["torn_line"]
+            or segment["skipped_rows"] > 0
+            or any((segment.get(key) or 0) > 0 for key in fatal_counts)
+            or segment["pumps_alive"]
+            else "complete"
+        )
+        # Preserve request order inside a session, then concatenate sessions in
+        # file order. Never globally sort colliding per-process seq values.
+        segment_calls.sort(
+            key=lambda call: (
+                _nonnegative_int(call.get("seq")) in (None, 0),
+                _nonnegative_int(call.get("seq")) or 0,
+            )
+        )
+        calls.extend(segment_calls)
+        session_statuses.append(segment)
+
+    metas = [segment["meta"] for segment in session_statuses if segment["meta"] is not None]
+    unfinalized_sessions = sum(segment["meta"] is None for segment in session_statuses)
+    status["sessions"] = session_statuses
+    status["session_count"] = len(session_statuses)
+    status["metas"] = metas
+    status["meta"] = metas[-1] if metas else None
+    status["proxy_meta_count"] = len(metas)
+    status["unfinalized_sessions"] = unfinalized_sessions
+    status["proxy_meta_not_final"] = unfinalized_sessions > 0
+    status["torn_line"] = any(segment["torn_line"] for segment in session_statuses)
+    status["pumps_alive"] = any(segment["pumps_alive"] for segment in session_statuses)
+    aggregate_keys = (
+        "skipped_rows",
+        *counter_keys,
+        "invalid_seq",
+        "duplicate_seq",
+        "missing_seq",
+        "unexpected_seq",
+        "invalid_meta_fields",
     )
-    if not calls and not meta and not torn and skipped_rows == 0:
-        status["state"] = "empty"
-    elif incomplete:
-        status["state"] = "incomplete"
-    else:
-        status["state"] = "complete"
+    for key in aggregate_keys:
+        status[key] = sum((segment.get(key) or 0) for segment in session_statuses)
+
+    unique_manifests = sorted(set(manifests))
+    missing_manifests = len(metas) - len(manifests)
+    status["tool_manifest_fingerprints"] = unique_manifests
+    status["tool_manifest_missing_sessions"] = missing_manifests
+    status["tool_manifest_disagreement"] = len(unique_manifests) > 1 or bool(unique_manifests and missing_manifests)
+    status["tool_manifest_fingerprint"] = (
+        unique_manifests[0] if len(unique_manifests) == 1 and missing_manifests == 0 else None
+    )
+    if status["meta"] is not None:
+        status["finalization_reason"] = status["meta"].get("finalization_reason")
+        status["finalization_signal"] = status["meta"].get("finalization_signal")
+    status["state"] = (
+        "incomplete" if any(segment["state"] == "incomplete" for segment in session_statuses) else "complete"
+    )
     return calls, status
 
 
@@ -258,10 +318,15 @@ def _incompleteness_note(status: dict[str, Any]) -> str:
     parts = ["proxy_sidecar_incomplete"]
     if status.get("torn_line"):
         parts.append("torn_line=1")
+    if status.get("meta") is None:
+        parts.append("no_meta=1")
+    else:
+        if status.get("proxy_meta_not_final"):
+            parts.append("proxy_meta_not_final=1")
+        if status.get("unfinalized_sessions"):
+            parts.append(f"unfinalized_sessions={int(status['unfinalized_sessions'])}")
     for key in (
         "skipped_rows",
-        "proxy_meta_count",
-        "proxy_meta_not_final",
         "pending_left",
         "non_tool_pending_left",
         "unmatched_responses",
@@ -278,8 +343,6 @@ def _incompleteness_note(status: dict[str, Any]) -> str:
         value = status.get(key)
         if value and not (key == "proxy_meta_count" and value == 1):
             parts.append(f"{key}={int(value)}")
-    if status.get("meta") is None:
-        parts.append("no_meta=1")
     if status.get("pumps_alive"):
         parts.append("pumps_alive=1")
     return ":".join(parts)
@@ -291,22 +354,118 @@ def load_proxy_sidecar_calls(path: Path) -> list[dict[str, Any]]:
     return calls
 
 
+def proxy_pid_path(sidecar_path: Path) -> Path:
+    """Return the companion lifecycle file written by the recording proxy."""
+    return sidecar_path.with_name(f"{sidecar_path.name}.pid")
+
+
+def _read_proxy_pid(sidecar_path: Path) -> int | None:
+    try:
+        raw = proxy_pid_path(sidecar_path).read_text(encoding="ascii").strip()
+        pid = int(raw)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    return pid if pid > 0 else None
+
+
+def _process_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _wait_for_proxy_meta_outcome(
+    sidecar_path: Path,
+    *,
+    poll_s: float = 0.2,
+    max_wait_s: float | None = None,
+) -> ProxyMetaWaitOutcome:
+    """Wait for final metadata and retain why an absent row cannot still arrive."""
+    # Local import keeps drivers import-light for non-proxy unit tests.
+    from evals.proxy import SHUTDOWN_DEADLINE_S
+
+    if max_wait_s is None:
+        max_wait_s = SHUTDOWN_DEADLINE_S + 2.0
+
+    # A completed CLI cannot launch a proxy after the fact. No trace and no
+    # lifecycle file therefore means the proxy was never observed, rather than
+    # a finalizer that could benefit from waiting for the whole deadline.
+    pid = _read_proxy_pid(sidecar_path)
+    if not sidecar_path.exists() and pid is None:
+        return "proxy_not_observed"
+
+    deadline = time.monotonic() + max(0.0, max_wait_s)
+    while True:
+        _, status = load_proxy_sidecar(sidecar_path)
+        if status.get("meta") is not None:
+            return "meta_present"
+        pid = _read_proxy_pid(sidecar_path)
+        if pid is not None and not _process_is_alive(pid):
+            return "proxy_exited"
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            break
+        time.sleep(min(max(0.001, poll_s), rem))
+
+    # Close the boundary races in both directions: metadata may have landed on
+    # the final sleep, or the proxy may have exited without writing it.
+    _, status = load_proxy_sidecar(sidecar_path)
+    if status.get("meta") is not None:
+        return "meta_present"
+    pid = _read_proxy_pid(sidecar_path)
+    if pid is not None and not _process_is_alive(pid):
+        return "proxy_exited"
+    return "timeout"
+
+
+def _note_proxy_meta_wait(outcome: ProxyMetaWaitOutcome, sidecar_path: Path, notes: list[str]) -> None:
+    if outcome == "proxy_exited":
+        notes.append("proxy_meta_missing_after_proxy_exit")
+    elif outcome == "proxy_not_observed":
+        notes.append("proxy_meta_missing:proxy_not_observed")
+    elif outcome == "timeout":
+        pid = _read_proxy_pid(sidecar_path)
+        state = "proxy_alive=1" if pid is not None and _process_is_alive(pid) else "proxy_state=unknown"
+        notes.append(f"proxy_meta_wait_timeout:{state}")
+
+
 def apply_proxy_sidecar(
     calls: list[dict[str, Any]],
     client_calls: list[dict[str, Any]],
     sidecar_path: Path,
     notes: list[str],
+    *,
+    poll_s: float = 0.2,
+    max_wait_s: float | None = None,
 ) -> ProxySidecarResult:
-    """Prefer a complete proxy sidecar; fall back to CLI-parsed when incomplete/empty.
+    """Wait for and prefer a complete sidecar; fall back when incomplete/empty.
 
     Incomplete sidecar (torn/skipped row, missing meta, pending_left>0) yields
     to the CLI trace when the CLI has *more* plane calls. Returns
     ``(plane_calls, client_calls, call_source)``.
     """
+    wait_outcome = _wait_for_proxy_meta_outcome(
+        sidecar_path,
+        poll_s=poll_s,
+        max_wait_s=max_wait_s,
+    )
+    _note_proxy_meta_wait(wait_outcome, sidecar_path, notes)
     proxy_calls, status = load_proxy_sidecar(sidecar_path)
     state = status.get("state")
     trace_integrity, trace_integrity_reason = trace_integrity_from_status(status)
     fingerprint = status.get("tool_manifest_fingerprint") if trace_integrity else None
+    if status.get("tool_manifest_disagreement"):
+        manifest_values = list(status.get("tool_manifest_fingerprints") or [])
+        if status.get("tool_manifest_missing_sessions"):
+            manifest_values.append("<missing>")
+        manifests = ",".join(manifest_values)
+        notes.append(f"proxy_tool_manifest_disagreement:{manifests}")
 
     def result(
         selected_calls: list[dict[str, Any]],
@@ -352,22 +511,14 @@ def wait_for_proxy_meta(
     EOF and needs up to SHUTDOWN_DEADLINE_S to flush. Call before harvesting so the temp
     directory is not deleted mid-finalization.
     """
-    # Local import keeps drivers import-light for non-proxy unit tests.
-    from evals.proxy import SHUTDOWN_DEADLINE_S
-
-    if max_wait_s is None:
-        max_wait_s = SHUTDOWN_DEADLINE_S + 2.0
-    deadline = time.monotonic() + max_wait_s
-    while True:
-        _, status = load_proxy_sidecar(sidecar_path)
-        if status.get("meta") is not None:
-            return True
-        rem = deadline - time.monotonic()
-        if rem <= 0:
-            break
-        time.sleep(min(poll_s, rem))
-    _, status = load_proxy_sidecar(sidecar_path)
-    return status.get("meta") is not None
+    return (
+        _wait_for_proxy_meta_outcome(
+            sidecar_path,
+            poll_s=poll_s,
+            max_wait_s=max_wait_s,
+        )
+        == "meta_present"
+    )
 
 
 def harvest_proxy_after_cli_timeout(
@@ -384,10 +535,13 @@ def harvest_proxy_after_cli_timeout(
     note from ``apply_proxy_sidecar``). ``max_wait_s`` defaults to
     ``SHUTDOWN_DEADLINE_S + 2`` (see ``wait_for_proxy_meta``).
     """
-    found = wait_for_proxy_meta(sidecar_path, max_wait_s=max_wait_s)
-    if not found:
-        notes.append("proxy_meta_wait_timeout")
-    return apply_proxy_sidecar(calls, client_calls, sidecar_path, notes)
+    return apply_proxy_sidecar(
+        calls,
+        client_calls,
+        sidecar_path,
+        notes,
+        max_wait_s=max_wait_s,
+    )
 
 
 __all__ = [
@@ -396,6 +550,7 @@ __all__ = [
     "harvest_proxy_after_cli_timeout",
     "load_proxy_sidecar",
     "load_proxy_sidecar_calls",
+    "proxy_pid_path",
     "proxy_wrap_server_command",
     "ProxySidecarResult",
     "trace_integrity_from_status",

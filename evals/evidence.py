@@ -194,7 +194,7 @@ def decode_evidence_config(
 
 
 def write_evidence_config(path: Path, sentinels: Any, targets: Any, aggregates: Any = None) -> None:
-    """Create a private, one-shot proxy configuration outside the agent cwd."""
+    """Create a private, run-scoped proxy configuration outside the agent cwd."""
     payload = encode_evidence_config(sentinels, targets, aggregates)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -208,18 +208,18 @@ def consume_evidence_config(
     dict[str, tuple[str, ...]],
     dict[str, tuple[dict[str, Any], ...]],
 ]:
-    """Read and unlink a one-shot proxy configuration, failing closed."""
+    """Read a reusable run-scoped proxy configuration, failing closed.
+
+    The historical name is retained for callers. A CLI may start multiple MCP
+    proxy sessions during one task, so the driver's TemporaryDirectory owns
+    deletion after every session has exited.
+    """
     if path is None:
         return {}, {}, {}
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
         return {}, {}, {}
-    finally:
-        try:
-            path.unlink()
-        except OSError:
-            pass
     return decode_evidence_config(raw)
 
 

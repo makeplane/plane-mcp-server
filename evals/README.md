@@ -115,9 +115,10 @@ habit; use it only when the more sensitive, larger sidecar is justified.
 Read-task provenance is stricter than “a call happened.” Seeders place a hidden per-run
 sentinel on the target entity, and the API driver or CLI proxy records only whether a
 successful response exposed it **and its request targeted that seeded entity ID**. CLI
-proxies receive only target IDs and one-way value fingerprints through a private one-shot
-file; the raw sentinel is absent even if that file is inspected. The proxy unlinks it before
-Plane MCP starts. Result rows contain the matched label, never the sentinel value or response body. Thus an unrelated
+proxies receive only target IDs and one-way value fingerprints through a private run-scoped
+file; the raw sentinel is absent even if that file is inspected. Every proxy session can read it, and the driver
+removes it with its temporary directory after the run. Result rows contain the matched label, never the sentinel
+value or response body. Thus an unrelated
 successful response cannot satisfy provenance; unavailable or incomplete matching is
 diagnosed and fails closed.
 

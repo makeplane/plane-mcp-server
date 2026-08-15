@@ -12,10 +12,12 @@ import argparse
 import json
 import os
 import select
+import signal
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +63,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--evidence-file",
         type=Path,
-        help="One-shot target-evidence configuration consumed before the MCP child starts",
+        help="Run-scoped target-evidence configuration loaded before the MCP child starts",
     )
     p.add_argument(
         "command",
@@ -173,6 +175,8 @@ class SidecarRecorder:
         self.server_requests = 0
         self.child_killed = False
         self.pumps_alive = False
+        self.finalization_reason = "direct"
+        self.finalization_signal: str | None = None
         self.finalized = False
         # Post-finalize append attempts (not written; for tests / diagnostics).
         self.post_finalize_appends = 0
@@ -349,6 +353,8 @@ class SidecarRecorder:
                 "tool_request_count": self._seq,
                 "child_killed": self.child_killed,
                 "pumps_alive": self.pumps_alive,
+                "finalization_reason": self.finalization_reason,
+                "finalization_signal": self.finalization_signal,
                 "evidence_trace_available": self.evidence_active,
                 "tool_manifest_fingerprint": self._tool_manifest.fingerprint,
             }
@@ -540,6 +546,18 @@ def reap_timeout(deadline_at: float | None, floor: float = 0.1) -> float:
     return max(floor, _remaining(deadline_at))
 
 
+def _signal_name(signum: int) -> str:
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return str(signum)
+
+
+def _record_signal_finalization(recorder: SidecarRecorder, signum: int) -> None:
+    recorder.finalization_reason = "signal"
+    recorder.finalization_signal = _signal_name(signum)
+
+
 def run_proxy(
     command: list[str],
     log_path: Path,
@@ -549,6 +567,7 @@ def run_proxy(
     evidence_fingerprints: dict[str, Any] | None = None,
     evidence_targets: dict[str, Any] | None = None,
     evidence_aggregates: dict[str, Any] | None = None,
+    termination_signal: Callable[[], int | None] | None = None,
 ) -> int:
     """Spawn ``command`` as the real MCP server and relay with recording.
 
@@ -565,6 +584,16 @@ def run_proxy(
         evidence_targets=evidence_targets,
         evidence_aggregates=evidence_aggregates,
     )
+    recorder.finalization_reason = "running"
+    # The CLI driver does not own this detached process, so leave a companion
+    # lifecycle file that lets it distinguish a slow finalizer from a proxy
+    # that exited before writing proxy_meta. The temp directory owns cleanup.
+    try:
+        log_path.with_name(f"{log_path.name}.pid").write_text(str(os.getpid()), encoding="ascii")
+    except OSError:
+        # Metadata remains authoritative. A missing lifecycle file merely
+        # leaves timeout diagnostics with an unknown process state.
+        pass
     child: subprocess.Popen[bytes] | None = None
     # Scrub repo PYTHONPATH so the real server does not import from this tree.
     child_env = scrub_child_pythonpath()
@@ -582,6 +611,7 @@ def run_proxy(
                 env=child_env,
             )
         except OSError as exc:
+            recorder.finalization_reason = "spawn_failure"
             print(f"evals.proxy: failed to spawn {command!r}: {exc}", file=sys.stderr)
             return 1
 
@@ -649,8 +679,20 @@ def run_proxy(
 
         # Phase 1: run until client stdin EOF or child exits.
         # Child exit cancels the *stdin* pump only — stdout must drain to pipe EOF.
-        while child.poll() is None and not stdin_done.is_set():
+        while (
+            child.poll() is None
+            and not stdin_done.is_set()
+            and (termination_signal is None or termination_signal() is None)
+        ):
             time.sleep(0.05)
+
+        requested_signal = termination_signal() if termination_signal is not None else None
+        if requested_signal is not None:
+            _record_signal_finalization(recorder, requested_signal)
+        elif child.poll() is not None:
+            recorder.finalization_reason = "child_exit"
+        else:
+            recorder.finalization_reason = "normal_eof"
 
         # One deadline for the entire post-EOF / post-child-exit shutdown.
         deadline_at = time.monotonic() + SHUTDOWN_DEADLINE_S
@@ -712,6 +754,14 @@ def run_proxy(
         )
         recorder.pumps_alive = pumps_still
         return map_child_returncode(child.returncode)
+    except KeyboardInterrupt:
+        # Preserve Python's existing SIGINT behaviour: unwind through the
+        # finalizer, then let KeyboardInterrupt retain the signal exit status.
+        _record_signal_finalization(recorder, signal.SIGINT)
+        raise
+    except BaseException:
+        recorder.finalization_reason = "exception"
+        raise
     finally:
         if child is not None and child.poll() is None:
             try:
@@ -729,6 +779,9 @@ def run_proxy(
             still = any(t is not None and t.is_alive() for t in (t_in, t_out, t_err))
             if still:
                 recorder.pumps_alive = True
+        requested_signal = termination_signal() if termination_signal is not None else None
+        if requested_signal is not None:
+            _record_signal_finalization(recorder, requested_signal)
         try:
             recorder.write_meta()
         except Exception as exc:
@@ -749,14 +802,40 @@ def main(argv: list[str] | None = None) -> int:
         pass
     args = parse_args(argv)
     evidence_fingerprints, evidence_targets, evidence_aggregates = consume_evidence_config(args.evidence_file)
-    return run_proxy(
-        list(args.command),
-        Path(args.log),
-        record_result_payloads=bool(args.record_result_payloads),
-        evidence_fingerprints=evidence_fingerprints,
-        evidence_targets=evidence_targets,
-        evidence_aggregates=evidence_aggregates,
-    )
+    received_signal: list[int | None] = [None]
+
+    def request_termination(signum: int, _frame: Any) -> None:
+        # Do not finalize in the handler: it can interrupt code holding the
+        # recorder lock. The relay loop observes this state and drains first.
+        if received_signal[0] is None:
+            received_signal[0] = signum
+
+    previous_handlers: dict[int, Any] = {}
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        previous_handlers[signum] = signal.getsignal(signum)
+        signal.signal(signum, request_termination)
+    try:
+        returncode = run_proxy(
+            list(args.command),
+            Path(args.log),
+            record_result_payloads=bool(args.record_result_payloads),
+            evidence_fingerprints=evidence_fingerprints,
+            evidence_targets=evidence_targets,
+            evidence_aggregates=evidence_aggregates,
+            termination_signal=lambda: received_signal[0],
+        )
+    finally:
+        for signum, previous_handler in previous_handlers.items():
+            signal.signal(signum, previous_handler)
+
+        signum = received_signal[0]
+        if signum is not None:
+            # Metadata and child cleanup are complete. Re-deliver with the
+            # default disposition so subprocess/shell status encodes the signal.
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+
+    return returncode
 
 
 if __name__ == "__main__":

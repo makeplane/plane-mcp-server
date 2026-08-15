@@ -22,6 +22,7 @@ from evals.drivers import (
     harvest_proxy_after_cli_timeout,
     load_proxy_sidecar,
     load_proxy_sidecar_calls,
+    proxy_pid_path,
     proxy_wrap_server_command,
     run_cli_subprocess,
     wait_for_proxy_meta,
@@ -483,6 +484,7 @@ def _apply_proxy_sidecar_replaces_when_nonempty(tmp_path):
         [],
         side,
         notes,
+        max_wait_s=0,
     )
     assert src == "proxy"
     assert calls[0]["tool"] == "find_work_items"
@@ -495,7 +497,7 @@ def _apply_proxy_sidecar_empty_fallback(tmp_path):
     side.write_text("", encoding="utf-8")
     notes: list[str] = []
     original = [{"tool": "from_cli", "args": {}, "origin": "plane"}]
-    calls, _client, src = apply_proxy_sidecar(original, [], side, notes)
+    calls, _client, src = apply_proxy_sidecar(original, [], side, notes, max_wait_s=0)
     assert calls is original or calls == original
     assert "proxy_sidecar_empty" in notes
     assert src != "proxy" or calls == original
@@ -523,7 +525,7 @@ def _apply_proxy_incomplete_defers_to_richer_cli(tmp_path):
         {"tool": "c2", "args": {}, "origin": "plane"},
     ]
     notes: list[str] = []
-    calls, _client, src = apply_proxy_sidecar(cli, [], p, notes)
+    calls, _client, src = apply_proxy_sidecar(cli, [], p, notes, max_wait_s=0)
     assert src != "proxy"
     assert [c["tool"] for c in calls] == ["c1", "c2"]
     assert any("proxy_sidecar_incomplete" in n for n in notes)
@@ -1056,6 +1058,144 @@ def test_wait_for_proxy_meta_unit(tmp_path: Path):
     assert wait_for_proxy_meta(side, max_wait_s=1.0, poll_s=0.05) is True
 
 
+def test_normal_completion_waits_for_delayed_proxy_meta(tmp_path: Path):
+    """The shared normal path must not harvest the call row before final metadata."""
+    import threading
+
+    early_notes: list[str] = []
+    meta_written = threading.Event()
+    writer_threads: list[threading.Thread] = []
+
+    def fake_run(cmd, **kwargs):
+        del kwargs
+        config_path = Path(cmd[cmd.index("--mcp-config") + 1])
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        proxy_args = config["mcpServers"]["plane"]["args"]
+        sidecar = Path(proxy_args[proxy_args.index("--log") + 1])
+        call = {
+            "tool": "delayed_meta_tool",
+            "args": {"n": 1},
+            "is_error": False,
+            "result_chars": 2,
+            "duration_ms": 1,
+            "seq": 1,
+        }
+        sidecar.write_text(json.dumps(call) + "\n", encoding="utf-8")
+        proxy_pid_path(sidecar).write_text(str(os.getpid()), encoding="ascii")
+
+        # This is the historical harvest: the call exists, but finalization has
+        # not happened, so accepting it now manufactures recorder loss.
+        early = apply_proxy_sidecar([], [], sidecar, early_notes, max_wait_s=0)
+        assert early.trace_integrity is False
+        assert "proxy_sidecar_incomplete:no_meta=1" in early_notes
+
+        def write_meta_later() -> None:
+            time.sleep(0.08)
+            meta = {
+                "row_type": "proxy_meta",
+                "pending_left": 0,
+                "non_tool_pending_left": 0,
+                "unmatched_responses": 0,
+                "unparsed_lines": 0,
+                "recorder_errors": 0,
+                "pumps_alive": False,
+                "last_seq": 1,
+                "tool_request_count": 1,
+            }
+            with sidecar.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(meta) + "\n")
+            meta_written.set()
+
+        writer = threading.Thread(target=write_meta_later, daemon=True)
+        writer_threads.append(writer)
+        writer.start()
+        output = {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": "done",
+            "session_id": "delayed-meta-session",
+            "num_turns": 1,
+        }
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(output), stderr="")
+
+    driver = ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
+    run = driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="sonnet",
+        max_turns=1,
+        cwd=tmp_path,
+    )
+    for writer in writer_threads:
+        writer.join(timeout=1.0)
+
+    assert meta_written.is_set()
+    assert run.trace_integrity is True
+    assert run.trace_integrity_reason is None
+    assert run.call_source == "proxy"
+    assert [call["tool"] for call in run.calls] == ["delayed_meta_tool"]
+    assert not any("no_meta" in note for note in run.notes)
+
+
+def test_proxy_meta_wait_timeout_is_fatal_and_diagnosable(tmp_path: Path):
+    sidecar = tmp_path / "never-finalized.jsonl"
+    sidecar.write_text(
+        json.dumps({"tool": "unfinished", "args": {}, "seq": 1}) + "\n",
+        encoding="utf-8",
+    )
+    proxy_pid_path(sidecar).write_text(str(os.getpid()), encoding="ascii")
+    notes: list[str] = []
+
+    result = apply_proxy_sidecar([], [], sidecar, notes, poll_s=0.005, max_wait_s=0.03)
+
+    assert result.trace_integrity is False
+    assert result.trace_integrity_reason == "recorder_loss"
+    assert "proxy_meta_wait_timeout:proxy_alive=1" in notes
+    assert "proxy_sidecar_incomplete:no_meta=1" in notes
+
+
+def test_proxy_exit_before_meta_is_fatal_and_diagnosable(tmp_path: Path):
+    sidecar = tmp_path / "exited-before-meta.jsonl"
+    sidecar.write_text(
+        json.dumps({"tool": "unfinished", "args": {}, "seq": 1}) + "\n",
+        encoding="utf-8",
+    )
+    exited = subprocess.Popen([sys.executable, "-c", "pass"])
+    exited.wait(timeout=2.0)
+    proxy_pid_path(sidecar).write_text(str(exited.pid), encoding="ascii")
+    notes: list[str] = []
+    started = time.monotonic()
+
+    result = apply_proxy_sidecar([], [], sidecar, notes, poll_s=0.01, max_wait_s=1.0)
+
+    assert time.monotonic() - started < 0.2
+    assert result.trace_integrity is False
+    assert result.trace_integrity_reason == "recorder_loss"
+    assert "proxy_meta_missing_after_proxy_exit" in notes
+    assert "proxy_sidecar_incomplete:no_meta=1" in notes
+
+
+def test_proxy_meta_fast_path_does_not_sleep(tmp_path: Path, monkeypatch):
+    sidecar = tmp_path / "already-finalized.jsonl"
+    meta = {
+        "row_type": "proxy_meta",
+        "pending_left": 0,
+        "last_seq": 0,
+        "tool_request_count": 0,
+    }
+    sidecar.write_text(json.dumps(meta) + "\n", encoding="utf-8")
+    monkeypatch.setattr("evals.drivers.cli.sidecar.time.sleep", lambda _seconds: pytest.fail("fast path slept"))
+    notes: list[str] = []
+    started = time.monotonic()
+
+    result = apply_proxy_sidecar([], [], sidecar, notes, max_wait_s=1.0)
+
+    assert time.monotonic() - started < 0.1
+    assert result.trace_integrity is True
+    assert not any("proxy_meta_wait" in note for note in notes)
+
+
 def test_harvest_proxy_after_cli_timeout_incomplete_note(tmp_path: Path):
     """If meta never arrives, harvest still returns with incomplete note."""
     side = tmp_path / "s.jsonl"
@@ -1065,7 +1205,7 @@ def test_harvest_proxy_after_cli_timeout_incomplete_note(tmp_path: Path):
     )
     notes: list[str] = []
     calls, _client, src = harvest_proxy_after_cli_timeout([], [], side, notes, max_wait_s=0.25)
-    assert "proxy_meta_wait_timeout" in notes
+    assert "proxy_meta_wait_timeout:proxy_state=unknown" in notes
     assert len(calls) == 1
     assert src == "proxy"
     assert any("incomplete" in n for n in notes)

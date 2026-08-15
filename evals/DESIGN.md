@@ -128,8 +128,9 @@ hidden, per-run sentinel and its seeded target entity ID. At the API loop or CLI
 proxy, the harness requires the request arguments to target that ID and matches the sentinel
 while the successful response is in memory, persisting only a non-sensitive
 `observed_sentinels` label. CLI proxies receive only target IDs plus sentinel lengths and
-SHA-256 fingerprints through a mode-0600 one-shot file outside the agent cwd; the raw value
-is absent even from that file. They consume and unlink it before starting Plane MCP. A successful response from
+SHA-256 fingerprints through a mode-0600 run-scoped file outside the agent cwd; the raw value
+is absent even from that file. Every MCP proxy session reads the same file, and the driver
+removes it with its temporary directory after the run. A successful response from
 an unrelated entity therefore does not count, and neither the response body nor sentinel
 enters the payload-free result row. Unavailable or incomplete matching is diagnosed and
 cannot pass a read verifier.

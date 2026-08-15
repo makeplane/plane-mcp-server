@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -18,7 +20,12 @@ from evals.drivers import (
     load_proxy_sidecar,
     load_proxy_sidecar_calls,
 )
-from evals.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE, write_evidence_config
+from evals.evidence import (
+    EVIDENCE_SENTINELS_ENV,
+    TARGET_ENTITY_EVIDENCE,
+    consume_evidence_config,
+    write_evidence_config,
+)
 from evals.proxy import (
     SHUTDOWN_DEADLINE_S,
     SidecarRecorder,
@@ -46,6 +53,32 @@ def _request(request_id: int, method: str, params: dict | None = None) -> dict:
 
 def _response(request_id: int, result: object) -> dict:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _complete_proxy_meta(last_seq: int, manifest: str = "manifest-a") -> dict:
+    return {
+        "row_type": "proxy_meta",
+        "pending_left": 0,
+        "non_tool_pending_left": 0,
+        "unmatched_responses": 0,
+        "unparsed_lines": 0,
+        "recorder_errors": 0,
+        "pumps_alive": False,
+        "last_seq": last_seq,
+        "tool_request_count": last_seq,
+        "tool_manifest_fingerprint": manifest,
+    }
+
+
+def _proxy_call(tool: str, seq: int) -> dict:
+    return {
+        "tool": tool,
+        "args": {},
+        "is_error": False,
+        "result_chars": 1,
+        "duration_ms": 1,
+        "seq": seq,
+    }
 
 
 FAKE_SERVER = textwrap.dedent(
@@ -164,6 +197,7 @@ def _proxy_records_tools_call_and_exit_code(tmp_path):
         timeout=15,
     )
     assert proc.returncode == 7  # child exit propagated
+    assert int(sidecar.with_name(f"{sidecar.name}.pid").read_text(encoding="ascii")) > 0
     # Byte-faithful: unparsed line and JSON responses appear on stdout.
     out = proc.stdout.decode("utf-8", errors="replace")
     assert "NOT_JSON_LINE" in out
@@ -182,6 +216,8 @@ def _proxy_records_tools_call_and_exit_code(tmp_path):
     assert call_rows[1]["is_error"] is True
     assert meta["unparsed_lines"] >= 1
     assert meta["relayed_lines"] >= 3
+    assert meta["finalization_reason"] in {"normal_eof", "child_exit"}
+    assert meta["finalization_signal"] is None
 
 
 def _proxy_byte_faithful_child_receives_exact_bytes(tmp_path):
@@ -559,6 +595,96 @@ def _proxy_survives_cli_group_kill_and_writes_meta(tmp_path):
 )
 def test_proxy_behaviours(case, tmp_path):
     case(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "signum",
+    [
+        pytest.param(signal.SIGTERM, id="SIGTERM"),
+        pytest.param(signal.SIGHUP, id="SIGHUP"),
+        pytest.param(signal.SIGINT, id="SIGINT"),
+    ],
+)
+def test_proxy_signal_finalization_writes_meta_and_preserves_signal_exit(tmp_path: Path, signum: int):
+    server = _write_fake_server(tmp_path / "signal_server.py")
+    sidecar = tmp_path / "signal-sidecar.jsonl"
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "evals.proxy",
+            "--log",
+            str(sidecar),
+            "--",
+            sys.executable,
+            str(server),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        cwd=str(REPO),
+    )
+    try:
+        assert proc.stdin is not None
+        messages = [
+            _request(1, "tools/list"),
+            _request(2, "tools/call", {"name": "list_work_items", "arguments": {"project": "P"}}),
+        ]
+        proc.stdin.write(("\n".join(json.dumps(message) for message in messages) + "\n").encode("utf-8"))
+        proc.stdin.flush()
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            calls, _status = load_proxy_sidecar(sidecar)
+            if len(calls) == 1:
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("proxy did not record the completed tool call before signal")
+
+        os.kill(proc.pid, signum)
+        returncode = proc.wait(timeout=SHUTDOWN_DEADLINE_S + 5.0)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=2.0)
+        if proc.stdin is not None:
+            proc.stdin.close()
+
+    rows = [json.loads(line) for line in sidecar.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["row_type"] == "proxy_meta"
+    meta = rows[-1]
+    assert meta["finalization_reason"] == "signal"
+    assert meta["finalization_signal"] == signal.Signals(signum).name
+    assert returncode == -signum
+
+    # SIGTERM/SIGHUP use the controlled drain. A completed request remains a
+    # complete trace; a signal is diagnostic, not intrinsically recorder loss.
+    if signum in (signal.SIGTERM, signal.SIGHUP):
+        _calls, status = load_proxy_sidecar(sidecar)
+        assert status["state"] == "complete"
+        assert status["pending_left"] == 0
+        assert status["pumps_alive"] is False
+        assert status["tool_manifest_fingerprint"]
+
+
+def test_signal_finalization_does_not_hide_pending_tool_loss(tmp_path: Path):
+    sidecar = tmp_path / "signal-pending.jsonl"
+    recorder = SidecarRecorder(sidecar)
+    recorder.finalization_reason = "signal"
+    recorder.finalization_signal = "SIGTERM"
+    recorder.on_client_message(_request(1, "tools/call", {"name": "unfinished", "arguments": {}}))
+    recorder.write_meta()
+
+    notes: list[str] = []
+    result = apply_proxy_sidecar([], [], sidecar, notes)
+
+    assert result.status["finalization_reason"] == "signal"
+    assert result.status["finalization_signal"] == "SIGTERM"
+    assert result.status["pending_left"] == 1
+    assert result.trace_integrity is False
+    assert result.trace_integrity_reason == "recorder_loss"
+    assert any(note.startswith("proxy_sidecar_incomplete:pending_left=1") for note in notes)
 
 
 def _sidecar_recorder_unit(tmp_path):
@@ -941,7 +1067,7 @@ def test_scrub_child_pythonpath_removes_repo():
     assert "PYTHONPATH" not in only
 
 
-def test_proxy_consumes_private_evidence_file_before_starting_mcp(tmp_path: Path, monkeypatch):
+def test_proxy_loads_reusable_private_evidence_file_before_starting_mcp(tmp_path: Path, monkeypatch):
     sentinel = "hidden-target-fact-7b0a1f9c"
     evidence_file = tmp_path / "evidence.json"
     write_evidence_config(
@@ -954,7 +1080,7 @@ def test_proxy_consumes_private_evidence_file_before_starting_mcp(tmp_path: Path
     captured = {}
 
     def fake_run_proxy(command, log_path, **kwargs):
-        assert not evidence_file.exists(), "proxy must unlink evidence before starting Plane MCP"
+        assert evidence_file.is_file(), "run-scoped evidence must remain for later proxy sessions"
         captured.update({"command": command, "log_path": log_path, **kwargs})
         return 0
 
@@ -972,9 +1098,102 @@ def test_proxy_consumes_private_evidence_file_before_starting_mcp(tmp_path: Path
     )
 
     assert rc == 0
+    assert evidence_file.is_file()
+    assert sentinel not in evidence_file.read_text(encoding="utf-8")
     assert set(captured["evidence_fingerprints"]) == {TARGET_ENTITY_EVIDENCE}
     assert captured["evidence_targets"] == {TARGET_ENTITY_EVIDENCE: ("target-1",)}
     assert captured["evidence_aggregates"] == {}
+
+
+def test_probe_then_session_reuses_evidence_config_and_records_provenance(tmp_path: Path):
+    sentinel = "hidden-target-fact-7b0a1f9c"
+    evidence_file = tmp_path / "evidence.json"
+    write_evidence_config(
+        evidence_file,
+        {TARGET_ENTITY_EVIDENCE: [sentinel]},
+        {TARGET_ENTITY_EVIDENCE: ["target-1"]},
+    )
+    assert stat.S_IMODE(evidence_file.stat().st_mode) == 0o600
+    assert sentinel not in evidence_file.read_text(encoding="utf-8")
+
+    server = tmp_path / "evidence_server.py"
+    server.write_text(
+        textwrap.dedent(
+            f"""
+            import json, sys
+            sentinel = {sentinel!r}
+            for line in sys.stdin:
+                message = json.loads(line)
+                method = message.get("method")
+                if method == "tools/list":
+                    result = {{"tools": [{{"name": "read_target", "inputSchema": {{"type": "object"}}}}]}}
+                elif method == "tools/call":
+                    result = {{
+                        "content": [{{"type": "text", "text": f"target={{sentinel}}"}}],
+                        "isError": False,
+                    }}
+                else:
+                    result = {{}}
+                sys.stdout.write(json.dumps({{"jsonrpc": "2.0", "id": message["id"], "result": result}}) + "\\n")
+                sys.stdout.flush()
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    def run_session(sidecar: Path, request: dict) -> tuple[list[dict], dict]:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "evals.proxy",
+                "--log",
+                str(sidecar),
+                "--evidence-file",
+                str(evidence_file),
+                "--",
+                sys.executable,
+                str(server),
+            ],
+            input=(json.dumps(request) + "\n").encode("utf-8"),
+            capture_output=True,
+            cwd=str(REPO),
+            timeout=15,
+        )
+        assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+        return load_proxy_sidecar(sidecar)
+
+    probe_calls, probe_status = run_session(tmp_path / "probe.jsonl", _request(1, "tools/list"))
+    assert probe_calls == []
+    assert probe_status["state"] == "complete"
+    assert probe_status["meta"]["evidence_trace_available"] is True
+    assert evidence_file.is_file()
+    assert sentinel not in evidence_file.read_text(encoding="utf-8")
+
+    session_calls, session_status = run_session(
+        tmp_path / "session.jsonl",
+        _request(
+            2,
+            "tools/call",
+            {"name": "read_target", "arguments": {"work_item_id": "target-1"}},
+        ),
+    )
+    assert session_status["state"] == "complete"
+    assert session_status["meta"]["evidence_trace_available"] is True
+    assert len(session_calls) == 1
+    assert session_calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert evidence_file.is_file()
+    assert sentinel not in evidence_file.read_text(encoding="utf-8")
+
+
+def test_missing_or_malformed_evidence_config_fails_closed(tmp_path: Path):
+    empty = ({}, {}, {})
+    assert consume_evidence_config(tmp_path / "missing.json") == empty
+
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("{not-json", encoding="utf-8")
+    assert consume_evidence_config(malformed) == empty
+    assert malformed.is_file()
 
 
 def test_rapid_response_pairing(tmp_path: Path):
@@ -1324,28 +1543,95 @@ def test_sidecar_rejects_invalid_duplicate_and_gapped_sequences(
     assert f"{status_key}={status[status_key]}" in notes[0]
 
 
-@pytest.mark.parametrize("case", ["duplicate", "not-final"])
-def test_sidecar_requires_exactly_one_final_proxy_meta(tmp_path: Path, case: str):
-    path = tmp_path / f"meta-{case}.jsonl"
-    meta = {"row_type": "proxy_meta", "pending_left": 0, "last_seq": 0, "tool_request_count": 0}
-    if case == "duplicate":
-        rows = [meta, meta]
-    else:
-        meta.update({"last_seq": 1, "tool_request_count": 1})
-        rows = [meta, {"tool": "late", "args": {}, "seq": 1}]
+def test_zero_call_probe_then_real_session_is_complete(tmp_path: Path):
+    path = tmp_path / "probe-then-real.jsonl"
+    manifest = "31c209e40544"
+    rows = [
+        _complete_proxy_meta(0, manifest),
+        _proxy_call("list_projects", 1),
+        _proxy_call("search_work_items", 2),
+        _proxy_call("create_work_log", 3),
+        _complete_proxy_meta(3, manifest),
+    ]
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
-    _, status = load_proxy_sidecar(path)
     notes: list[str] = []
-    apply_proxy_sidecar([], [], path, notes)
+    result = apply_proxy_sidecar([], [], path, notes)
 
-    assert status["state"] == "incomplete"
-    if case == "duplicate":
-        assert status["proxy_meta_count"] == 2
-        assert "proxy_meta_count=2" in notes[0]
-    else:
-        assert status["proxy_meta_not_final"] is True
-        assert "proxy_meta_not_final=1" in notes[0]
+    assert result.status["state"] == "complete"
+    assert result.status["session_count"] == 2
+    assert result.status["proxy_meta_count"] == 2
+    assert result.status["duplicate_seq"] == 0
+    assert [call["tool"] for call in result.calls] == [
+        "list_projects",
+        "search_work_items",
+        "create_work_log",
+    ]
+    assert result.trace_integrity is True
+    assert result.tool_manifest_fingerprint == manifest
+    assert not any("incomplete" in note for note in notes)
+
+
+def test_two_calling_sessions_validate_sequences_independently(tmp_path: Path):
+    path = tmp_path / "two-calling-sessions.jsonl"
+    rows = [
+        _proxy_call("session-1-call-2", 2),
+        _proxy_call("session-1-call-1", 1),
+        _complete_proxy_meta(2),
+        _proxy_call("session-2-call-3", 3),
+        _proxy_call("session-2-call-1", 1),
+        _proxy_call("session-2-call-2", 2),
+        _complete_proxy_meta(3),
+    ]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    calls, status = load_proxy_sidecar(path)
+
+    assert status["state"] == "complete"
+    assert status["duplicate_seq"] == 0
+    assert status["missing_seq"] == 0
+    assert status["unexpected_seq"] == 0
+    assert [call["tool"] for call in calls] == [
+        "session-1-call-1",
+        "session-1-call-2",
+        "session-2-call-1",
+        "session-2-call-2",
+        "session-2-call-3",
+    ]
+    assert [call["seq"] for call in calls] == [1, 2, 1, 2, 3]
+
+
+def test_trailing_unfinalized_proxy_session_stays_fatal(tmp_path: Path):
+    path = tmp_path / "trailing-unfinalized.jsonl"
+    rows = [_complete_proxy_meta(0), _proxy_call("late", 1)]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    notes: list[str] = []
+    result = apply_proxy_sidecar([], [], path, notes)
+
+    assert result.status["state"] == "incomplete"
+    assert result.status["proxy_meta_count"] == 1
+    assert result.status["unfinalized_sessions"] == 1
+    assert result.status["proxy_meta_not_final"] is True
+    assert result.trace_integrity is False
+    assert result.trace_integrity_reason == "recorder_loss"
+    assert any("unfinalized_sessions=1" in note for note in notes)
+
+
+def test_disagreeing_session_manifests_are_reported_and_invalidated(tmp_path: Path):
+    path = tmp_path / "manifest-disagreement.jsonl"
+    rows = [_complete_proxy_meta(0, "manifest-a"), _complete_proxy_meta(0, "manifest-b")]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    notes: list[str] = []
+    result = apply_proxy_sidecar([], [], path, notes)
+
+    assert result.status["state"] == "complete"
+    assert result.status["tool_manifest_disagreement"] is True
+    assert result.status["tool_manifest_fingerprints"] == ["manifest-a", "manifest-b"]
+    assert result.trace_integrity is True
+    assert result.tool_manifest_fingerprint is None
+    assert "proxy_tool_manifest_disagreement:manifest-a,manifest-b" in notes
 
 
 @pytest.mark.parametrize("case", ["missing-last-seq", "request-count-mismatch"])
