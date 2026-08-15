@@ -1,4 +1,4 @@
-"""JSONL row loading and classification for evaluation reports."""
+"""JSONL row loading and error handling for evaluation reports."""
 
 from __future__ import annotations
 
@@ -11,6 +11,38 @@ from evals.results import TaskResult
 
 DedupeMode = Literal["latest", "none"]
 ResultRow = TaskResult | dict[str, Any]
+
+
+def _invalid_result_row(path: Path, line_number: int, reason: str) -> TaskResult:
+    """Represent an unreadable persisted row as a completeness-visible harness error."""
+    return TaskResult(
+        task_id=f"<invalid-result-line-{line_number}>",
+        rep=line_number,
+        label=path.stem,
+        success=False,
+        error=f"{path}:{line_number}: {reason}",
+        error_class="harness_report_load",
+    )
+
+
+def load_run_expected_rows(path: Path) -> int | None:
+    """Read the declared run size from the JSONL meta header, when available."""
+    with path.open(encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            if row.get("row_type") != "meta":
+                return None
+            value = row.get("expected_rows")
+            return int(value) if value is not None else None
+    return None
 
 
 def read_result(row: ResultRow) -> TaskResult:
@@ -48,7 +80,7 @@ def dedupe_rows_latest(rows: list[ResultRow]) -> list[TaskResult]:
 
 
 def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[TaskResult]:
-    """Load JSONL data rows (skip meta / missing task_id).
+    """Load JSONL data rows, representing malformed data as harness errors.
 
     Default ``dedupe="latest"`` keeps the last row per (task_id, rep, label)
     so resume appends do not double-count. Pass ``dedupe="none"`` for forensics.
@@ -63,14 +95,35 @@ def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[TaskResult]:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
                 print(
-                    f"warning: {path}:{line_number}: skipping invalid JSON ({exc})",
+                    f"warning: {path}:{line_number}: recording invalid JSON as a harness error ({exc})",
                     file=sys.stderr,
                 )
+                rows.append(_invalid_result_row(path, line_number, f"invalid JSON ({exc})"))
                 continue
             if not isinstance(row, dict):
+                print(
+                    f"warning: {path}:{line_number}: recording non-object JSON as a harness error",
+                    file=sys.stderr,
+                )
+                rows.append(_invalid_result_row(path, line_number, "result row is not a JSON object"))
                 continue
-            result = TaskResult.from_row(row)
-            if is_meta_row(result):
+            if row.get("row_type") == "meta":
+                continue
+            try:
+                result = TaskResult.from_row(row)
+            except Exception as exc:
+                print(
+                    f"warning: {path}:{line_number}: recording invalid result object as a harness error ({exc})",
+                    file=sys.stderr,
+                )
+                rows.append(_invalid_result_row(path, line_number, f"invalid result object ({exc})"))
+                continue
+            if not result.task_id:
+                print(
+                    f"warning: {path}:{line_number}: recording result without task_id as a harness error",
+                    file=sys.stderr,
+                )
+                rows.append(_invalid_result_row(path, line_number, "result row has no task_id"))
                 continue
             rows.append(result)
     if dedupe == "latest":

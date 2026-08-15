@@ -7,23 +7,30 @@ from pathlib import Path
 from typing import Any
 
 from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
-from .statistics import median, sign_test_pvalue
-from .summary import noise_floor_statement, summarize
+from .statistics import median, paired_bootstrap_mean_ci, paired_permutation_pvalue
+from .summary import completeness_statement, execution_coverage_statement, summarize
 from .table import format_number
 
 
 def ab_compare(
     rows_a: list[ResultRow],
     rows_b: list[ResultRow],
+    *,
+    expected_rows_a: int | None = None,
+    expected_rows_b: int | None = None,
 ) -> dict[str, Any]:
-    """Compare two result sets: paired call-count deltas + success rates.
+    """Compare two result sets with task-paired call and success deltas.
 
     Paired call deltas only include tasks with at least one successful repetition
     in both A and B. Calls are the median across successful repetitions; this is
     identical to the historical behavior for single-rep files.
+
+    Success-rate differences pair each task's completed-repetition rate across
+    labels, then bootstrap whole task pairs. This treats tasks as independent
+    sampling units and assumes the labels cover comparable task instances.
     """
-    summary_a = summarize(rows_a)
-    summary_b = summarize(rows_b)
+    summary_a = summarize(rows_a, expected_rows=expected_rows_a)
+    summary_b = summarize(rows_b, expected_rows=expected_rows_b)
 
     def successful_calls_by_task(rows: list[ResultRow]) -> dict[str, list[float]]:
         output: dict[str, list[float]] = defaultdict(list)
@@ -55,16 +62,33 @@ def ab_compare(
             }
         )
 
+    success_shared = sorted(
+        task_id
+        for task_id in set(summary_a.tasks) & set(summary_b.tasks)
+        if summary_a.tasks[task_id].n and summary_b.tasks[task_id].n
+    )
+    success_deltas = [
+        (summary_b.tasks[task_id].k / summary_b.tasks[task_id].n)
+        - (summary_a.tasks[task_id].k / summary_a.tasks[task_id].n)
+        for task_id in success_shared
+    ]
+    paired_success_delta = sum(success_deltas) / len(success_deltas) if success_deltas else None
+    paired_success_ci = paired_bootstrap_mean_ci(success_deltas)
+
     return {
         "summary_a": summary_a,
         "summary_b": summary_b,
         "paired_tasks": per_task,
+        "mean_delta": sum(deltas) / len(deltas) if deltas else None,
         "median_delta": median(deltas),
-        "sign_test_p": sign_test_pvalue(deltas),
+        "call_permutation_p": paired_permutation_pvalue(deltas),
+        "call_zero_deltas": sum(delta == 0 for delta in deltas),
         "n_paired": len(deltas),
+        "paired_success_tasks": success_shared,
+        "n_paired_success": len(success_deltas),
+        "paired_success_delta": paired_success_delta,
+        "paired_success_ci": paired_success_ci,
         "multi_rep": summary_a.multi_rep or summary_b.multi_rep,
-        "unstable_a": summary_a.unstable_tasks,
-        "unstable_b": summary_b.unstable_tasks,
         "success_a": {
             "k": summary_a.aggregate_k,
             "n": summary_a.aggregate_n,
@@ -97,15 +121,32 @@ def print_ab_report(comparison: dict[str, Any], path_a: Path, path_b: Path) -> N
         f"  success B: {success_b['k']}/{success_b['n']} ({rate_b:.1%}) "
         f"Wilson95 [{success_b['wilson'][0]:.2f},{success_b['wilson'][1]:.2f}]"
     )
+    print(f"  A {execution_coverage_statement(comparison['summary_a'])}")
+    print(f"  B {execution_coverage_statement(comparison['summary_b'])}")
+    print(f"  A {completeness_statement(comparison['summary_a'])}")
+    print(f"  B {completeness_statement(comparison['summary_b'])}")
     print(f"  success rate delta (B−A): {rate_b - rate_a:+.1%}")
+    paired_success_delta = comparison["paired_success_delta"]
+    paired_success_lo, paired_success_hi = comparison["paired_success_ci"]
+    if paired_success_delta is None or paired_success_lo is None or paired_success_hi is None:
+        print("  paired task success delta (B−A): n/a (no shared evaluated tasks)")
+    else:
+        print(
+            f"  paired task success delta (B−A): {paired_success_delta:+.1%} "
+            f"paired-bootstrap95 [{paired_success_lo:+.1%},{paired_success_hi:+.1%}] "
+            f"(n={comparison['n_paired_success']} tasks)"
+        )
     print(f"  paired successful tasks: {comparison['n_paired']}")
+    print(f"  mean call delta (B−A): {format_number(comparison['mean_delta'])}")
     print(f"  median call delta (B−A): {format_number(comparison['median_delta'])}")
-    probability = comparison["sign_test_p"]
-    print(f"  sign-test p-value (two-sided): {probability if probability is not None else 'n/a'}")
+    probability = comparison["call_permutation_p"]
+    tie_count = comparison["call_zero_deltas"]
+    print(
+        "  paired permutation p-value for mean call delta (two-sided): "
+        f"{probability if probability is not None else 'n/a'} "
+        f"({tie_count} zero-delta ties retained)"
+    )
     multiple_repetitions = bool(comparison.get("multi_rep"))
-    if multiple_repetitions:
-        print(f"  A {noise_floor_statement(int(comparison.get('unstable_a') or 0))}")
-        print(f"  B {noise_floor_statement(int(comparison.get('unstable_b') or 0))}")
     if comparison["paired_tasks"]:
         print()
         print(f"{'task':<6} {'calls_A':>8} {'calls_B':>8} {'delta':>8}")

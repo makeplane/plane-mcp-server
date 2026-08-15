@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.results import TaskResult
+from evals.skip_taxonomy import is_expected_environment_capability_skip
 
 from .meta import is_meta_or_non_task_row
 
@@ -15,9 +16,9 @@ from .meta import is_meta_or_non_task_row
 def should_skip_resume_row(row: TaskResult | dict[str, Any]) -> bool:
     """Return True if a prior row is a completed result that resume should skip.
 
-    Re-run when ``error_class`` starts with ``infra_`` or when ``error`` is non-null.
-    Rows with ``skipped`` set are treated as complete and are not retried (intentional:
-    environment/fixture skips are stable outcomes, not infra failures).
+    Re-run rows with errors, cleanup failures, or unexpected skips. Known missing
+    environment capabilities are legitimate terminal outcomes because rerunning cannot
+    add them; fixture collisions and unknown skips may be repairable.
     Pure function — unit-tested without the live battery.
     """
     result = row if isinstance(row, TaskResult) else TaskResult.from_row(row)
@@ -26,6 +27,10 @@ def should_skip_resume_row(row: TaskResult | dict[str, Any]) -> bool:
         return False
     if result.error is not None:
         return False
+    if result.cleanup_error is not None:
+        return False
+    if result.skipped is not None:
+        return is_expected_environment_capability_skip(result.skipped)
     return True
 
 

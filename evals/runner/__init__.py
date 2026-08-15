@@ -4,7 +4,6 @@ from .canary import run_canary
 from .live import (
     MAX_ITERATIONS,
     MAX_TOKENS,
-    classify_call,
     is_infra_cli_stop_reason,
     run_agent_task_via_driver,
     run_live,
@@ -16,7 +15,6 @@ from .resume import load_resume_skip_keys, should_skip_resume_row
 __all__ = [
     "MAX_ITERATIONS",
     "MAX_TOKENS",
-    "classify_call",
     "is_infra_cli_stop_reason",
     "is_meta_or_non_task_row",
     "load_resume_skip_keys",

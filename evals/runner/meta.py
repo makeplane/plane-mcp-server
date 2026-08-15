@@ -46,10 +46,11 @@ def make_run_meta_row(
     requested_model: str | None = None,
     requested_tier: str | None = None,
     resolved_model: str | None = None,
+    expected_rows: int | None = None,
     ts: str | None = None,
 ) -> dict[str, Any]:
     """Build the single first-line meta record for a new output JSONL."""
-    return {
+    row = {
         "schema_version": RESULT_SCHEMA_VERSION,
         "row_type": "meta",
         "run_id": run_id,
@@ -65,6 +66,9 @@ def make_run_meta_row(
         "git_sha": git_sha,
         "ts": ts or datetime.now(timezone.utc).isoformat(),
     }
+    if expected_rows is not None:
+        row["expected_rows"] = expected_rows
+    return row
 
 
 def maybe_write_run_meta(path: Path, meta: dict[str, Any]) -> bool:

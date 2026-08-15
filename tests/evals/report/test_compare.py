@@ -1,82 +1,92 @@
-"""Offline eval tests for compare."""
+"""Offline eval tests for paired comparisons."""
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
 from evals.report import (
     ab_compare,
-    sign_test_pvalue,
+    paired_bootstrap_mean_ci,
+    paired_permutation_pvalue,
+    print_ab_report,
 )
 
 
-def test_sign_test_behaviours():
-    def test_sign_test_all_positive_hand_computed():
-        deltas = [1.0, 2.0, 3.0, 0.5, 4.0]
-        p = sign_test_pvalue(deltas)
-        assert p == pytest.approx(2.0 * (1.0 / 32.0))
-        assert p == pytest.approx(0.0625)
+def test_paired_permutation_retains_ties_and_uses_delta_magnitudes():
+    assert paired_permutation_pvalue([]) is None
+    assert paired_permutation_pvalue([0.0, 0.0]) == 1.0
 
-    def test_sign_test_four_of_five_hand_computed():
-        deltas = [1.0, 1.0, 1.0, 1.0, -1.0]
-        p = sign_test_pvalue(deltas)
-        right = (math.comb(5, 4) + math.comb(5, 5)) / 32.0
-        assert p == pytest.approx(2.0 * right)
-        assert p == pytest.approx(0.375)
-
-    def test_sign_test_drops_zeros_and_none_when_empty():
-        assert sign_test_pvalue([0.0, 0.0]) is None
-        assert sign_test_pvalue([]) is None
-        # One positive, one zero → n=1, k=1 → p = 2*(1/2) = 1.0
-        assert sign_test_pvalue([3.0, 0.0]) == pytest.approx(1.0)
-
-    test_sign_test_all_positive_hand_computed()
-    test_sign_test_four_of_five_hand_computed()
-    test_sign_test_drops_zeros_and_none_when_empty()
+    # A sign test sees 6 positive versus 10 negative deltas and cannot detect
+    # the coherent large-magnitude shift. The paired randomization distribution
+    # uses those magnitudes while all 30 zero-delta task pairs remain in n=46.
+    deltas = [10.0] * 6 + [-0.1] * 10 + [0.0] * 30
+    permutation_p = paired_permutation_pvalue(deltas)
+    old_sign_p = 2 * sum(math.comb(16, index) for index in range(7)) / (2**16)
+    assert old_sign_p > 0.05
+    assert permutation_p == pytest.approx(0.03125)
 
 
-def test_ab_compare_behaviours():
-    def test_ab_compare_paired_deltas_and_sign_test():
-        rows_a = [
-            {"task_id": "R1", "rep": 0, "success": True, "num_calls": 5, "calls": []},
-            {"task_id": "R2", "rep": 0, "success": True, "num_calls": 3, "calls": []},
-            {"task_id": "R3", "rep": 0, "success": False, "num_calls": 9, "calls": []},  # not paired
-        ]
-        rows_b = [
-            {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": []},  # delta -3
-            {"task_id": "R2", "rep": 0, "success": True, "num_calls": 4, "calls": []},  # delta +1
-            {"task_id": "R3", "rep": 0, "success": True, "num_calls": 1, "calls": []},  # A failed → not paired
-        ]
-        cmp = ab_compare(rows_a, rows_b)
-        assert cmp["n_paired"] == 2
-        deltas = {p["task_id"]: p["delta"] for p in cmp["paired_tasks"]}
-        assert deltas["R1"] == -3.0
-        assert deltas["R2"] == 1.0
-        assert cmp["median_delta"] == pytest.approx(-1.0)  # median of [-3, 1]
-        assert cmp["sign_test_p"] is not None
-        assert cmp["success_a"]["k"] == 2 and cmp["success_a"]["n"] == 3
-        assert cmp["success_b"]["k"] == 3 and cmp["success_b"]["n"] == 3
+def test_paired_bootstrap_small_sample_is_task_paired_and_wide():
+    deltas = [1.0, 1.0, -1.0, 0.0, 0.0]
 
-    def test_ab_compare_multi_rep_uses_median_successful_call_counts():
-        rows_a = [
-            {"task_id": "R1", "rep": 0, "success": True, "num_calls": 1, "calls": []},
-            {"task_id": "R1", "rep": 1, "success": False, "num_calls": 9, "calls": []},
-            {"task_id": "R1", "rep": 2, "success": True, "num_calls": 5, "calls": []},
-        ]
-        rows_b = [
-            {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": []},
-            {"task_id": "R1", "rep": 1, "success": True, "num_calls": 4, "calls": []},
-            {"task_id": "R1", "rep": 2, "success": True, "num_calls": 6, "calls": []},
-        ]
+    lower, upper = paired_bootstrap_mean_ci(deltas)
 
-        cmp = ab_compare(rows_a, rows_b)
+    assert lower is not None and upper is not None
+    assert lower < 0.0 < upper
+    assert upper - lower >= 1.0
 
-        assert cmp["multi_rep"] is True
-        assert cmp["unstable_a"] == 1
-        assert cmp["unstable_b"] == 0
-        assert cmp["paired_tasks"] == [{"task_id": "R1", "calls_a": 3.0, "calls_b": 4.0, "delta": 1.0}]
 
-    test_ab_compare_paired_deltas_and_sign_test()
-    test_ab_compare_multi_rep_uses_median_successful_call_counts()
+def test_ab_compare_behaviours(capsys):
+    rows_a = [
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 5, "calls": []},
+        {"task_id": "R2", "rep": 0, "success": True, "num_calls": 3, "calls": []},
+        {"task_id": "R3", "rep": 0, "success": False, "num_calls": 9, "calls": []},
+    ]
+    rows_b = [
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": []},
+        {"task_id": "R2", "rep": 0, "success": True, "num_calls": 4, "calls": []},
+        {"task_id": "R3", "rep": 0, "success": True, "num_calls": 1, "calls": []},
+    ]
+
+    comparison = ab_compare(rows_a, rows_b)
+
+    assert comparison["n_paired"] == 2  # R3 has no successful A call count
+    deltas = {pair["task_id"]: pair["delta"] for pair in comparison["paired_tasks"]}
+    assert deltas == {"R1": -3.0, "R2": 1.0}
+    assert comparison["mean_delta"] == pytest.approx(-1.0)
+    assert comparison["median_delta"] == pytest.approx(-1.0)
+    assert comparison["call_permutation_p"] is not None
+    assert comparison["call_zero_deltas"] == 0
+    assert comparison["n_paired_success"] == 3
+    assert comparison["paired_success_delta"] == pytest.approx(1 / 3)
+    assert comparison["success_a"]["k"] == 2 and comparison["success_a"]["n"] == 3
+    assert comparison["success_b"]["k"] == 3 and comparison["success_b"]["n"] == 3
+
+    print_ab_report(comparison, Path("a.jsonl"), Path("b.jsonl"))
+    output = capsys.readouterr().out
+    assert "paired-bootstrap95" in output
+    assert "paired permutation p-value" in output
+    assert "zero-delta ties retained" in output
+    assert "sign-test" not in output
+    assert "noise floor" not in output
+
+
+def test_ab_compare_multi_rep_uses_median_successful_call_counts():
+    rows_a = [
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 1, "calls": []},
+        {"task_id": "R1", "rep": 1, "success": False, "num_calls": 9, "calls": []},
+        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 5, "calls": []},
+    ]
+    rows_b = [
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": []},
+        {"task_id": "R1", "rep": 1, "success": True, "num_calls": 4, "calls": []},
+        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 6, "calls": []},
+    ]
+
+    comparison = ab_compare(rows_a, rows_b)
+
+    assert comparison["multi_rep"] is True
+    assert comparison["paired_tasks"] == [{"task_id": "R1", "calls_a": 3.0, "calls_b": 4.0, "delta": 1.0}]

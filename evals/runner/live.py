@@ -14,6 +14,9 @@ from typing import Any
 
 from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api import MODEL_TIERS
+from evals.evidence import normalize_evidence_sentinels
+from evals.report.load import load_rows
+from evals.report.summary import completeness_statement, execution_coverage_statement, summarize
 from evals.results import TaskResult, agent_run_to_task_result
 from evals.seed import make_plane_client, seed, teardown
 from evals.tasks.catalog import battery_fingerprint, task_author
@@ -34,14 +37,6 @@ def _system_preamble(workspace_slug: str, project_name: str) -> str:
         f"Workspace slug: {workspace_slug}. Project name: {project_name}. "
         f"Complete the task using the available tools, then stop."
     )
-
-
-def classify_call(tool: str, optimal: set[str], alternate: set[str]) -> str:
-    if tool in optimal:
-        return "optimal"
-    if tool in alternate:
-        return "alternate"
-    return "out_of_set"
 
 
 def stdio_server_env(*, extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -103,17 +98,12 @@ async def run_agent_task_via_driver(
     task: dict[str, Any],
     ctx: dict[str, Any],
     workspace_slug: str,
-    optimal_tools: set[str] | None = None,
-    alternate_tools: set[str] | None = None,
     server_env: dict[str, str] | None = None,
 ) -> TaskResult:
     """Run one task through the selected driver."""
     project_name = ctx["project_name"]
     system = _system_preamble(workspace_slug, project_name)
     prompt = format_task_prompt(task, ctx, strict=True)
-    optimal = set(optimal_tools) if optimal_tools is not None else set(task["optimal_tools"])
-    alternate = set(alternate_tools) if alternate_tools is not None else set(task["alternate_tools"])
-    assert optimal.isdisjoint(alternate), f"{task['id']}: optimal/alternate overlap"
 
     mcp_env = stdio_server_env(extra=server_env)
     # Drivers are sync (CLI subprocess or API loop); keep them off this loop.
@@ -125,13 +115,9 @@ async def run_agent_task_via_driver(
         MAX_ITERATIONS,
         system=system,
         cwd=Path(__file__).resolve().parent.parent.parent,
+        evidence_sentinels=ctx.get("evidence_sentinels"),
     )
-    return agent_run_to_task_result(
-        agent_run,
-        optimal=optimal,
-        alternate=alternate,
-        classify=classify_call,
-    )
+    return agent_run_to_task_result(agent_run)
 
 
 def _make_task_row(
@@ -146,6 +132,7 @@ def _make_task_row(
     requested_tier: str | None,
     task: dict[str, Any],
     repetition: int,
+    expected_rows: int,
     battery: str,
     server: str,
 ) -> TaskResult:
@@ -165,6 +152,7 @@ def _make_task_row(
         task_id=str(task["id"]),
         author=task_author(task),
         rep=repetition,
+        expected_rows=expected_rows,
     )
 
 
@@ -180,7 +168,17 @@ def _seed_fixtures(
     task_needs = set(task.get("needs") or set())
     # Seed wrap: TaskSkipped → skip; other failures → infra_seed.
     try:
-        seed(plane, run_id=uuid.uuid4().hex, needs=task_needs, ctx=context)
+        seed(
+            plane,
+            run_id=uuid.uuid4().hex,
+            needs=task_needs,
+            ctx=context,
+            task_id=str(task["id"]),
+        )
+        if "read" in set(task.get("tags") or set()) and not normalize_evidence_sentinels(
+            context.get("evidence_sentinels")
+        ):
+            raise RuntimeError(f"{task['id']} seed did not register target-entity evidence sentinels")
     except TaskSkipped as skip:
         row.skipped = skip.reason
         row.verify_note = skip.reason
@@ -234,8 +232,6 @@ async def _drive_agent(
             task=task,
             ctx=context,
             workspace_slug=workspace_slug,
-            optimal_tools=set(task["optimal_tools"]),
-            alternate_tools=set(task["alternate_tools"]),
             server_env=server_env,
         )
     except PromptBindError as exc:
@@ -273,7 +269,6 @@ def _apply_agent_run(
     model_alias: str,
     requested_tier: str | None,
     model_id: str | None,
-    external: bool,
 ) -> None:
     """Copy agent metrics and restore the run-level model and server identity."""
     row.apply_agent_result(agent)
@@ -282,10 +277,6 @@ def _apply_agent_run(
     row.requested_model = model_alias
     row.requested_tier = requested_tier
     row.resolved_model = model_id
-    if external:
-        # Foreign tool names are not comparable to our catalog.
-        row.alternate_calls = None
-        row.out_of_set_calls = None
 
 
 def _record_cli_infra_stop(
@@ -338,6 +329,10 @@ async def _verify_task(
             {
                 "final_text": agent.final_text,
                 "calls": agent_row["calls"],
+                "call_source": agent.call_source,
+                "evidence_trace_available": agent.evidence_trace_available,
+                "driver_notes": list(agent.driver_notes),
+                "result_pair_mismatch": agent.result_pair_mismatch,
             },
         )
         row.success = bool(ok)
@@ -382,11 +377,12 @@ def _record_unexpected(
         )
 
 
-def _remove_fixtures(plane: Any, context: dict[str, Any]) -> None:
+def _remove_fixtures(plane: Any, context: dict[str, Any], row: TaskResult) -> None:
     """Remove task fixtures and retain the historical teardown diagnostics."""
     try:
         teardown(plane, context)
     except Exception as exc:
+        row.cleanup_error = f"{type(exc).__name__}: {exc}"
         print(f"  teardown error: {exc}", file=sys.stderr)
         if context.get("project_name"):
             print(f"  orphaned project: {context['project_name']}", file=sys.stderr)
@@ -399,6 +395,7 @@ async def _run_task_repetition(
     workspace_slug: str,
     task: dict[str, Any],
     repetition: int,
+    expected_rows: int,
     run_id: str,
     git_revision: str,
     label: str,
@@ -425,6 +422,7 @@ async def _run_task_repetition(
         requested_tier=requested_tier,
         task=task,
         repetition=repetition,
+        expected_rows=expected_rows,
         battery=battery,
         server="external" if external else "local",
     )
@@ -448,7 +446,6 @@ async def _run_task_repetition(
                     model_alias=model_alias,
                     requested_tier=requested_tier,
                     model_id=model_id,
-                    external=external,
                 )
                 if not _record_cli_infra_stop(
                     row,
@@ -462,7 +459,7 @@ async def _run_task_repetition(
         # Anything outside seed/driver/verify wraps.
         _record_unexpected(row, exc, task=task, repetition=repetition, context=context)
     finally:
-        _remove_fixtures(plane, context)
+        _remove_fixtures(plane, context, row)
     return row
 
 
@@ -500,6 +497,7 @@ async def run_live(
     run_id = uuid.uuid4().hex
     git_revision = read_git_revision()
     battery = battery_fingerprint(tasks)
+    total_runs = len(tasks) * reps
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     resume_skip: set[tuple[str, int, str]] = set()
@@ -531,6 +529,7 @@ async def run_live(
         driver=driver_name,
         provider=provider_id,
         git_sha=git_revision,
+        expected_rows=total_runs,
     )
     if maybe_write_run_meta(out_path, meta):
         print(f"wrote meta header battery={battery} label={label}", flush=True)
@@ -559,7 +558,6 @@ async def run_live(
 
     # A battery is tens of minutes of silence otherwise: one line before each
     # repetition says what is running now, and one after says where the run is.
-    total_runs = len(tasks) * reps
     started_at = time.monotonic()
     finished = 0
     passed = 0
@@ -584,6 +582,7 @@ async def run_live(
                     workspace_slug=workspace_slug,
                     task=task,
                     repetition=repetition,
+                    expected_rows=total_runs,
                     run_id=run_id,
                     git_revision=git_revision,
                     label=label,
@@ -617,4 +616,21 @@ async def run_live(
         f"finished {finished}/{total_runs} in {_elapsed(started_at)}: {passed} pass, {failed} fail, {skipped} skip",
         flush=True,
     )
-    return 0
+    selected_task_ids = {str(task["id"]) for task in tasks}
+    result_rows = [
+        row
+        for row in load_rows(out_path)
+        if row.label == label
+        and (not row.battery or row.battery == battery)
+        and row.task_id in selected_task_ids
+        and 0 <= row.rep < reps
+    ]
+    summary = summarize(result_rows, expected_rows=total_runs)
+    if summary.aggregate_n:
+        rate = summary.aggregate_k / summary.aggregate_n
+        print(f"success: {summary.aggregate_k}/{summary.aggregate_n} ({rate:.1%})", flush=True)
+    else:
+        print("success: 0/0 (n/a; no evaluated rows)", flush=True)
+    print(execution_coverage_statement(summary), flush=True)
+    print(completeness_statement(summary), flush=True)
+    return 0 if summary.complete else 1
