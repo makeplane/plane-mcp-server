@@ -26,7 +26,7 @@ def test_completeness_is_independent_from_success_rate():
         [
             {"task_id": "R1", "success": True, "calls": []},
             {"task_id": "R2", "success": False, "calls": []},
-            {"task_id": "C1", "skipped": "env:plan-gated:customers", "calls": []},
+            {"task_id": "L4", "skipped": "env:plan-gated:customers", "calls": []},
         ],
         expected_rows=3,
     )
@@ -37,7 +37,7 @@ def test_completeness_is_independent_from_success_rate():
     assert complete.complete is True
     assert completeness_statement(complete).startswith("RUN COMPLETE:")
     assert execution_coverage_statement(complete) == (
-        "EXECUTION COVERAGE: 2/3 rows evaluated (66.7%); skipped tasks=[C1 (env:plan-gated:customers)]"
+        "EXECUTION COVERAGE: 2/3 rows evaluated (66.7%); skipped tasks=[L4 (env:plan-gated:customers)]"
     )
 
     missing_worker = summarize(
@@ -91,6 +91,30 @@ def test_completeness_is_independent_from_success_rate():
     assert cleanup.aggregate_k == cleanup.aggregate_n == 1
     assert cleanup.cleanup_errors == 1
     assert cleanup.complete is False
+
+
+def test_result_pair_mismatch_preserves_outcome_but_excludes_trace_metrics():
+    summary = summarize(
+        [
+            {
+                "task_id": "R1",
+                "success": True,
+                "trace_integrity": False,
+                "trace_integrity_reason": "result_pair_mismatch",
+                "result_pair_mismatch": True,
+                "num_calls": 99,
+                "calls": [{"tool": "untrustworthy", "result_tokens": 200}],
+            }
+        ],
+        expected_rows=1,
+    )
+
+    assert summary.complete is False
+    assert summary.trace_invalid_rows == 1
+    assert summary.aggregate_k == summary.aggregate_n == 1
+    assert summary.tasks["R1"].med_calls is None
+    assert summary.tasks["R1"].tool_reps == 0
+    assert summary.tasks["R1"].med_result_tokens is None
 
 
 def _summarize_excludes_infra_errors_from_success():
@@ -250,6 +274,26 @@ def test_wilson_interval_bounds():
     assert wilson_interval(0, 0) == (0.0, 0.0)
 
 
+def test_headline_interval_bootstraps_35_task_clusters_instead_of_175_repetitions():
+    rows = [
+        {"task_id": f"T{task_index:02d}", "rep": rep, "success": task_index < 17, "calls": []}
+        for task_index in range(35)
+        for rep in range(5)
+    ]
+
+    summary = summarize(rows)
+
+    assert (summary.aggregate_k, summary.aggregate_n) == (85, 175)
+    assert summary.aggregate_wilson_lo == pytest.approx(0.4127693534)
+    assert summary.aggregate_wilson_hi == pytest.approx(0.5592729455)
+    assert summary.task_mean_success == pytest.approx(17 / 35)
+    assert summary.task_cluster_lo == pytest.approx(0.3142857143)
+    assert summary.task_cluster_hi == pytest.approx(0.6571428571)
+    assert summary.task_cluster_hi - summary.task_cluster_lo > (
+        summary.aggregate_wilson_hi - summary.aggregate_wilson_lo
+    )
+
+
 def test_multi_rep_synthetic_file_reports_wilson_and_instability_without_noise_claim(tmp_path: Path, capsys):
     path = tmp_path / "multi.jsonl"
     outcomes = {
@@ -302,7 +346,8 @@ def test_single_rep_summary_renders_tool_distribution_unavailable(capsys):
 
     assert capsys.readouterr().out == (
         "Summary: sample.jsonl\n"
-        "aggregate success: 1/1 (100.0%) Wilson95 [0.21,1.00]\n"
+        "task-cluster success: 100.0% across 1 tasks cluster-bootstrap95 [1.00,1.00]\n"
+        "pooled repetition success: 1/1 (100.0%) Wilson95 [0.21,1.00]\n"
         "EXECUTION COVERAGE: 1/1 rows evaluated (100.0%)\n"
         "RUN COMPLETE: 1/1 rows completed\n"
         "tool variability: —\n"

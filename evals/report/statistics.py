@@ -113,6 +113,22 @@ def paired_bootstrap_mean_ci(
     return (percentile(bootstrap_means, tail), percentile(bootstrap_means, 1.0 - tail))
 
 
+def cluster_bootstrap_mean_ci(
+    task_rates: list[float],
+    *,
+    confidence: float = 0.95,
+    resamples: int = BOOTSTRAP_RESAMPLES,
+    seed: int = 0,
+) -> tuple[float | None, float | None]:
+    """Bootstrap the mean success rate by resampling whole task clusters."""
+    return paired_bootstrap_mean_ci(
+        task_rates,
+        confidence=confidence,
+        resamples=resamples,
+        seed=seed,
+    )
+
+
 def median(values: list[float]) -> float | None:
     if not values:
         return None

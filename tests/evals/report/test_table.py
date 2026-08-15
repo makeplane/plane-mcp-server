@@ -66,7 +66,7 @@ def test_report_separates_success_from_completeness_and_sets_exit_status(tmp_pat
     collision.write_text(
         "\n".join(
             [
-                json.dumps({"row_type": "meta", "expected_rows": 1}),
+                json.dumps({"row_type": "meta", "expected_rows": 1, "server": "local"}),
                 json.dumps(_synth_row("R1", skipped="env:fixture-collision:customers:Acme")),
             ]
         )
@@ -76,7 +76,7 @@ def test_report_separates_success_from_completeness_and_sets_exit_status(tmp_pat
 
     assert report_mod.main([str(collision)]) == 1
     collision_output = capsys.readouterr().out
-    assert "aggregate success: 0/0" in collision_output
+    assert "pooled repetition success: 0/0" in collision_output
     assert "EXECUTION COVERAGE: 0/1 rows evaluated (0.0%)" in collision_output
     assert "R1 (env:fixture-collision:customers:Acme)" in collision_output
     assert "RUN INCOMPLETE:" in collision_output
@@ -86,8 +86,8 @@ def test_report_separates_success_from_completeness_and_sets_exit_status(tmp_pat
     plan_gated.write_text(
         "\n".join(
             [
-                json.dumps({"row_type": "meta", "expected_rows": 1}),
-                json.dumps(_synth_row("C1", skipped="env:plan-gated:customers")),
+                json.dumps({"row_type": "meta", "expected_rows": 1, "server": "local"}),
+                json.dumps(_synth_row("L4", skipped="env:plan-gated:customers")),
             ]
         )
         + "\n",
@@ -96,9 +96,9 @@ def test_report_separates_success_from_completeness_and_sets_exit_status(tmp_pat
 
     assert report_mod.main([str(plan_gated)]) == 0
     plan_output = capsys.readouterr().out
-    assert "aggregate success: 0/0" in plan_output
+    assert "pooled repetition success: 0/0" in plan_output
     assert "EXECUTION COVERAGE: 0/1 rows evaluated (0.0%)" in plan_output
-    assert "C1 (env:plan-gated:customers)" in plan_output
+    assert "L4 (env:plan-gated:customers)" in plan_output
     assert "RUN COMPLETE:" in plan_output
     assert "expected skips=1 [plan-gated=1]" in plan_output
 
@@ -172,7 +172,7 @@ def _report_main_table_cli(tmp_path, capsys):
     assert "R1" in out
 
 
-def _report_main_table_warns_when_battery_fingerprints_differ(tmp_path, capsys):
+def _report_main_table_refuses_when_battery_fingerprints_differ(tmp_path, capsys):
     f1 = tmp_path / "old.jsonl"
     f2 = tmp_path / "new.jsonl"
     f1.write_text(
@@ -186,10 +186,11 @@ def _report_main_table_warns_when_battery_fingerprints_differ(tmp_path, capsys):
 
     rc = report_mod.main(["--table", str(f1), str(f2)])
 
-    assert rc == 0
+    assert rc == 2
     captured = capsys.readouterr()
-    assert "spans battery fingerprints" in captured.err
-    assert "different task prompts/questions" in captured.err
+    assert captured.out == ""
+    assert "comparability cannot be established from the persisted identity" in captured.err
+    assert "battery differs across files" in captured.err
 
 
 def _report_main_markdown_flag(tmp_path, capsys):
@@ -198,7 +199,8 @@ def _report_main_markdown_flag(tmp_path, capsys):
     rc = report_mod.main(["--table", "--markdown", str(f1)])
     assert rc == 0
     out = capsys.readouterr().out
-    assert out.startswith("| task |")
+    assert out.startswith("WARNING: TOOL MANIFEST ABSENT")
+    assert "\n\n| task |" in out
     assert "| R1 |" in out
     assert "---" in out
 
@@ -226,7 +228,7 @@ def _report_main_no_dedupe_flag(tmp_path, capsys):
         _report_marks_entirely_estimated_result_token_columns,
         _report_marks_mixed_measured_and_estimated_columns,
         _report_main_table_cli,
-        _report_main_table_warns_when_battery_fingerprints_differ,
+        _report_main_table_refuses_when_battery_fingerprints_differ,
         _report_main_markdown_flag,
         _report_main_no_dedupe_flag,
     ),
@@ -331,7 +333,8 @@ def test_single_rep_multi_surface_renders_tool_distribution_unavailable():
         "-------------------------------------------------------\n"
         "R1    In project P, what is the curren…  ✅ 2c · tools —\n"
         "-------------------------------------------------------\n"
-        "local        success 1/1 (100%)  total calls 2  tool variability —  infra 0\n"
+        "local        success task-cluster 100.0% [1.00,1.00]; pooled 1/1  total calls 2  "
+        "tool variability —  infra 0\n"
         "local        EXECUTION COVERAGE: 1/1 rows evaluated (100.0%)\n"
         "local        RUN COMPLETE: 1/1 rows completed\n"
     )

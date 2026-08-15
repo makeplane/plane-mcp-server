@@ -2,15 +2,28 @@
 
 from .command import main
 from .compare import ab_compare, print_ab_report
+from .identity import (
+    ComparabilityError,
+    FileIdentity,
+    IdentityReport,
+    format_refusal,
+    identity_header_lines,
+    parse_varied_dimensions,
+    validate_persisted_identity,
+)
 from .load import (
     DedupeMode,
     ResultRow,
+    RunExpectation,
+    RunKeyValidation,
     dedupe_rows_latest,
     is_infra_error_row,
     is_meta_row,
     load_rows,
+    load_run_expectation,
     load_run_expected_rows,
     read_result,
+    validate_run_keys,
 )
 from .statistics import iqr, median, paired_bootstrap_mean_ci, paired_permutation_pvalue, percentile, wilson_interval
 from .summary import (
@@ -36,11 +49,15 @@ from .table import (
     result_tokens_marker,
     surface_label_for_file,
     task_sort_key,
-    warn_if_table_mixes_batteries,
 )
 
 __all__ = [
     "DedupeMode",
+    "RunExpectation",
+    "RunKeyValidation",
+    "ComparabilityError",
+    "FileIdentity",
+    "IdentityReport",
     "ResultRow",
     "ResultTokensMode",
     "Summary",
@@ -52,6 +69,7 @@ __all__ = [
     "format_multi_rep_surface_cell",
     "format_number",
     "format_result_tokens",
+    "format_refusal",
     "format_surface_cell",
     "format_tool_distribution",
     "format_tool_variability",
@@ -59,23 +77,27 @@ __all__ = [
     "iqr",
     "is_infra_error_row",
     "is_meta_row",
+    "identity_header_lines",
     "load_rows",
+    "load_run_expectation",
     "load_run_expected_rows",
     "main",
     "median",
     "paired_bootstrap_mean_ci",
     "paired_permutation_pvalue",
+    "parse_varied_dimensions",
     "percentile",
     "print_ab_report",
     "print_table",
     "prompt_excerpt",
     "read_result",
+    "validate_run_keys",
     "render_multi_surface_table",
     "result_tokens_marker",
     "result_tokens_mode",
     "summarize",
     "surface_label_for_file",
     "task_sort_key",
-    "warn_if_table_mixes_batteries",
+    "validate_persisted_identity",
     "wilson_interval",
 ]

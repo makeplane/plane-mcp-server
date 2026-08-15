@@ -9,8 +9,8 @@ from typing import Literal
 from evals.results import TaskResult
 from evals.skip_taxonomy import is_expected_environment_capability_skip, skip_reason_family
 
-from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
-from .statistics import iqr, median, percentile, wilson_interval
+from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
+from .statistics import cluster_bootstrap_mean_ci, iqr, median, percentile, wilson_interval
 
 ResultTokensMode = Literal["measured", "estimated", "mixed", "unlabeled", "unavailable"]
 
@@ -69,6 +69,7 @@ class Summary:
     expected_skips: int
     unexpected_skips: int
     cleanup_errors: int
+    trace_invalid_rows: int
     expected_skip_reasons: dict[str, int]
     unexpected_skip_reasons: dict[str, int]
     skipped_task_reasons: dict[str, list[str]]
@@ -76,6 +77,11 @@ class Summary:
     aggregate_n: int
     aggregate_wilson_lo: float
     aggregate_wilson_hi: float
+    task_mean_success: float | None
+    task_cluster_lo: float | None
+    task_cluster_hi: float | None
+    missing_run_keys: tuple[str, ...]
+    unexpected_run_keys: tuple[str, ...]
     multi_rep: bool
     result_tokens_mode: ResultTokensMode
 
@@ -83,10 +89,13 @@ class Summary:
     def complete(self) -> bool:
         return (
             self.completed_rows == self.expected_rows
+            and not self.missing_run_keys
+            and not self.unexpected_run_keys
             and self.infra_errors == 0
             and self.harness_errors == 0
             and self.unexpected_skips == 0
             and self.cleanup_errors == 0
+            and self.trace_invalid_rows == 0
         )
 
     @property
@@ -111,6 +120,8 @@ def result_tokens_mode(rows: list[ResultRow]) -> ResultTokensMode:
     labels: set[str] = set()
     for raw_row in rows:
         row = read_result(raw_row)
+        if not row.trace_integrity:
+            continue
         for call in row.calls:
             if call.result_tokens is None:
                 continue
@@ -153,6 +164,12 @@ def completeness_statement(summary: Summary) -> str:
         parts.append(f"unexpected skips={summary.unexpected_skips} [{reasons}]")
     if summary.cleanup_errors:
         parts.append(f"cleanup errors={summary.cleanup_errors}")
+    if summary.trace_invalid_rows:
+        parts.append(f"trace-invalid rows={summary.trace_invalid_rows}")
+    if summary.missing_run_keys:
+        parts.append(f"missing keys=[{', '.join(summary.missing_run_keys)}]")
+    if summary.unexpected_run_keys:
+        parts.append(f"unexpected keys=[{', '.join(summary.unexpected_run_keys)}]")
     if summary.expected_skips:
         reasons = _format_reason_counts(summary.expected_skip_reasons)
         parts.append(f"expected skips={summary.expected_skips} [{reasons}]")
@@ -175,7 +192,12 @@ def execution_coverage_statement(summary: Summary) -> str:
     return "EXECUTION COVERAGE: " + "; ".join(parts)
 
 
-def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Summary:
+def summarize(
+    rows: list[ResultRow],
+    *,
+    expected_rows: int | None = None,
+    run_keys: RunKeyValidation | None = None,
+) -> Summary:
     """Aggregate per-task metrics.
 
     Rows with ``error_class`` starting ``infra_`` are excluded from success-rate
@@ -193,6 +215,7 @@ def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Sum
     expected_skips = 0
     unexpected_skips = 0
     cleanup_errors = 0
+    trace_invalid_rows = 0
     expected_skip_reasons: dict[str, int] = defaultdict(int)
     unexpected_skip_reasons: dict[str, int] = defaultdict(int)
     skipped_task_reasons: dict[str, set[str]] = defaultdict(set)
@@ -204,6 +227,8 @@ def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Sum
         declared_expected_rows = max(declared_expected_rows, row.expected_rows)
         task_id = row.task_id
         repetitions_by_task[task_id].add(row.rep)
+        if not row.trace_integrity:
+            trace_invalid_rows += 1
         if row.cleanup_error:
             cleanup_errors += 1
         if is_infra_error_row(row):
@@ -217,7 +242,7 @@ def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Sum
         if row.skipped:
             family = skip_reason_family(row.skipped)
             skipped_task_reasons[row.skipped].add(task_id)
-            if is_expected_environment_capability_skip(row.skipped):
+            if is_expected_environment_capability_skip(row.skipped, task_id=task_id):
                 expected_skips += 1
                 expected_skip_reasons[family] += 1
                 completed_rows += 1
@@ -241,11 +266,11 @@ def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Sum
         total_passes += pass_count
         total_repetitions += repetition_count
         lower, upper = wilson_interval(pass_count, repetition_count) if repetition_count else (0.0, 0.0)
-        successful_calls = [float(row.num_calls) for row in task_results if row.success]
+        successful_calls = [float(row.num_calls) for row in task_results if row.success and row.trace_integrity]
         first_quartile, median_calls, third_quartile = iqr(successful_calls)
         minimum_calls = min(successful_calls) if successful_calls else None
         maximum_calls = max(successful_calls) if successful_calls else None
-        successful_results = [row for row in task_results if row.success]
+        successful_results = [row for row in task_results if row.success and row.trace_integrity]
         tool_reps = len(successful_results)
         failed_tool_reps = (
             repetition_count
@@ -270,6 +295,8 @@ def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Sum
         errored_calls = 0
         result_tokens: list[float] = []
         for row in task_results:
+            if not row.trace_integrity:
+                continue
             for call in row.calls:
                 if call.is_error:
                     errored_calls += 1
@@ -304,8 +331,13 @@ def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Sum
     aggregate_lower, aggregate_upper = (
         wilson_interval(total_passes, total_repetitions) if total_repetitions else (0.0, 0.0)
     )
+    task_rates = [task.k / task.n for task in output.values() if task.n]
+    task_mean_success = sum(task_rates) / len(task_rates) if task_rates else None
+    task_cluster_lower, task_cluster_upper = cluster_bootstrap_mean_ci(task_rates)
     resolved_expected_rows = (
-        max(expected_rows, declared_expected_rows)
+        run_keys.expectation.expected_rows
+        if run_keys is not None
+        else max(expected_rows, declared_expected_rows)
         if expected_rows is not None
         else declared_expected_rows or sum(1 for row in rows if not is_meta_row(row))
     )
@@ -319,6 +351,7 @@ def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Sum
         expected_skips=expected_skips,
         unexpected_skips=unexpected_skips,
         cleanup_errors=cleanup_errors,
+        trace_invalid_rows=trace_invalid_rows,
         expected_skip_reasons=dict(expected_skip_reasons),
         unexpected_skip_reasons=dict(unexpected_skip_reasons),
         skipped_task_reasons={reason: sorted(task_ids) for reason, task_ids in sorted(skipped_task_reasons.items())},
@@ -326,6 +359,11 @@ def summarize(rows: list[ResultRow], *, expected_rows: int | None = None) -> Sum
         aggregate_n=total_repetitions,
         aggregate_wilson_lo=aggregate_lower,
         aggregate_wilson_hi=aggregate_upper,
+        task_mean_success=task_mean_success,
+        task_cluster_lo=task_cluster_lower,
+        task_cluster_hi=task_cluster_upper,
+        missing_run_keys=run_keys.missing if run_keys is not None else (),
+        unexpected_run_keys=run_keys.unexpected if run_keys is not None else (),
         multi_rep=any(len(repetitions) > 1 for repetitions in repetitions_by_task.values()),
         result_tokens_mode=result_tokens_mode([row for task_results in by_task.values() for row in task_results]),
     )

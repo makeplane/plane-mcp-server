@@ -90,3 +90,22 @@ def test_ab_compare_multi_rep_uses_median_successful_call_counts():
 
     assert comparison["multi_rep"] is True
     assert comparison["paired_tasks"] == [{"task_id": "R1", "calls_a": 3.0, "calls_b": 4.0, "delta": 1.0}]
+
+
+def test_ab_compare_excludes_trace_invalid_call_counts():
+    rows_a = [
+        {
+            "task_id": "R1",
+            "success": True,
+            "trace_integrity": False,
+            "trace_integrity_reason": "result_pair_mismatch",
+            "num_calls": 99,
+            "calls": [],
+        }
+    ]
+    rows_b = [{"task_id": "R1", "success": True, "num_calls": 1, "calls": []}]
+
+    comparison = ab_compare(rows_a, rows_b)
+
+    assert comparison["n_paired"] == 0
+    assert comparison["paired_tasks"] == []

@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
+from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
 from .statistics import median, paired_bootstrap_mean_ci, paired_permutation_pvalue
 from .summary import completeness_statement, execution_coverage_statement, summarize
 from .table import format_number
@@ -18,6 +18,8 @@ def ab_compare(
     *,
     expected_rows_a: int | None = None,
     expected_rows_b: int | None = None,
+    run_keys_a: RunKeyValidation | None = None,
+    run_keys_b: RunKeyValidation | None = None,
 ) -> dict[str, Any]:
     """Compare two result sets with task-paired call and success deltas.
 
@@ -29,14 +31,14 @@ def ab_compare(
     labels, then bootstrap whole task pairs. This treats tasks as independent
     sampling units and assumes the labels cover comparable task instances.
     """
-    summary_a = summarize(rows_a, expected_rows=expected_rows_a)
-    summary_b = summarize(rows_b, expected_rows=expected_rows_b)
+    summary_a = summarize(rows_a, expected_rows=expected_rows_a, run_keys=run_keys_a)
+    summary_b = summarize(rows_b, expected_rows=expected_rows_b, run_keys=run_keys_b)
 
     def successful_calls_by_task(rows: list[ResultRow]) -> dict[str, list[float]]:
         output: dict[str, list[float]] = defaultdict(list)
         for raw_row in rows:
             row = read_result(raw_row)
-            if is_meta_row(row) or is_infra_error_row(row) or row.error or row.skipped:
+            if is_meta_row(row) or is_infra_error_row(row) or row.error or row.skipped or not row.trace_integrity:
                 continue
             if not row.success:
                 continue
@@ -96,6 +98,9 @@ def ab_compare(
                 summary_a.aggregate_wilson_lo,
                 summary_a.aggregate_wilson_hi,
             ),
+            "task_mean": summary_a.task_mean_success,
+            "task_cluster": (summary_a.task_cluster_lo, summary_a.task_cluster_hi),
+            "task_n": sum(task.n > 0 for task in summary_a.tasks.values()),
         },
         "success_b": {
             "k": summary_b.aggregate_k,
@@ -104,6 +109,9 @@ def ab_compare(
                 summary_b.aggregate_wilson_lo,
                 summary_b.aggregate_wilson_hi,
             ),
+            "task_mean": summary_b.task_mean_success,
+            "task_cluster": (summary_b.task_cluster_lo, summary_b.task_cluster_hi),
+            "task_n": sum(task.n > 0 for task in summary_b.tasks.values()),
         },
     }
 
@@ -113,14 +121,20 @@ def print_ab_report(comparison: dict[str, Any], path_a: Path, path_b: Path) -> N
     success_a, success_b = comparison["success_a"], comparison["success_b"]
     rate_a = (success_a["k"] / success_a["n"]) if success_a["n"] else 0.0
     rate_b = (success_b["k"] / success_b["n"]) if success_b["n"] else 0.0
-    print(
-        f"  success A: {success_a['k']}/{success_a['n']} ({rate_a:.1%}) "
-        f"Wilson95 [{success_a['wilson'][0]:.2f},{success_a['wilson'][1]:.2f}]"
-    )
-    print(
-        f"  success B: {success_b['k']}/{success_b['n']} ({rate_b:.1%}) "
-        f"Wilson95 [{success_b['wilson'][0]:.2f},{success_b['wilson'][1]:.2f}]"
-    )
+    for label, success, pooled_rate in (("A", success_a, rate_a), ("B", success_b, rate_b)):
+        task_mean = success["task_mean"]
+        task_lo, task_hi = success["task_cluster"]
+        if task_mean is None or task_lo is None or task_hi is None:
+            print(f"  success {label} task-cluster: n/a (no evaluated tasks)")
+        else:
+            print(
+                f"  success {label} task-cluster: {task_mean:.1%} "
+                f"cluster-bootstrap95 [{task_lo:.2f},{task_hi:.2f}] (n={success['task_n']} tasks)"
+            )
+        print(
+            f"  success {label} pooled repetitions: {success['k']}/{success['n']} ({pooled_rate:.1%}) "
+            f"Wilson95 [{success['wilson'][0]:.2f},{success['wilson'][1]:.2f}]"
+        )
     print(f"  A {execution_coverage_statement(comparison['summary_a'])}")
     print(f"  B {execution_coverage_statement(comparison['summary_b'])}")
     print(f"  A {completeness_statement(comparison['summary_a'])}")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -10,7 +9,7 @@ from typing import Any
 from evals.results import TaskResult
 from evals.tasks import TASKS_BY_ID
 
-from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
+from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
 from .statistics import wilson_interval
 from .summary import (
     Summary,
@@ -81,16 +80,20 @@ def print_table(summary: Summary, title: str) -> None:
     elif token_mode == "unlabeled":
         print("result-token columns marked ?: include legacy values with unknown measurement status")
     aggregate_count = summary.aggregate_n
-    if aggregate_count:
-        aggregate_passes = summary.aggregate_k
-        lower = summary.aggregate_wilson_lo
-        upper = summary.aggregate_wilson_hi
-        rate = aggregate_passes / aggregate_count if aggregate_count else 0.0
+    if aggregate_count and summary.task_mean_success is not None:
+        task_count = sum(task.n > 0 for task in summary.tasks.values())
         print(
-            f"aggregate success: {aggregate_passes}/{aggregate_count} ({rate:.1%}) Wilson95 [{lower:.2f},{upper:.2f}]"
+            f"task-cluster success: {summary.task_mean_success:.1%} across {task_count} tasks "
+            f"cluster-bootstrap95 [{summary.task_cluster_lo:.2f},{summary.task_cluster_hi:.2f}]"
+        )
+        pooled_rate = summary.aggregate_k / aggregate_count
+        print(
+            f"pooled repetition success: {summary.aggregate_k}/{aggregate_count} ({pooled_rate:.1%}) "
+            f"Wilson95 [{summary.aggregate_wilson_lo:.2f},{summary.aggregate_wilson_hi:.2f}]"
         )
     else:
-        print("aggregate success: 0/0 (n/a; no evaluated rows)")
+        print("task-cluster success: n/a (no evaluated tasks)")
+        print("pooled repetition success: 0/0 (n/a; no evaluated rows)")
     print(execution_coverage_statement(summary))
     print(completeness_statement(summary))
     if summary.infra_errors:
@@ -205,6 +208,7 @@ def build_multi_surface_table(
     file_rows: list[tuple[str, list[ResultRow]]],
     *,
     expected_rows_by_column: dict[str, int | None] | None = None,
+    run_keys_by_column: dict[str, RunKeyValidation | None] | None = None,
 ) -> dict[str, Any]:
     """Build a per-task × per-surface grid from labeled row sets.
 
@@ -269,6 +273,7 @@ def build_multi_surface_table(
         column_summary = summarize(
             [row for task_rows in rows_by_column[column].values() for row in task_rows],
             expected_rows=(expected_rows_by_column or {}).get(column),
+            run_keys=(run_keys_by_column or {}).get(column),
         )
         footer[column] = {
             "success": successes,
@@ -280,6 +285,9 @@ def build_multi_surface_table(
                 column_summary.variable_tool_tasks if column_summary.tool_distribution_available else None
             ),
             "tasks": len(rows_by_column[column]),
+            "task_mean_success": column_summary.task_mean_success,
+            "task_cluster_lo": column_summary.task_cluster_lo,
+            "task_cluster_hi": column_summary.task_cluster_hi,
             "complete": column_summary.complete,
             "completeness": completeness_statement(column_summary),
             "coverage": execution_coverage_statement(column_summary),
@@ -321,7 +329,14 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
         footer_parts = []
         for column in columns:
             values = footer[column]
-            rate = f"{values['success']}/{values['n']}" if values["n"] else "0/0"
+            pooled = f"{values['success']}/{values['n']}" if values["n"] else "0/0"
+            if values["task_mean_success"] is None:
+                rate = f"task-cluster n/a; pooled {pooled}"
+            else:
+                rate = (
+                    f"task-cluster {values['task_mean_success']:.1%} "
+                    f"[{values['task_cluster_lo']:.2f},{values['task_cluster_hi']:.2f}]; pooled {pooled}"
+                )
             variability = (
                 f"{values['tool_variability']}/{values['tasks']} variable"
                 if values["tool_variability"] is not None
@@ -357,13 +372,19 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
     lines.append("-" * len(heading))
     for column in columns:
         values = footer[column]
-        rate = f"{values['success']}/{values['n']}" if values["n"] else "0/0"
-        percentage = f" ({100 * values['success'] / values['n']:.0f}%)" if values["n"] else ""
+        pooled = f"{values['success']}/{values['n']}" if values["n"] else "0/0"
+        if values["task_mean_success"] is None:
+            rate = f"task-cluster n/a; pooled {pooled}"
+        else:
+            rate = (
+                f"task-cluster {values['task_mean_success']:.1%} "
+                f"[{values['task_cluster_lo']:.2f},{values['task_cluster_hi']:.2f}]; pooled {pooled}"
+            )
         variability = (
             f"{values['tool_variability']}/{values['tasks']} tasks" if values["tool_variability"] is not None else "—"
         )
         lines.append(
-            f"{column:12} success {rate}{percentage}  total calls {values['calls']}"
+            f"{column:12} success {rate}  total calls {values['calls']}"
             f"  tool variability {variability}  infra {values['infra_errors']}"
         )
     for column in columns:
@@ -383,23 +404,3 @@ def surface_label_for_file(path: Path, rows: list[TaskResult]) -> str:
     if counts:
         return max(counts, key=counts.get)  # type: ignore[arg-type]
     return path.stem
-
-
-def warn_if_table_mixes_batteries(file_rows: list[tuple[str, list[ResultRow]]]) -> bool:
-    """Warn when table columns contain rows from different task batteries."""
-    by_label: dict[str, set[str]] = {}
-    all_fingerprints: set[str] = set()
-    for label, rows in file_rows:
-        fingerprints = {read_result(row).battery or "<missing>" for row in rows if not is_meta_row(row)}
-        if fingerprints:
-            by_label[label] = fingerprints
-            all_fingerprints.update(fingerprints)
-    if len(all_fingerprints) <= 1:
-        return False
-    detail = "; ".join(f"{label}={','.join(sorted(values))}" for label, values in by_label.items())
-    print(
-        "warning: table spans battery fingerprints; these rows were graded on "
-        f"different task prompts/questions and are not directly comparable ({detail})",
-        file=sys.stderr,
-    )
-    return True

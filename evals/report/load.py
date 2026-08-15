@@ -4,13 +4,133 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import Counter, defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from evals.result_lifecycle import is_terminal_result
 from evals.results import TaskResult
 
 DedupeMode = Literal["latest", "none"]
 ResultRow = TaskResult | dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class RunExpectation:
+    """Exact task/repetition universe declared by a result-file meta header."""
+
+    task_ids: tuple[str, ...]
+    reps: int
+    label: str | None = None
+
+    @property
+    def expected_rows(self) -> int:
+        return len(self.task_ids) * self.reps
+
+    @property
+    def keys(self) -> frozenset[tuple[str, int]]:
+        return frozenset((task_id, rep) for task_id in self.task_ids for rep in range(self.reps))
+
+
+@dataclass(frozen=True, slots=True)
+class RunKeyValidation:
+    """Raw-row comparison against one exact run expectation."""
+
+    expectation: RunExpectation
+    missing: tuple[str, ...]
+    unexpected: tuple[str, ...]
+
+    @property
+    def exact(self) -> bool:
+        return not self.missing and not self.unexpected
+
+
+def _first_meta_row(path: Path) -> dict[str, Any] | None:
+    with path.open(encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict) or row.get("row_type") != "meta":
+                return None
+            return row
+    return None
+
+
+def load_run_expectation(path: Path) -> RunExpectation | None:
+    """Reconstruct the exact expected ``(task_id, rep)`` set when declared."""
+    row = _first_meta_row(path)
+    if row is None:
+        return None
+    raw_task_ids = row.get("expected_task_ids")
+    raw_reps = row.get("expected_reps")
+    if raw_task_ids is None and raw_reps is None:
+        return None
+    if not isinstance(raw_task_ids, list) or raw_reps is None:
+        raise ValueError(f"{path}: meta must declare expected_task_ids and expected_reps together")
+    task_ids = tuple(str(task_id) for task_id in raw_task_ids)
+    try:
+        reps = int(raw_reps)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{path}: expected_reps must be a positive integer") from exc
+    if not task_ids or any(not task_id for task_id in task_ids):
+        raise ValueError(f"{path}: expected_task_ids must be a non-empty list of non-empty ids")
+    if len(set(task_ids)) != len(task_ids):
+        raise ValueError(f"{path}: expected_task_ids contains duplicates")
+    if reps < 1:
+        raise ValueError(f"{path}: expected_reps must be a positive integer")
+    expectation = RunExpectation(task_ids=task_ids, reps=reps, label=str(row["label"]) if row.get("label") else None)
+    declared_rows = row.get("expected_rows")
+    if declared_rows is not None and int(declared_rows) != expectation.expected_rows:
+        raise ValueError(
+            f"{path}: expected_rows={declared_rows} disagrees with exact expectation={expectation.expected_rows}"
+        )
+    return expectation
+
+
+def _format_run_key(key: tuple[str, int], count: int) -> str:
+    rendered = f"{key[0]}[rep={key[1]}]"
+    return f"{rendered} x{count}" if count > 1 else rendered
+
+
+def validate_run_keys(rows: list[ResultRow], expectation: RunExpectation) -> RunKeyValidation:
+    """Validate exact keys while allowing append-only retry history.
+
+    For an expected key, every occurrence except the last must be retryable. The final
+    occurrence is authoritative. A prior terminal occurrence is a genuine duplicate and
+    remains visible as an unexpected key.
+    """
+    expected = Counter({key: 1 for key in expectation.keys})
+    histories: dict[tuple[str, int, str | None], list[TaskResult]] = defaultdict(list)
+    for raw_row in rows:
+        row = read_result(raw_row)
+        if not is_meta_row(row):
+            row_label = row.label if expectation.label is not None else None
+            histories[(row.task_id, row.rep, row_label)].append(row)
+    expected_history_keys = {(task_id, rep, expectation.label) for task_id, rep in expectation.keys}
+    observed = Counter(
+        {(task_id, rep): len(histories.get((task_id, rep, expectation.label), ())) for task_id, rep in expectation.keys}
+    )
+    missing_counts = expected - observed
+    unexpected_counts: Counter[tuple[str, int]] = Counter()
+    for history_key, history in histories.items():
+        key = history_key[:2]
+        if history_key not in expected_history_keys:
+            unexpected_counts[key] += len(history)
+            continue
+        terminal_predecessors = sum(is_terminal_result(row) for row in history[:-1])
+        if terminal_predecessors:
+            unexpected_counts[key] += terminal_predecessors
+    return RunKeyValidation(
+        expectation=expectation,
+        missing=tuple(_format_run_key(key, count) for key, count in sorted(missing_counts.items())),
+        unexpected=tuple(_format_run_key(key, count) for key, count in sorted(unexpected_counts.items())),
+    )
 
 
 def _invalid_result_row(path: Path, line_number: int, reason: str) -> TaskResult:
@@ -27,22 +147,13 @@ def _invalid_result_row(path: Path, line_number: int, reason: str) -> TaskResult
 
 def load_run_expected_rows(path: Path) -> int | None:
     """Read the declared run size from the JSONL meta header, when available."""
-    with path.open(encoding="utf-8") as file:
-        for line in file:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(row, dict):
-                continue
-            if row.get("row_type") != "meta":
-                return None
-            value = row.get("expected_rows")
-            return int(value) if value is not None else None
-    return None
+    if expectation := load_run_expectation(path):
+        return expectation.expected_rows
+    row = _first_meta_row(path)
+    if row is None:
+        return None
+    value = row.get("expected_rows")
+    return int(value) if value is not None else None
 
 
 def read_result(row: ResultRow) -> TaskResult:
@@ -135,7 +246,7 @@ def load_rows(path: Path, *, dedupe: DedupeMode = "latest") -> list[TaskResult]:
         if key in seen_keys:
             print(
                 f"warning: {path}: duplicate (task_id, rep, label)={key} "
-                f"(--no-dedupe keeps all rows; bare --out reuse double-counts)",
+                "(--no-dedupe keeps append-only history; validator distinguishes retries from duplicates)",
                 file=sys.stderr,
             )
         else:
