@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from collections import deque
 from contextlib import asynccontextmanager
+from dataclasses import fields
 from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 from evals.drivers import (
     ApiDriver,
@@ -17,12 +20,23 @@ from evals.drivers.api import (
     ToolSpec,
     Turn,
 )
-from evals.results import RESULT_SCHEMA_VERSION, AgentRun, CallRecord, TaskResult, Usage, agent_run_to_harness_dict
-from evals.runner.live import classify_call
+from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.results import (
+    AGENT_RESULT_COPY_FIELDS,
+    AGENT_RESULT_OPTIONAL_IDENTITY_FIELDS,
+    RESULT_SCHEMA_VERSION,
+    TASK_RESULT_HARNESS_FIELDS,
+    AgentRun,
+    CallRecord,
+    TaskResult,
+    Usage,
+    agent_run_to_harness_dict,
+)
 from evals.token_counting import estimate_result_tokens
 from evals.tool_names import (
     normalize_tool_call,
 )
+from tests.evals.conftest import case_params
 
 
 class FakeBackend:
@@ -103,7 +117,7 @@ def run_driver(driver: ApiDriver, *, max_turns: int = 5):
     )
 
 
-def test_api_driver_maps_every_legacy_row_field():
+def test_api_driver_maps_every_current_row_field():
     backend = FakeBackend(
         [
             Turn(
@@ -122,22 +136,13 @@ def test_api_driver_maps_every_legacy_row_field():
         ]
     )
     run = run_driver(make_driver(backend, FakeMcpSession([ToolResult(call_id="a", text="12345")])))
-    row = agent_run_to_harness_dict(
-        run,
-        optimal={"lookup"},
-        alternate=set(),
-        classify=lambda tool, optimal, alternate: (
-            "optimal" if tool in optimal else "alternate" if tool in alternate else "out_of_set"
-        ),
-    )
+    row = agent_run_to_harness_dict(run)
 
     required = {
         "final_text",
         "calls",
         "num_calls",
         "errored_calls",
-        "alternate_calls",
-        "out_of_set_calls",
         "total_result_tokens",
         "usage_per_iteration",
         "cum_input_tokens",
@@ -151,7 +156,6 @@ def test_api_driver_maps_every_legacy_row_field():
     assert required <= row.keys()
     assert {
         "tool",
-        "class",
         "args_chars",
         "result_tokens",
         "result_chars",
@@ -167,162 +171,155 @@ def test_api_driver_maps_every_legacy_row_field():
     assert row["provider_stop_reason"] == "fake_done"
 
 
-def test_agent_run_behaviours():
-    def test_agent_run_dict_keeps_action_arg():
-        run = AgentRun(
-            calls=[
-                {"tool": "work_item", "args": {"action": "create", "name": "x"}, "origin": "plane"},
-                {"tool": "get_pql_reference", "args": {}, "origin": "plane"},
-            ],
-            final_text="done",
-            usage=None,
-            stopped_reason="end_turn",
-        )
-        d = agent_run_to_harness_dict(
-            run,
-            optimal=set(),
-            alternate=set(),
-            classify=lambda t, o, a: "out_of_set",
-        )
-        assert d["calls"][0]["action"] == "create"
-        assert "action" not in d["calls"][1]
+def _agent_run_dict_keeps_action_arg():
+    run = AgentRun(
+        calls=[
+            {"tool": "work_item", "args": {"action": "create", "name": "x"}, "origin": "plane"},
+            {"tool": "get_pql_reference", "args": {}, "origin": "plane"},
+        ],
+        final_text="done",
+        usage=None,
+        stopped_reason="end_turn",
+    )
+    d = agent_run_to_harness_dict(run)
+    assert d["calls"][0]["action"] == "create"
+    assert "action" not in d["calls"][1]
 
-    def test_agent_run_to_harness_dict_excludes_toolsearch_from_mispicks():
-        run = AgentRun(
-            calls=[
-                normalize_tool_call("mcp__plane__find_work_items", {"project": "A"}),
-            ],
-            client_tool_calls=[
-                normalize_tool_call("ToolSearch", {"query": "work items"}),
-            ],
-            final_text="done",
-            usage={
-                "input_tokens": 10,
-                "output_tokens": 865,
-                "cache_read_input_tokens": 250433,
-                "cache_creation_input_tokens": 33838,
-                "total_cost_usd": 0.29,
-                "modelUsage": {
-                    "claude-sonnet": {
-                        "inputTokens": 10,
-                        "outputTokens": 865,
-                        "cacheReadInputTokens": 250433,
-                        "cacheCreationInputTokens": 33838,
-                        "costUSD": 0.29,
-                    }
-                },
-            },
-            usage_total={
-                "input_tokens": 10,
-                "output_tokens": 865,
-                "cache_read_input_tokens": 250433,
-                "cache_creation_input_tokens": 33838,
-                "total_input_tokens_including_cache": 10 + 250433 + 33838,
-                "total_cost_usd": 0.29,
-                "source": "modelUsage",
-            },
-            stopped_reason="end_turn",
-            usage_scope="run",
-            call_source="transcript",
-            hit_max_turns=False,
-            wall_time_s=1.5,
-        )
-        out = agent_run_to_harness_dict(
-            run,
-            optimal={"find_work_items"},
-            alternate={"get_work_item"},
-            classify=classify_call,
-        )
-        assert out["num_calls"] == 1
-        assert out["out_of_set_calls"] == 0
-        assert out["calls"][0]["class"] == "optimal"
-        assert out["client_tool_call_count"] == 1
-        assert out["client_tool_calls"][0]["tool"] == "ToolSearch"
-        # F2: cum_input_tokens null — not the misleading uncached-only 10
-        assert out["cum_input_tokens"] is None
-        assert out["cum_input_tokens_reason"]
-        assert out["usage_total"]["total_input_tokens_including_cache"] == 10 + 250433 + 33838
-        assert out["usage_per_iteration"] == []
-        assert out["calls"][0]["result_tokens"] == 0
-        assert out["calls"][0]["result_tokens_estimated"] is True
-        assert out["result_tokens_estimated"] is True
-        assert "result_tokens_skipped_reason" not in out
 
-    def test_agent_run_hit_max_maps_to_hit_max_iterations():
-        run = AgentRun(
-            calls=[],
-            final_text="",
-            usage=None,
-            stopped_reason="end_turn",
-            hit_max_turns=True,
-            call_source="json",
-        )
-        out = agent_run_to_harness_dict(run, optimal=set(), alternate=set(), classify=classify_call)
-        assert out["hit_max_iterations"] is True
-        assert out["stop_reason"] == "max_turns"
-
-    def test_agent_run_to_harness_dict_does_not_guess_usage_total():
-        run = AgentRun(
-            calls=[],
-            final_text="ok",
-            usage={
-                "input_tokens": 5000,
-                "output_tokens": 200,
-                # Codex-ish shape — not Claude modelUsage. A Claude rebuild would
-                # silently produce a wrong / empty total if reintroduced.
-                "total_token_usage": {"input_tokens": 5000, "output_tokens": 200},
-            },
-            usage_total=None,
-            stopped_reason="completed",
-            usage_scope="run",
-            call_source="stream",
-        )
-        out = agent_run_to_harness_dict(
-            run,
-            optimal=set(),
-            alternate=set(),
-            classify=classify_call,
-        )
-        assert out["usage"] == run.usage
-        assert out["usage_total"] is None
-
-    def test_agent_run_to_harness_propagates_proxy_fields():
-        run = AgentRun(
-            calls=[
-                {
-                    "tool": "find_work_items",
-                    "args": {"q": "a"},
-                    "origin": "plane",
-                    "is_error": True,
-                    "result_chars": 99,
-                    "duration_ms": 42,
+def _agent_run_to_harness_dict_excludes_toolsearch_from_plane_calls():
+    run = AgentRun(
+        calls=[
+            normalize_tool_call("mcp__plane__find_work_items", {"project": "A"}),
+        ],
+        client_tool_calls=[
+            normalize_tool_call("ToolSearch", {"query": "work items"}),
+        ],
+        final_text="done",
+        usage={
+            "input_tokens": 10,
+            "output_tokens": 865,
+            "cache_read_input_tokens": 250433,
+            "cache_creation_input_tokens": 33838,
+            "total_cost_usd": 0.29,
+            "modelUsage": {
+                "claude-sonnet": {
+                    "inputTokens": 10,
+                    "outputTokens": 865,
+                    "cacheReadInputTokens": 250433,
+                    "cacheCreationInputTokens": 33838,
+                    "costUSD": 0.29,
                 }
-            ],
-            final_text="x",
-            usage=None,
-            stopped_reason="end_turn",
-            call_source="proxy",
-            usage_scope="run",
-        )
-        d = agent_run_to_harness_dict(
-            run,
-            optimal={"find_work_items"},
-            alternate=set(),
-            classify=lambda t, o, a: "optimal",
-        )
-        assert d["calls"][0]["is_error"] is True
-        assert d["calls"][0]["result_chars"] == 99
-        assert d["calls"][0]["result_tokens"] == estimate_result_tokens(99)
-        assert d["calls"][0]["result_tokens_estimated"] is True
-        assert d["result_tokens_estimated"] is True
-        assert d["calls"][0]["duration_ms"] == 42
-        assert d["errored_calls"] == 1
+            },
+        },
+        usage_total={
+            "input_tokens": 10,
+            "output_tokens": 865,
+            "cache_read_input_tokens": 250433,
+            "cache_creation_input_tokens": 33838,
+            "total_input_tokens_including_cache": 10 + 250433 + 33838,
+            "total_cost_usd": 0.29,
+            "source": "modelUsage",
+        },
+        stopped_reason="end_turn",
+        usage_scope="run",
+        call_source="transcript",
+        hit_max_turns=False,
+        wall_time_s=1.5,
+    )
+    out = agent_run_to_harness_dict(run)
+    assert out["num_calls"] == 1
+    assert out["client_tool_call_count"] == 1
+    assert out["client_tool_calls"][0]["tool"] == "ToolSearch"
+    # F2: cum_input_tokens null — not the misleading uncached-only 10
+    assert out["cum_input_tokens"] is None
+    assert out["cum_input_tokens_reason"]
+    assert out["usage_total"]["total_input_tokens_including_cache"] == 10 + 250433 + 33838
+    assert out["usage_per_iteration"] == []
+    assert out["calls"][0]["result_tokens"] == 0
+    assert out["calls"][0]["result_tokens_estimated"] is True
+    assert out["result_tokens_estimated"] is True
+    assert "result_tokens_skipped_reason" not in out
 
-    test_agent_run_dict_keeps_action_arg()
-    test_agent_run_to_harness_dict_excludes_toolsearch_from_mispicks()
-    test_agent_run_hit_max_maps_to_hit_max_iterations()
-    test_agent_run_to_harness_dict_does_not_guess_usage_total()
-    test_agent_run_to_harness_propagates_proxy_fields()
+
+def _agent_run_hit_max_maps_to_hit_max_iterations():
+    run = AgentRun(
+        calls=[],
+        final_text="",
+        usage=None,
+        stopped_reason="end_turn",
+        hit_max_turns=True,
+        call_source="json",
+    )
+    out = agent_run_to_harness_dict(run)
+    assert out["hit_max_iterations"] is True
+    assert out["stop_reason"] == "max_turns"
+
+
+def _agent_run_to_harness_dict_does_not_guess_usage_total():
+    run = AgentRun(
+        calls=[],
+        final_text="ok",
+        usage={
+            "input_tokens": 5000,
+            "output_tokens": 200,
+            # Codex-ish shape — not Claude modelUsage. A Claude rebuild would
+            # silently produce a wrong / empty total if reintroduced.
+            "total_token_usage": {"input_tokens": 5000, "output_tokens": 200},
+        },
+        usage_total=None,
+        stopped_reason="completed",
+        usage_scope="run",
+        call_source="stream",
+    )
+    out = agent_run_to_harness_dict(run)
+    assert out["usage"] == run.usage
+    assert out["usage_total"] is None
+
+
+def _agent_run_to_harness_propagates_proxy_fields():
+    run = AgentRun(
+        calls=[
+            {
+                "tool": "find_work_items",
+                "args": {"q": "a"},
+                "origin": "plane",
+                "is_error": True,
+                "result_chars": 99,
+                "duration_ms": 42,
+                "observed_sentinels": [TARGET_ENTITY_EVIDENCE],
+            }
+        ],
+        final_text="x",
+        usage=None,
+        stopped_reason="end_turn",
+        call_source="proxy",
+        usage_scope="run",
+        evidence_trace_available=True,
+    )
+    d = agent_run_to_harness_dict(run)
+    assert d["calls"][0]["is_error"] is True
+    assert d["calls"][0]["result_chars"] == 99
+    assert d["calls"][0]["result_tokens"] == estimate_result_tokens(99)
+    assert d["calls"][0]["result_tokens_estimated"] is True
+    assert d["result_tokens_estimated"] is True
+    assert d["calls"][0]["duration_ms"] == 42
+    assert d["calls"][0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert d["evidence_trace_available"] is True
+    assert d["errored_calls"] == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    case_params(
+        _agent_run_dict_keeps_action_arg,
+        _agent_run_to_harness_dict_excludes_toolsearch_from_plane_calls,
+        _agent_run_hit_max_maps_to_hit_max_iterations,
+        _agent_run_to_harness_dict_does_not_guess_usage_total,
+        _agent_run_to_harness_propagates_proxy_fields,
+    ),
+)
+def test_agent_run_behaviours(case):
+    case()
 
 
 def test_task_result_schema_round_trip_owns_usage_shape():
@@ -331,16 +328,19 @@ def test_task_result_schema_round_trip_owns_usage_shape():
         task_id="R1",
         label="local",
         server="local",
+        expected_rows=35,
+        cleanup_error="RuntimeError: teardown failed",
         calls=[
             CallRecord(
                 tool="find_work_items",
-                classification="optimal",
                 result_tokens=3,
                 result_tokens_estimated=False,
                 result_token_count_method="backend",
+                observed_sentinels=[TARGET_ENTITY_EVIDENCE],
             )
         ],
         num_calls=1,
+        evidence_trace_available=True,
         usage_per_iteration=[Usage(10, 2, 3, 4)],
     )
 
@@ -349,8 +349,31 @@ def test_task_result_schema_round_trip_owns_usage_shape():
     assert row["row_type"] == "result"
     assert row["label"] == "local"
     assert row["server"] == "local"
+    assert row["expected_rows"] == 35
+    assert row["cleanup_error"] == "RuntimeError: teardown failed"
     assert row["usage_per_iteration"] == [{"in": 10, "out": 2, "cache_read": 3, "cache_write": 4}]
     loaded = TaskResult.from_row(row)
     assert loaded.row_type == "result"
     assert loaded.calls[0].tool == "find_work_items"
+    assert loaded.calls[0].observed_sentinels == [TARGET_ENTITY_EVIDENCE]
+    assert loaded.evidence_trace_available is True
+    assert loaded.expected_rows == 35
+    assert loaded.cleanup_error == "RuntimeError: teardown failed"
     assert loaded.usage_per_iteration == [Usage(10, 2, 3, 4)]
+
+
+def test_apply_agent_result_reflection_parity_and_skipped_reason_copy():
+    declared = {field.name for field in fields(TaskResult)}
+    copied = set(AGENT_RESULT_COPY_FIELDS)
+    optional_identity = set(AGENT_RESULT_OPTIONAL_IDENTITY_FIELDS)
+    harness_owned = set(TASK_RESULT_HARNESS_FIELDS)
+
+    assert not (copied & optional_identity or copied & harness_owned or optional_identity & harness_owned)
+    assert declared == copied | optional_identity | harness_owned
+
+    row = TaskResult(task_id="R1", result_tokens_skipped_reason=None)
+    agent = TaskResult(task_id="must-not-replace", result_tokens_skipped_reason="payload recording disabled")
+    row.apply_agent_result(agent)
+
+    assert row.task_id == "R1"
+    assert row.result_tokens_skipped_reason == "payload recording disabled"

@@ -10,23 +10,24 @@ This document explains why the harness is shaped this way. Operational commands 
 
 ## The questions it answers
 
-The original tool-consolidation question breaks down into three measurable questions:
+The original tool-consolidation question breaks down into four measurable questions:
 
-1. **Mispick rate** — how often does an agent choose an alternate or out-of-set tool when
-   several tools have overlapping names or capabilities?
-2. **Calls-to-done versus optimal** — how much lookup, name-to-ID resolution, and
-   sub-object fan-out does the surface require before the task is complete?
-3. **Response bloat** — how much tool-result content is injected into the conversation?
+1. **Task success** — did the agent produce the verified Plane state or exact answer?
+2. **Calls to done** — how much lookup, name-to-ID resolution, and sub-object fan-out did
+   successful repetitions actually require?
+3. **Tool-use stability** — which tools were core across successful repetitions, and where
+   did repetitions choose different routes?
+4. **Response bloat** — how much tool-result content was injected into the conversation?
 
-Success is the guardrail around all three. A surface that uses fewer calls or returns less
-text but fails the task is not an improvement. Conversely, success rate alone hides
-avoidable calls, wrong turns, and large responses. The harness therefore records all four
+Success is the guardrail around the other three. A surface that uses fewer calls or returns
+less text but fails the task is not an improvement. Conversely, success rate alone hides
+extra calls, variable routes, and large responses. The harness therefore records all four
 dimensions for the same task execution.
 
 The point is empirical comparison. Given the same task battery, model, and repetitions,
 different surfaces can be compared from observed behavior rather than from tool counts,
-schema inspection, or projected costs. The battery fingerprint records the prompt and
-tool-set definition used for a run so incompatible batteries are not silently compared.
+schema inspection, or projected costs. The battery fingerprint records task IDs and prompts
+so incompatible batteries are not silently compared.
 
 ## What is measured
 
@@ -39,38 +40,60 @@ exact-value matchers where the task defines them.
 
 This avoids using the agent's explanation, confidence, or self-reported completion as the
 source of truth. The model is also not asked to grade another model. Verification is tied to
-the fixture and the Plane state the task was meant to affect. The canary runs every eligible
-verifier against an empty agent result and fails if a do-nothing run passes.
+the fixture and the Plane state the task was meant to affect. The canary reports which
+verifiers were exercised, skipped, or errored and probes eligible verifiers with an empty
+result plus plausible zero-call contract answers. CI can name an explicit strict set of task
+ids that must be eligible in its environment.
 
 Skipped tasks and infrastructure failures are recorded separately. The report excludes
 both from success denominators; a plan gate, unavailable fixture, provider failure, or MCP
 process failure is not rewritten as an agent task failure.
 
+Caught exceptions follow one validity convention: continuing is allowed only when a local
+fallback makes the result equivalent, and that catch documents why. Failures that can alter
+the evaluated state, recorded evidence, cleanup, or report denominator are represented as
+infrastructure, harness, or cleanup errors so run completeness cannot silently remain green.
+
 ### Calls to done
 
-`num_calls` counts Plane MCP calls made during the task. Each catalog entry also declares an
-`optimal_calls` baseline. The report shows the observed distribution rather than assuming
-one run is representative.
+`num_calls` counts Plane MCP calls made during the task. The report shows the observed
+distribution rather than assuming one run is representative. Every reported call-count
+minimum, median, maximum, and Q1–Q3 span is conditioned on successful repetitions; a run
+that failed early is not treated as a cost-to-success observation. There is no
+author-declared call floor.
+
+Two-label reports pair tasks before making inferential comparisons. Their success-rate
+difference uses a paired percentile-bootstrap interval that resamples tasks as the
+independent units. Their mean call-count delta uses a paired sign-flip permutation test on
+the actual magnitudes, retaining zero-delta ties. These procedures assume comparable task
+instances under the two labels, independent tasks, and exchangeable A/B labels under the
+permutation null; they do not account for shared environment drift or dependence between
+tasks. The report prints the paired task count so small samples remain visible.
 
 Client-local tools such as shell or tool-search helpers are retained separately as
 `client_tool_calls`; they do not count as Plane calls. For an external server launched with
-`--server-cmd`, call counts still apply, but the runner marks the row server as `external`
-and clears the row-level alternate/out-of-set counters because the catalog has no
-authoritative sets for foreign tool names.
+`--server-cmd`, the runner marks the row server as `external`; call counts and observed tool
+distributions use the same rules as local-server rows.
 
-### Mispicks
+### Observed tool distribution
 
-Every Plane call on a catalogued surface is classified by tool name as `optimal`,
-`alternate`, or `out_of_set`. The task owns disjoint optimal and alternate sets. The
-headline mispick rate is:
+The former author-declared optimal/alternate sets and mispick score were removed. Reports
+now describe the tools agents used in successful repetitions:
 
-```text
-(alternate calls + out-of-set calls) / all Plane calls
-```
+- `tool_rep_frequency` is the share of successful repetitions that used each tool at least
+  once. Repeated calls in one repetition count once for frequency.
+- `tool_call_counts` is the total number of calls to each tool across those repetitions.
+- Reports label the successful-repetition denominator as `success-only n=...` and show the
+  number of non-success, non-skip repetitions omitted from it as `failed excluded=...`.
+  The exclusion count includes recorded harness/infrastructure errors; skips did not run
+  the agent and remain in execution coverage instead.
 
-`is_error` is independent of that classification. A valid call can still be an avoidable
-pick, and an optimal tool can return an error. The ordered call records are retained in the
-JSONL so a run can be audited after aggregation.
+Failed repetitions are excluded because an early failure would otherwise make the tools in
+successful runs appear variable. With fewer than two successful repetitions, variance is
+not observable and the report shows `frequency=—` beside those counts. Frequency `1.0` is rendered as core use; lower
+positive frequency is variable use. The fleet headline counts tasks with at least one
+variable tool. Because the measurement is descriptive, external servers get the same metric
+as local servers even when their tool names differ.
 
 ### Response-token cost
 
@@ -93,6 +116,14 @@ Payload recording is off by default because tool results contain live workspace 
 make sidecars larger. The character-derived estimate remains useful for surface comparison
 because it is deterministic and monotonic in the recorded response size.
 
+Read-task provenance does not turn payload recording back on. Each read seeder registers a
+hidden, per-run target-entity sentinel. At the API loop or CLI recording proxy, the harness
+matches that sentinel while the successful response is in memory and persists only a
+non-sensitive `observed_sentinels` label. A successful unrelated Plane call therefore does
+not count as evidence, and neither the response body nor the sentinel value enters the
+payload-free result row. A driver path without response matching is reported as unavailable
+and cannot pass a read verifier.
+
 Provider usage is a different measurement: where the driver supplies it, the harness keeps
 input, output, cache-read, and cache-creation usage. Tool-result sizing describes one source
 of context growth; it is not substituted for the provider's conversation-level usage.
@@ -100,7 +131,7 @@ of context growth; it is not substituted for the provider's conversation-level u
 ## Why calls are recorded at the transport boundary
 
 An agent's final answer is not a reliable call log. It may omit a failed lookup, summarize
-several calls as one action, or claim an action it did not perform. Call-count and mispick
+several calls as one action, or claim an action it did not perform. Call-count and tool-use
 metrics therefore come from execution evidence.
 
 The API driver owns the MCP session and records each call it executes. The four CLI drivers

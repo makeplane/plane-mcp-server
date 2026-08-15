@@ -7,14 +7,20 @@ and a fingerprint description that omits the revision hides why results stopped 
 
 from __future__ import annotations
 
+import pytest
+
 from evals import REPO_ROOT
 
 README = (REPO_ROOT / "evals" / "README.md").read_text()
 DESIGN = (REPO_ROOT / "evals" / "DESIGN.md").read_text()
 
 
-def test_the_behaviours():
-    def test_the_flag_server_is_documented_as_optional():
+@pytest.mark.parametrize(
+    "case",
+    ["optional-flag-server", "plan-gate-reason", "catalog-revision", "exit-zero-contract"],
+)
+def test_the_behaviours(case):
+    if case == "optional-flag-server":
         assert "FEATURE_FLAG_SERVER_BASE_URL" in README, "the option should still be documented"
         index = README.index("FEATURE_FLAG_SERVER_BASE_URL")
         paragraph = README[max(0, index - 200) : index + 500]
@@ -22,16 +28,13 @@ def test_the_behaviours():
             "the flag server stopped being a prerequisite when the seeders learned to skip; "
             "the runbook must not tell people otherwise"
         )
-
-    def test_the_plan_gate_skip_reason_is_documented():
+    elif case == "plan-gate-reason":
         assert "env:plan-gated:" in README
-
-    def test_the_fingerprint_revision_is_documented():
+    elif case == "catalog-revision":
         assert "CATALOG_REVISION" in README
-
-    test_the_flag_server_is_documented_as_optional()
-    test_the_plan_gate_skip_reason_is_documented()
-    test_the_fingerprint_revision_is_documented()
+    else:
+        assert "exit 0 does **not** mean the agent passed" in README
+        assert "execution coverage" in README
 
 
 def test_design_still_states_the_skip_contract_the_seeders_now_implement():

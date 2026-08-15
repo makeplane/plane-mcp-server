@@ -10,9 +10,9 @@ The harness is agent-agnostic and surface-agnostic: any stdio MCP server can be 
 (`--server-cmd`), driven by any of five driver implementations. `DESIGN.md` explains why it is
 built this way; this file is how to run it.
 
-What you get per task: pass/fail, tool calls to done, which tools were picked (and whether
-they were the optimal ones), response size and token-count provenance, errors, and the
-agent's final text.
+What you get per task: pass/fail, observed calls to done, core and variable tool use across
+successful repetitions, response size and token-count provenance, errors, and the agent's
+final text.
 
 ## Prerequisites
 
@@ -52,13 +52,12 @@ agent's final text.
   --server-env KEY=VALUE --out evals/output/their-pr.jsonl
 ```
 
-Useful flags: `--reps N` (repetitions per task), `--resume out.jsonl` (skip completed or
-skipped `(task, rep, label)` keys and retry rows with recorded errors), `--list` / `--dry-run`
-(no network).
+Useful flags: `--reps N` (repetitions per task), `--resume out.jsonl` (skip completed
+`(task, rep, label)` keys and plan-gated skips; retry recorded errors, cleanup failures,
+fixture-collision skips, and unknown skips), `--list` / `--dry-run` (no network).
 
-**External mode** (`--server-cmd`) records `server: "external"`. Foreign tool names have no catalogued optimal/alternate sets,
-so use success, call counts, and errors for those rows; their mispick values are not
-comparable to catalogued surfaces.
+**External mode** (`--server-cmd`) records `server: "external"`. Success, call counts,
+errors, and observed tool distributions use the same rules as local-server rows.
 
 ### Drivers
 
@@ -113,6 +112,12 @@ workspace data and bloat the sidecar. For comparing tool surfaces, the default c
 estimate is monotonic in the thing being compared anyway. Do not enable payload recording by
 habit; use it only when the more sensitive, larger sidecar is justified.
 
+Read-task provenance is stricter than “a call happened.” Seeders place a hidden per-run
+sentinel on the target entity, and the API driver or CLI proxy records only whether a
+successful response exposed it. Result rows contain the matched sentinel label, never the
+sentinel value or response body. Thus an unrelated successful call cannot satisfy provenance;
+a driver path where response matching is unavailable is diagnosed and fails closed.
+
 ### Reading results
 
 ```bash
@@ -127,26 +132,33 @@ denominators, as are rows with recorded errors. Result-token columns use `~` for
 `*` for mixed measured/estimated values, and `?` for legacy values whose provenance was not
 recorded.
 
+Reports keep three verdicts separate: model success among evaluated rows, execution coverage
+(evaluated rows / expected rows, including skipped task IDs and capability reasons), and run
+completeness. A plan-gated-only run can therefore be **RUN COMPLETE** below 100% execution
+coverage. The live runner and report commands exit 0 when the evaluation completed cleanly;
+exit 0 does **not** mean the agent passed. Callers that need a pass-threshold exit must apply
+that as a separate opt-in policy rather than overloading the completeness status.
+
 With `--reps N`, each `(task, rep)` is independently seeded, run, verified, and torn down.
 Multi-rep reports show each task's pass count, Wilson interval, and whether its pass/fail
-answer changed across completed repetitions. The measured noise-floor line converts those
-flips into task-count units: if `U` tasks were unstable, surface differences of `U` tasks or
-fewer should be treated as within observed run-to-run variance, making `U + 1` the minimum
-meaningful difference from that sample. This is an empirical guardrail, not proof that larger
-differences are statistically significant.
+answer changed across completed repetitions. Instability remains descriptive; it is not
+converted into an ad-hoc threshold for declaring surface differences meaningful. Two-file
+A/B reports instead pair shared tasks, report a paired-bootstrap 95% interval for the mean
+per-task success-rate difference, and use a paired sign-flip permutation test for mean call
+deltas. Zero call-delta ties remain in that paired sample. The inference treats tasks as
+independent sampling units and assumes comparable task instances under both labels, so the
+printed paired task count—and the resulting wide interval for small samples—matters.
 
-Every result row carries a `battery` fingerprint derived from the selected catalog's prompts
-and tool metadata. Compare rows only when their fingerprints match: a table that mixes
-fingerprints is comparing different questions, even when task IDs are the same. In particular,
-results from a task whose output contract changed are not directly comparable with its rows in
-older batteries. `evals.report --table` warns when its input rows span fingerprints.
+Every result row carries a `battery` fingerprint derived from the selected catalog's task IDs,
+prompts, and catalog revision. It contains exactly what the agent is asked and no expectation
+about how the answer should be produced. A table that mixes fingerprints normally compares
+different questions, even when task IDs are the same, so `evals.report --table` warns when its
+input rows span fingerprints. A revision can document a deliberately comparable structural
+change when prompts and verifiers remain unchanged.
 
-The hash covers prompts and tool sets, not fixtures or verifier bodies — prompt drift is what
-it was built to catch. That leaves a hole, because correcting a seeder changes the question a
-task puts to the agent without touching either. `CATALOG_REVISION` in `tasks/catalog.py` closes
-it: bump it whenever a fixture or verifier change redefines what a task asks, and the
-fingerprint moves with it. Revision 1 covers batteries 6-8; revision 2 is the feature-exclusion
-correction, which made S5 genuinely require all three of its conditions.
+The hash excludes fixtures and verifier bodies. `CATALOG_REVISION` in `tasks/catalog.py`
+closes that gap: bump it whenever an excluded change redefines what a task asks, and explain
+the comparison consequence in its docstring.
 
 ## Running surfaces in parallel
 
@@ -188,9 +200,6 @@ A task is a dict:
     "id": "W11",
     "tags": {"write", "tier1"},
     "prompt": f"In project {{project}}, ...",  # {project} is bound at run time
-    "optimal_calls": 3,
-    "optimal_tools": {"list_cycles", "complete_cycle"},  # scored as optimal picks
-    "alternate_tools": {"list_projects"},  # acceptable, not optimal
     "needs": {"items", "cycles"},  # fixtures to seed
     "verify": verify_w11,
 }
@@ -223,11 +232,15 @@ Then prove the verifier can fail:
 
 ```bash
 .venv/bin/python -m evals --canary --label local
+# CI capability contract: these ids must be eligible and verified.
+.venv/bin/python -m evals --canary --canary-strict R1,R2,W8 --label local
 ```
 
-The canary seeds each task, calls its verifier with an **empty** agent
-result, and exits non-zero if any verifier passes a do-nothing agent. Run it after touching
-tasks, fixtures, or verifiers.
+The canary seeds each task, calls its verifier with both an **empty** agent result and
+plausible zero-call canned contract answers, then reports verified, skipped, and errored
+task ids separately. It exits non-zero for a false pass, verifier/teardown error, zero
+verified tasks, or a skipped id named by `--canary-strict`. Plan-gated skips outside that
+explicit strict set remain allowed. Run it after touching tasks, fixtures, or verifiers.
 
 **Make the task achievable before blaming a surface.** For example, W6 declares the
 `cycles_open_past` fixture variant because it asks the agent to close Sprint 12; the seeder
@@ -254,10 +267,19 @@ Keep such scripts outside version control — `localdev/` is ignored for exactly
 
 - If seeded comments do not materialize as activities, the activity-feed task self-skips
   with `env:no-activity-worker` rather than failing the agent.
-- A capability the workspace's plan excludes self-skips with `env:plan-gated:<feature>`.
+- A reviewed capability the workspace's plan excludes self-skips with
+  `env:plan-gated:<feature>`. The closed allowlist is `customers`, `releases`,
+  `work-item-types`, `initiatives`, and `teamspaces`; a typo or new name is unexpected
+  until its real gate site is reviewed and the allowlist is deliberately extended.
   Only a refusal that names a plan limit counts: 402, or 403/400 whose body says so. A
   bare 403 is an ordinary permission denial and stays a real error, because classifying it
   as a gate would let a permission bug leave the denominator and read as "nothing to see".
+- Run completeness uses an explicit skip taxonomy: known capabilities the environment does
+  not provide (an allowlisted `env:plan-gated:<feature>` or the exact reason
+  `env:no-activity-worker`) are expected skips.
+  They reduce **EXECUTION COVERAGE** but do not break **RUN COMPLETE**. A dirty environment
+  (`env:fixture-collision:*`) and every unrecognised reason are unexpected and make the run
+  incomplete; there is intentionally no catch-all for new `env:*` reasons.
 - A feature switched **off for a project** is not a plan gate — it is configuration the
   harness sets itself, and W11 exists to measure what an agent does when it meets one.
 - **Gated endpoints returning 402 on a workspace that should work.** Feature flags are

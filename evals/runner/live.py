@@ -14,7 +14,7 @@ from typing import Any
 
 from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api import MODEL_TIERS
-from evals.evidence import normalize_evidence_sentinels
+from evals.evidence import configured_evidence_labels
 from evals.report.load import load_rows
 from evals.report.summary import completeness_statement, execution_coverage_statement, summarize
 from evals.results import TaskResult, agent_run_to_task_result
@@ -116,6 +116,7 @@ async def run_agent_task_via_driver(
         system=system,
         cwd=Path(__file__).resolve().parent.parent.parent,
         evidence_sentinels=ctx.get("evidence_sentinels"),
+        evidence_targets=ctx.get("evidence_targets"),
     )
     return agent_run_to_task_result(agent_run)
 
@@ -175,10 +176,10 @@ def _seed_fixtures(
             ctx=context,
             task_id=str(task["id"]),
         )
-        if "read" in set(task.get("tags") or set()) and not normalize_evidence_sentinels(
-            context.get("evidence_sentinels")
+        if "read" in set(task.get("tags") or set()) and not configured_evidence_labels(
+            context.get("evidence_sentinels"), context.get("evidence_targets")
         ):
-            raise RuntimeError(f"{task['id']} seed did not register target-entity evidence sentinels")
+            raise RuntimeError(f"{task['id']} seed did not register target-bound response evidence")
     except TaskSkipped as skip:
         row.skipped = skip.reason
         row.verify_note = skip.reason

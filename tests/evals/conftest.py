@@ -8,6 +8,11 @@ from pathlib import Path
 import pytest
 
 
+def case_params(*cases):
+    """Build readable pytest cases from consolidated case helpers."""
+    return [pytest.param(case, id=case.__name__.removeprefix("_").replace("_", "-")) for case in cases]
+
+
 @pytest.fixture(autouse=True)
 def _eval_creds(monkeypatch):
     monkeypatch.setenv("EVAL_PLANE_API_KEY", "test-key")

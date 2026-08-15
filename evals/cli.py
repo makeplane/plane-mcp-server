@@ -113,7 +113,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "External MCP stdio server launch command (shlex-split). Enables external "
-            "mode, where foreign tool names make mispick classification unavailable."
+            "mode while retaining the same observed tool-use metrics."
         ),
     )
     p.add_argument(
@@ -155,8 +155,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="OUT.jsonl",
         help=(
             "Resume into an existing JSONL (also the --out target). Skip "
-            "(task_id, rep, label) keys that already completed; re-run rows with infra_ "
-            "error_class or non-null error."
+            "(task_id, rep, label) keys that completed or were plan-gated; re-run rows "
+            "with errors, cleanup failures, fixture collisions, or unknown skips."
         ),
     )
     p.add_argument(
@@ -165,6 +165,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Verifier canary: seed each task, call verify with an empty agent result "
             "(no driver/model), teardown. Exit 1 if any verifier returns ok=True on do-nothing."
+        ),
+    )
+    p.add_argument(
+        "--canary-strict",
+        type=str,
+        default=None,
+        metavar="TASK_IDS",
+        help=(
+            "Strict canary coverage: comma-separated task ids that must be verified. "
+            "Plan-gated skips outside this explicit eligible set remain allowed."
         ),
     )
     return p.parse_args(argv)
@@ -177,14 +187,14 @@ def _task_ids(raw: str | None) -> list[str] | None:
 
 
 def cmd_list() -> int:
-    print(f"{'id':<6} {'tags':<18} {'opt':>4}  prompt")
+    print(f"{'id':<6} {'tags':<18} prompt")
     print("-" * 100)
     for task in TASKS:
         tags = ",".join(sorted(task["tags"]))
         prompt = task["prompt"].replace("\n", " ")
         if len(prompt) > 70:
             prompt = prompt[:67] + "..."
-        print(f"{task['id']:<6} {tags:<18} {task['optimal_calls']:>4}  {prompt}")
+        print(f"{task['id']:<6} {tags:<18} {prompt}")
     return 0
 
 
@@ -202,8 +212,6 @@ def cmd_dry_run(tasks: list[dict[str, Any]]) -> int:
         print(f"=== {task['id']} ===")
         print(f"needs: {sorted(task.get('needs') or [])}")
         print(f"author: {task.get('author') or 'claude'}")
-        print(f"optimal_calls: {task['optimal_calls']}")
-        print(f"optimal_tools: {sorted(task['optimal_tools'])}")
         print(f"prompt:\n  {resolved}")
         print()
     return 0
@@ -247,7 +255,19 @@ def main(argv: list[str] | None = None) -> int:
 
     # Canary: live env only — no driver/model required.
     if args.canary:
-        return asyncio.run(run_canary(tasks, label=label))
+        required_ids = set(_task_ids(args.canary_strict) or [])
+        if args.canary_strict is not None and not required_ids:
+            print("error: --canary-strict requires at least one task id", file=sys.stderr)
+            return 2
+        known_ids = {str(task["id"]) for task in TASKS}
+        unknown_required = sorted(required_ids - known_ids)
+        if unknown_required:
+            print(f"error: unknown --canary-strict task id(s): {', '.join(unknown_required)}", file=sys.stderr)
+            return 2
+        return asyncio.run(run_canary(tasks, label=label, required_task_ids=required_ids))
+    if args.canary_strict is not None:
+        print("error: --canary-strict requires --canary", file=sys.stderr)
+        return 2
 
     driver_name = (getattr(args, "driver", None) or "api").strip().lower()
     if driver_name not in KNOWN_DRIVERS:
