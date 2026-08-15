@@ -24,10 +24,12 @@ less text but fails the task is not an improvement. Conversely, success rate alo
 extra calls, variable routes, and large responses. The harness therefore records all four
 dimensions for the same task execution.
 
-The point is empirical comparison. Given the same task battery, model, and repetitions,
-different surfaces can be compared from observed behavior rather than from tool counts,
-schema inspection, or projected costs. The battery fingerprint records task IDs and prompts
-so incompatible batteries are not silently compared.
+The point is empirical comparison. Given the same task battery and declared treatment
+dimensions, different surfaces can be compared from observed behavior rather than from tool
+counts, schema inspection, or projected costs. Report identity validation refuses incompatible
+batteries and undeclared canonical-identity differences before printing measurements. The
+battery fingerprint records the selected task universe; per-task fingerprints preserve the
+task-local payload needed for possible future intersection comparisons.
 
 ## What is measured
 
@@ -69,6 +71,11 @@ the actual magnitudes, retaining zero-delta ties. These procedures assume compar
 instances under the two labels, independent tasks, and exchangeable A/B labels under the
 permutation null; they do not account for shared environment drift or dependence between
 tasks. The report prints the paired task count so small samples remain visible.
+
+Single-run success headlines use the same sampling unit: each evaluated task contributes
+its repetition success rate, and a deterministic cluster bootstrap resamples whole tasks.
+The pooled repetition rate and its Wilson interval remain visible as a descriptive figure,
+but are labeled pooled rather than presented as the headline confidence interval.
 
 Client-local tools such as shell or tool-search helpers are retained separately as
 `client_tool_calls`; they do not count as Plane calls. For an external server launched with
@@ -117,12 +124,20 @@ make sidecars larger. The character-derived estimate remains useful for surface 
 because it is deterministic and monotonic in the recorded response size.
 
 Read-task provenance does not turn payload recording back on. Each read seeder registers a
-hidden, per-run target-entity sentinel. At the API loop or CLI recording proxy, the harness
-matches that sentinel while the successful response is in memory and persists only a
-non-sensitive `observed_sentinels` label. A successful unrelated Plane call therefore does
-not count as evidence, and neither the response body nor the sentinel value enters the
-payload-free result row. A driver path without response matching is reported as unavailable
-and cannot pass a read verifier.
+hidden, per-run sentinel and its seeded target entity ID. At the API loop or CLI recording
+proxy, the harness requires the request arguments to target that ID and matches the sentinel
+while the successful response is in memory, persisting only a non-sensitive
+`observed_sentinels` label. CLI proxies receive only target IDs plus sentinel lengths and
+SHA-256 fingerprints through a mode-0600 one-shot file outside the agent cwd; the raw value
+is absent even from that file. They consume and unlink it before starting Plane MCP. A successful response from
+an unrelated entity therefore does not count, and neither the response body nor sentinel
+enters the payload-free result row. Unavailable or incomplete matching is diagnosed and
+cannot pass a read verifier.
+
+Two count-oriented tasks have an equally narrow alternative evidence shape. R2 accepts an
+exact `total_count` only when the request arguments contain the seeded project ID; R6 accepts
+only grouped counts containing both seeded project IDs with their exact API-confirmed counts.
+No other read task receives this relaxation, and both transports still persist labels only.
 
 Provider usage is a different measurement: where the driver supplies it, the harness keeps
 input, output, cache-read, and cache-creation usage. Tool-result sizing describes one source
@@ -204,7 +219,7 @@ For each task repetition, the runner creates a fresh project and only the fixtur
 declared by that task. The live sequence is:
 
 ```text
-seed -> drive -> verify -> teardown -> append row
+seed -> drive -> verify -> capture non-secret seed shape -> teardown -> append row
 ```
 
 The row is assembled as the task progresses; teardown runs in `finally` before that row is
@@ -213,10 +228,18 @@ stdio server is launched for each driven task. The server environment is built f
 `HOME`, the three Plane connection values, and explicit `--server-env` additions; unrelated parent environment variables
 are not inherited.
 
+Result rows retain only seeded entity kinds and randomization namespaces. They never contain
+target entity IDs or randomized truth values. Each repetition has an independent persisted
+`fixture_seed_id`; its truth is reproducible from that seed plus namespace without exposing
+any later repetition's independent sentinel.
+
 The first line of a new result file is a meta row containing the run identity, label, server,
-battery, requested model/tier, resolved model, driver, provider, and Git SHA. Resume checks those identities,
-skips completed task/repetition keys, and reruns rows that contain recorded errors. Result
-rows preserve the common fields consumed by `evals.report` and existing JSONL readers.
+battery, requested model/tier, resolved model, driver, provider, Git SHA, exact task-id list,
+and repetition count. Reports compare raw `(task_id, rep)` histories with that exact set
+before latest-wins deduplication. Resume checks run identity and only appends replacements.
+A repeated key is valid only when every occurrence except the authoritative last row is
+retryable; prior terminal rows remain genuine duplicates and make the run incomplete.
+Result rows preserve the common fields consumed by `evals.report` and existing JSONL readers.
 
 ## Module layout
 

@@ -47,9 +47,22 @@ def make_run_meta_row(
     requested_tier: str | None = None,
     resolved_model: str | None = None,
     expected_rows: int | None = None,
+    expected_task_ids: list[str] | tuple[str, ...] | None = None,
+    expected_reps: int | None = None,
     ts: str | None = None,
 ) -> dict[str, Any]:
     """Build the single first-line meta record for a new output JSONL."""
+    if (expected_task_ids is None) != (expected_reps is None):
+        raise ValueError("expected_task_ids and expected_reps must be declared together")
+    if expected_task_ids is not None and expected_reps is not None:
+        task_ids = [str(task_id) for task_id in expected_task_ids]
+        if not task_ids or any(not task_id for task_id in task_ids) or len(set(task_ids)) != len(task_ids):
+            raise ValueError("expected_task_ids must contain unique non-empty ids")
+        if expected_reps < 1:
+            raise ValueError("expected_reps must be positive")
+        exact_rows = len(task_ids) * expected_reps
+        if expected_rows is not None and expected_rows != exact_rows:
+            raise ValueError(f"expected_rows={expected_rows} disagrees with exact expectation={exact_rows}")
     row = {
         "schema_version": RESULT_SCHEMA_VERSION,
         "row_type": "meta",
@@ -68,6 +81,10 @@ def make_run_meta_row(
     }
     if expected_rows is not None:
         row["expected_rows"] = expected_rows
+    if expected_task_ids is not None:
+        row["expected_task_ids"] = task_ids
+    if expected_reps is not None:
+        row["expected_reps"] = expected_reps
     return row
 
 

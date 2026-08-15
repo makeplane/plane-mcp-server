@@ -169,6 +169,7 @@ def test_api_driver_maps_every_current_row_field():
     assert row["model"] == "fake-actual"
     assert row["requested_model"] == "fake-requested"
     assert row["provider_stop_reason"] == "fake_done"
+    assert row["tool_manifest_fingerprint"]
 
 
 def _agent_run_dict_keeps_action_arg():
@@ -325,11 +326,16 @@ def test_agent_run_behaviours(case):
 def test_task_result_schema_round_trip_owns_usage_shape():
     result = TaskResult(
         row_type="result",
+        run_id="run-1",
+        fixture_seed_id="fixture-seed-1",
         task_id="R1",
+        task_fingerprint="taskhash0001",
         label="local",
         server="local",
         expected_rows=35,
         cleanup_error="RuntimeError: teardown failed",
+        seeded_entity_kinds=["project", "work_item"],
+        randomized_seed_namespaces=["R2.urgent_open_count"],
         calls=[
             CallRecord(
                 tool="find_work_items",
@@ -341,24 +347,40 @@ def test_task_result_schema_round_trip_owns_usage_shape():
         ],
         num_calls=1,
         evidence_trace_available=True,
+        trace_integrity=False,
+        trace_integrity_reason="protocol_violation",
+        tool_manifest_fingerprint="manifest-sha256",
         usage_per_iteration=[Usage(10, 2, 3, 4)],
     )
 
     row = result.to_row()
     assert row["schema_version"] == RESULT_SCHEMA_VERSION
     assert row["row_type"] == "result"
+    assert row["run_id"] == "run-1"
+    assert row["fixture_seed_id"] == "fixture-seed-1"
+    assert row["task_fingerprint"] == "taskhash0001"
     assert row["label"] == "local"
     assert row["server"] == "local"
     assert row["expected_rows"] == 35
     assert row["cleanup_error"] == "RuntimeError: teardown failed"
+    assert row["seeded_entity_kinds"] == ["project", "work_item"]
+    assert row["randomized_seed_namespaces"] == ["R2.urgent_open_count"]
     assert row["usage_per_iteration"] == [{"in": 10, "out": 2, "cache_read": 3, "cache_write": 4}]
     loaded = TaskResult.from_row(row)
     assert loaded.row_type == "result"
+    assert loaded.run_id == "run-1"
+    assert loaded.fixture_seed_id == "fixture-seed-1"
+    assert loaded.task_fingerprint == "taskhash0001"
     assert loaded.calls[0].tool == "find_work_items"
     assert loaded.calls[0].observed_sentinels == [TARGET_ENTITY_EVIDENCE]
     assert loaded.evidence_trace_available is True
+    assert loaded.trace_integrity is False
+    assert loaded.trace_integrity_reason == "protocol_violation"
+    assert loaded.tool_manifest_fingerprint == "manifest-sha256"
     assert loaded.expected_rows == 35
     assert loaded.cleanup_error == "RuntimeError: teardown failed"
+    assert loaded.seeded_entity_kinds == result.seeded_entity_kinds
+    assert loaded.randomized_seed_namespaces == result.randomized_seed_namespaces
     assert loaded.usage_per_iteration == [Usage(10, 2, 3, 4)]
 
 

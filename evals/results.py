@@ -13,7 +13,9 @@ from evals.token_counting import (
 )
 from evals.tool_names import split_plane_and_client_calls
 
-RESULT_SCHEMA_VERSION = 3
+RESULT_SCHEMA_VERSION = 6
+
+TraceIntegrityReason = Literal["recorder_loss", "protocol_violation", "result_pair_mismatch"]
 
 # ``apply_agent_result`` owns this explicit partition. A reflection test compares
 # it with every TaskResult dataclass field so additions cannot disappear silently.
@@ -23,6 +25,9 @@ AGENT_RESULT_COPY_FIELDS = (
     "provider_stop_reason",
     "hit_max_iterations",
     "result_pair_mismatch",
+    "trace_integrity",
+    "trace_integrity_reason",
+    "tool_manifest_fingerprint",
     "token_count_failures",
     "result_tokens_estimated",
     "calls",
@@ -51,9 +56,11 @@ TASK_RESULT_HARNESS_FIELDS = (
     "schema_version",
     "row_type",
     "run_id",
+    "fixture_seed_id",
     "ts",
     "git_sha",
     "battery",
+    "task_fingerprint",
     "label",
     "driver",
     "server",
@@ -69,6 +76,8 @@ TASK_RESULT_HARNESS_FIELDS = (
     "error",
     "error_class",
     "cleanup_error",
+    "seeded_entity_kinds",
+    "randomized_seed_namespaces",
 )
 
 
@@ -126,6 +135,9 @@ class AgentRun:
     usage_per_iteration: list[Usage] = field(default_factory=list)
     cum_input_tokens: int | None = None
     result_pair_mismatch: bool = False
+    trace_integrity: bool = True
+    trace_integrity_reason: TraceIntegrityReason | None = None
+    tool_manifest_fingerprint: str | None = None
     token_count_failures: int = 0
     # False means a tokenizer/backend counter was used for every result; True
     # means at least one result used the shared character estimate. None lets
@@ -148,15 +160,22 @@ class TaskResult:
     field added since. Version 1 defines wall_time_s as CLI invocation time only — earlier
     Claude/Antigravity/OpenCode rows also include a few ms of harness setup. Version 2 adds
     run-completeness metadata and cleanup failure recording. Version 3 records only
-    response-evidence labels (never Plane response bodies) plus trace availability.
+    response-evidence labels (never Plane response bodies) plus trace availability. Version
+    4 adds the task-local question fingerprint used by future intersection comparisons.
+    Version 5 adds typed trace integrity and the observed tool-manifest fingerprint.
+    Version 6 adds the reproducible per-repetition fixture seed id, non-secret fixture kinds,
+    and randomization namespaces. Target entity ids and randomized truth values are
+    deliberately excluded.
     """
 
     schema_version: int = RESULT_SCHEMA_VERSION
     row_type: str | None = None
     run_id: str = ""
+    fixture_seed_id: str = ""
     ts: str = ""
     git_sha: str = ""
     battery: str = ""
+    task_fingerprint: str = ""
     label: str = ""
     driver: str = ""
     provider: str | None = None
@@ -175,11 +194,16 @@ class TaskResult:
     error: str | None = None
     error_class: str | None = None
     cleanup_error: str | None = None
+    seeded_entity_kinds: list[str] = field(default_factory=list)
+    randomized_seed_namespaces: list[str] = field(default_factory=list)
     final_text: str = ""
     stop_reason: str | None = None
     provider_stop_reason: str | None = None
     hit_max_iterations: bool = False
     result_pair_mismatch: bool = False
+    trace_integrity: bool = True
+    trace_integrity_reason: TraceIntegrityReason | None = None
+    tool_manifest_fingerprint: str | None = None
     token_count_failures: int = 0
     result_tokens_estimated: bool | None = None
     calls: list[CallRecord] = field(default_factory=list)
@@ -262,9 +286,11 @@ class TaskResult:
         row: dict[str, Any] = {
             "schema_version": self.schema_version,
             "run_id": self.run_id,
+            "fixture_seed_id": self.fixture_seed_id,
             "ts": self.ts,
             "git_sha": self.git_sha,
             "battery": self.battery,
+            "task_fingerprint": self.task_fingerprint,
             "label": self.label,
             "driver": self.driver,
             "provider": self.provider,
@@ -283,11 +309,16 @@ class TaskResult:
             "error": self.error,
             "error_class": self.error_class,
             "cleanup_error": self.cleanup_error,
+            "seeded_entity_kinds": list(self.seeded_entity_kinds),
+            "randomized_seed_namespaces": list(self.randomized_seed_namespaces),
             "final_text": self.final_text,
             "stop_reason": self.stop_reason,
             "provider_stop_reason": self.provider_stop_reason,
             "hit_max_iterations": self.hit_max_iterations,
             "result_pair_mismatch": self.result_pair_mismatch,
+            "trace_integrity": self.trace_integrity,
+            "trace_integrity_reason": self.trace_integrity_reason,
+            "tool_manifest_fingerprint": self.tool_manifest_fingerprint,
             "token_count_failures": self.token_count_failures,
             "result_tokens_estimated": self.result_tokens_estimated,
             "calls": calls,
@@ -385,9 +416,11 @@ class TaskResult:
             schema_version=int(row.get("schema_version") or 0),
             row_type=(str(row["row_type"]) if row.get("row_type") is not None else None),
             run_id=str(row.get("run_id") or ""),
+            fixture_seed_id=str(row.get("fixture_seed_id") or ""),
             ts=str(row.get("ts") or ""),
             git_sha=str(row.get("git_sha") or ""),
             battery=str(row.get("battery") or ""),
+            task_fingerprint=str(row.get("task_fingerprint") or ""),
             label=str(row.get("label") or ""),
             driver=str(row.get("driver") or ""),
             provider=(str(row["provider"]) if row.get("provider") is not None else None),
@@ -406,6 +439,16 @@ class TaskResult:
             error=(str(row["error"]) if row.get("error") is not None else None),
             error_class=(str(row["error_class"]) if row.get("error_class") is not None else None),
             cleanup_error=(str(row["cleanup_error"]) if row.get("cleanup_error") is not None else None),
+            seeded_entity_kinds=(
+                [str(kind) for kind in row["seeded_entity_kinds"]]
+                if isinstance(row.get("seeded_entity_kinds"), list)
+                else []
+            ),
+            randomized_seed_namespaces=(
+                [str(namespace) for namespace in row["randomized_seed_namespaces"]]
+                if isinstance(row.get("randomized_seed_namespaces"), list)
+                else []
+            ),
             final_text=str(row.get("final_text") or ""),
             stop_reason=(str(row["stop_reason"]) if row.get("stop_reason") is not None else None),
             provider_stop_reason=(
@@ -413,6 +456,20 @@ class TaskResult:
             ),
             hit_max_iterations=bool(row.get("hit_max_iterations")),
             result_pair_mismatch=bool(row.get("result_pair_mismatch")),
+            trace_integrity=bool(row.get("trace_integrity", True)),
+            trace_integrity_reason=(
+                str(row["trace_integrity_reason"])
+                if row.get("trace_integrity_reason")
+                in {
+                    "recorder_loss",
+                    "protocol_violation",
+                    "result_pair_mismatch",
+                }
+                else None
+            ),
+            tool_manifest_fingerprint=(
+                str(row["tool_manifest_fingerprint"]) if row.get("tool_manifest_fingerprint") is not None else None
+            ),
             token_count_failures=int(row.get("token_count_failures") or 0),
             result_tokens_estimated=(
                 bool(row["result_tokens_estimated"]) if row.get("result_tokens_estimated") is not None else None
@@ -611,6 +668,9 @@ def agent_run_to_task_result(
         provider_stop_reason=run.provider_stop_reason,
         hit_max_iterations=hit_max,
         result_pair_mismatch=run.result_pair_mismatch,
+        trace_integrity=run.trace_integrity,
+        trace_integrity_reason=run.trace_integrity_reason,
+        tool_manifest_fingerprint=run.tool_manifest_fingerprint,
         token_count_failures=run.token_count_failures + local_token_count_failures,
         result_tokens_estimated=result_tokens_estimated,
         result_tokens_mode=result_tokens_mode,
@@ -643,6 +703,7 @@ __all__ = [
     "AgentRun",
     "CallRecord",
     "TaskResult",
+    "TraceIntegrityReason",
     "Usage",
     "agent_run_to_harness_dict",
     "agent_run_to_task_result",

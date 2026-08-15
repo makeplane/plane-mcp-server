@@ -28,6 +28,7 @@ from evals.drivers.api import (
 )
 from evals.evidence import TARGET_ENTITY_EVIDENCE
 from evals.token_counting import estimate_result_tokens
+from evals.tool_manifest import tool_manifest_fingerprint
 from tests.evals.conftest import case_params
 
 
@@ -56,15 +57,20 @@ class FakeBackend:
 
 
 class FakeMcpSession:
-    def __init__(self, results: list[Any] | None = None) -> None:
+    def __init__(self, results: list[Any] | None = None, tool_pages: list[Any] | None = None) -> None:
         self.results = deque(results or [])
+        self.tool_pages = deque(tool_pages or [])
         self.initialized = False
         self.called: list[tuple[str, dict[str, Any]]] = []
+        self.list_cursors: list[str | None] = []
 
     async def initialize(self) -> None:
         self.initialized = True
 
-    async def list_tools(self) -> Any:
+    async def list_tools(self, cursor: str | None = None) -> Any:
+        self.list_cursors.append(cursor)
+        if self.tool_pages:
+            return self.tool_pages.popleft()
         return SimpleNamespace(
             tools=[
                 SimpleNamespace(
@@ -99,7 +105,14 @@ def make_driver(backend: FakeBackend, session: FakeMcpSession) -> ApiDriver:
     )
 
 
-def run_driver(driver: ApiDriver, *, max_turns: int = 5, evidence_sentinels=None):
+def run_driver(
+    driver: ApiDriver,
+    *,
+    max_turns: int = 5,
+    evidence_sentinels=None,
+    evidence_targets=None,
+    evidence_aggregates=None,
+):
     return driver.run_task(
         "do it",
         {"SAFE": "1"},
@@ -107,6 +120,8 @@ def run_driver(driver: ApiDriver, *, max_turns: int = 5, evidence_sentinels=None
         max_turns,
         system="system",
         evidence_sentinels=evidence_sentinels,
+        evidence_targets=evidence_targets,
+        evidence_aggregates=evidence_aggregates,
     )
 
 
@@ -314,7 +329,62 @@ def _api_driver_flags_result_id_mismatch():
     run = run_driver(make_driver(backend, session))
 
     assert run.result_pair_mismatch is True
+    assert run.trace_integrity is False
+    assert run.trace_integrity_reason == "result_pair_mismatch"
     assert [call["result_chars"] for call in run.calls] == [0, 4]
+
+
+def test_api_driver_aggregates_every_tools_list_page_before_fingerprinting():
+    backend = FakeBackend([Turn(text="done", tool_calls=[], usage=None, stop_reason=StopReason.END_TURN)])
+    tools = [
+        {"name": "alpha", "inputSchema": {"type": "object"}},
+        {"name": "beta", "inputSchema": {"type": "object"}},
+    ]
+    session = FakeMcpSession(
+        tool_pages=[
+            {"tools": [tools[0]], "nextCursor": "page-2"},
+            {"tools": [tools[1]]},
+        ]
+    )
+
+    run = run_driver(make_driver(backend, session))
+
+    assert session.list_cursors == [None, "page-2"]
+    assert run.tool_manifest_fingerprint == tool_manifest_fingerprint(tools)
+    assert backend.started is not None
+    assert [tool.name for tool in backend.started[2]] == ["alpha", "beta"]
+
+
+def test_api_driver_invalidates_manifest_after_tools_list_changed(monkeypatch):
+    backend = FakeBackend([Turn(text="done", tool_calls=[], usage=None, stop_reason=StopReason.END_TURN)])
+    session = FakeMcpSession()
+
+    @asynccontextmanager
+    async def fake_stdio_client(_params):
+        yield object(), object()
+
+    class FakeClientSessionContext:
+        def __init__(self, _read, _write, *, message_handler):
+            self.message_handler = message_handler
+
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, *_args):
+            await self.message_handler(SimpleNamespace(root=SimpleNamespace(method="notifications/tools/list_changed")))
+            return None
+
+    monkeypatch.setattr("evals.drivers.driver.stdio_client", fake_stdio_client)
+    monkeypatch.setattr("evals.drivers.driver.ClientSession", FakeClientSessionContext)
+    driver = ApiDriver(
+        provider="anthropic",
+        backend_factory=lambda _model, _max_tokens: backend,
+        server_command=["fake-server"],
+    )
+
+    run = run_driver(driver)
+
+    assert run.tool_manifest_fingerprint is None
 
 
 def _api_driver_iteration_cap_only_flags_mid_tool_loop():
@@ -396,7 +466,9 @@ def _api_driver_records_only_matching_evidence_labels():
     )
     session = FakeMcpSession(
         [
-            ToolResult(call_id="a", text="ordinary workspace response"),
+            # A real response carrying the sentinel is insufficient when the request
+            # targeted an unrelated entity (write-there/read-back bypass).
+            ToolResult(call_id="a", text=f"state={sentinel}"),
             ToolResult(call_id="b", text=f"state={sentinel}"),
         ]
     )
@@ -404,12 +476,85 @@ def _api_driver_records_only_matching_evidence_labels():
     run = run_driver(
         make_driver(backend, session),
         evidence_sentinels={TARGET_ENTITY_EVIDENCE: [sentinel]},
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target"]},
     )
 
     assert run.evidence_trace_available is True
     assert run.calls[0]["observed_sentinels"] == []
     assert run.calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert "result_text" not in run.calls[1]
+
+
+def test_api_driver_records_only_exact_target_bound_aggregate_evidence():
+    backend = FakeBackend(
+        [
+            Turn(
+                text="",
+                tool_calls=[ToolCall("a", "count_work_items", {"pql": 'project = "project-other"'})],
+                usage=None,
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            Turn(
+                text="",
+                tool_calls=[ToolCall("b", "count_work_items", {"pql": 'project = "project-1"'})],
+                usage=None,
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            Turn(
+                text="",
+                tool_calls=[ToolCall("c", "count_work_items", {"pql": 'project = "project-1"'})],
+                usage=None,
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            Turn(
+                text="",
+                tool_calls=[ToolCall("d", "count_work_items", {"group_by": "project_id"})],
+                usage=None,
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            Turn(
+                text="",
+                tool_calls=[ToolCall("e", "count_work_items", {"group_by": "project_id"})],
+                usage=None,
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            Turn(text="done", tool_calls=[], usage=None, stop_reason=StopReason.END_TURN),
+        ]
+    )
+    session = FakeMcpSession(
+        [
+            ToolResult(call_id="a", text='{"total_count": 4}'),
+            ToolResult(call_id="b", text='{"total_count": 3}'),
+            ToolResult(call_id="c", text='{"total_count": 4}'),
+            ToolResult(
+                call_id="d",
+                text=('{"grouped_counts": {"project-1": {"count": 2}, "project-2": {"count": 4}}}'),
+            ),
+            ToolResult(
+                call_id="e",
+                text=('{"grouped_counts": {"project-1": {"count": 2}, "project-2": {"count": 5}}}'),
+            ),
+        ]
+    )
+
+    run = run_driver(
+        make_driver(backend, session),
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["project-1", "project-2"]},
+        evidence_aggregates={
+            TARGET_ENTITY_EVIDENCE: [
+                {"kind": "total_count", "value": 4},
+                {"kind": "grouped_counts", "values": {"project-1": 2, "project-2": 5}},
+            ]
+        },
+        max_turns=6,
+    )
+
+    assert run.evidence_trace_available is True
+    assert run.calls[0]["observed_sentinels"] == []
+    assert run.calls[1]["observed_sentinels"] == []
+    assert run.calls[2]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert run.calls[3]["observed_sentinels"] == []
+    assert run.calls[4]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
 
 
 _API_DRIVER_CASES = case_params(

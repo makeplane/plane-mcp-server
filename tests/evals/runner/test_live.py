@@ -26,6 +26,9 @@ from evals.runner import (
 )
 from evals.runner import live as runner_live
 from evals.runner.live import stdio_server_env
+from evals.seed.identities import record_seeded_entity
+from evals.seed.randomize import random_truth_token, record_randomized_truth
+from evals.tasks.catalog import task_fingerprint
 from evals.tasks.skip import TaskSkipped
 from tests.evals.conftest import _data_rows, case_params
 
@@ -125,6 +128,7 @@ def _run_seed_failure_is_infra_seed(tmp_path, monkeypatch, _capsys):
     assert "HttpError" in (row["error"] or "")
     assert "identifier" in (row["error"] or "").lower()
     assert row["battery"]  # fingerprint written
+    assert row["task_fingerprint"] == task_fingerprint(task)
     assert row["requested_model"] == "standard"
     assert row["requested_tier"] == "standard"
     assert row["resolved_model"] == "sonnet"
@@ -157,7 +161,7 @@ def _run_missing_bug_type_uses_context_skip_reason(tmp_path, monkeypatch, _capsy
     monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: driver)
 
     task = _taxonomy_task(
-        "BUGTYPE",
+        "S1",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("verify must not run")),
         needs={"bug_type"},
     )
@@ -265,7 +269,11 @@ def _run_driver_exception_is_infra_cli(tmp_path, monkeypatch, _capsys):
         name = "claude-cli"
 
         def run_task(self, *args, **kwargs):
-            raise RuntimeError("claude cli failed: json_parse_failed")
+            error = RuntimeError("claude cli failed: json_parse_failed")
+            error.trace_integrity = False
+            error.trace_integrity_reason = "recorder_loss"
+            error.tool_manifest_fingerprint = None
+            raise error
 
     monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: BoomDriver())
 
@@ -291,6 +299,8 @@ def _run_driver_exception_is_infra_cli(tmp_path, monkeypatch, _capsys):
     row = _data_rows(out)[0]
     assert row["error_class"] == "infra_cli"
     assert "RuntimeError" in (row["error"] or "")
+    assert row["trace_integrity"] is False
+    assert row["trace_integrity_reason"] == "recorder_loss"
 
 
 def _run_timeout_agent_is_infra_cli(tmp_path, monkeypatch, _capsys):
@@ -370,7 +380,11 @@ def _run_error_during_execution_is_infra_cli(tmp_path, monkeypatch, _capsys):
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 1, stdout=json.dumps(payload), stderr="claude boom")
 
-    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: ClaudeCliDriver(runner=fake_run))
+    monkeypatch.setattr(
+        runner_live,
+        "get_driver",
+        lambda name, **kw: ClaudeCliDriver(runner=fake_run, use_proxy=False),
+    )
 
     verify_calls: list[Any] = []
 
@@ -423,7 +437,11 @@ def _run_error_max_turns_is_task_path(tmp_path, monkeypatch, _capsys):
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 1, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: ClaudeCliDriver(runner=fake_run))
+    monkeypatch.setattr(
+        runner_live,
+        "get_driver",
+        lambda name, **kw: ClaudeCliDriver(runner=fake_run, use_proxy=False),
+    )
 
     verify_calls: list[Any] = []
 
@@ -625,7 +643,7 @@ def _run_success_keeps_requested_and_resolved_models(tmp_path, monkeypatch, _cap
     assert row["server"] == "local"
 
 
-def _run_multi_rep_uses_fresh_seed_and_teardown_per_rep(tmp_path, monkeypatch, _capsys):
+def _run_multi_rep_uses_fresh_fixture_seed_and_teardown_per_rep(tmp_path, monkeypatch, _capsys):
     out = tmp_path / "multi.jsonl"
     fake_plane = MagicMock()
     monkeypatch.setattr(runner_live, "make_plane_client", lambda: (fake_plane, "test-ws"))
@@ -674,6 +692,9 @@ def _run_multi_rep_uses_fresh_seed_and_teardown_per_rep(tmp_path, monkeypatch, _
     assert len(set(seed_ids)) == 3
     assert teardown_projects == seed_ids
     rows = _data_rows(out)
+    assert {row["fixture_seed_id"] for row in rows} == set(seed_ids)
+    assert len({row["run_id"] for row in rows}) == 1
+    rows = _data_rows(out)
     assert [row["rep"] for row in rows] == [0, 1, 2]
     assert all(row["success"] is True for row in rows)
 
@@ -708,6 +729,7 @@ def test_runner_passes_seeded_evidence_to_driver_and_retains_only_labels(monkeyp
     context = {
         "project_name": "EVAL deadbeef",
         "evidence_sentinels": {TARGET_ENTITY_EVIDENCE: [sentinel]},
+        "evidence_targets": {TARGET_ENTITY_EVIDENCE: ["project-1"]},
     }
 
     row = asyncio.run(
@@ -721,6 +743,7 @@ def test_runner_passes_seeded_evidence_to_driver_and_retains_only_labels(monkeyp
     )
 
     assert captured["evidence_sentinels"] == context["evidence_sentinels"]
+    assert captured["evidence_targets"] == context["evidence_targets"]
     assert row.evidence_trace_available is True
     assert row.calls[0].observed_sentinels == [TARGET_ENTITY_EVIDENCE]
     assert sentinel not in json.dumps(row.to_row())
@@ -822,7 +845,7 @@ _RUN_CASES = case_params(
     _run_verifier_exception_is_task_error,
     _run_external_server_records_observed_calls,
     _run_success_keeps_requested_and_resolved_models,
-    _run_multi_rep_uses_fresh_seed_and_teardown_per_rep,
+    _run_multi_rep_uses_fresh_fixture_seed_and_teardown_per_rep,
     _run_passes_server_cmd_to_non_claude,
     _run_reports_progress_per_repetition,
 )
@@ -968,16 +991,18 @@ def test_activity_read_connection_failure_is_infra_seed_and_incomplete(tmp_path,
 
 
 @pytest.mark.parametrize(
-    ("reason", "expected_rc", "verdict"),
+    ("reason", "task_id", "needs", "expected_rc", "verdict"),
     [
-        ("env:plan-gated:customers", 0, "RUN COMPLETE:"),
-        ("env:no-activity-worker", 0, "RUN COMPLETE:"),
-        ("env:plan-gated:customerz", 1, "RUN INCOMPLETE:"),
-        ("env:fixture-collision:customers:Acme Corp", 1, "RUN INCOMPLETE:"),
-        ("env:new-skip-reason", 1, "RUN INCOMPLETE:"),
+        ("env:plan-gated:customers", "L4", {"customer"}, 0, "RUN COMPLETE:"),
+        ("env:no-activity-worker", "L2", {"activity_feed"}, 0, "RUN COMPLETE:"),
+        ("env:plan-gated:customerz", "L4", {"customer"}, 1, "RUN INCOMPLETE:"),
+        ("env:fixture-collision:customers:Acme Corp", "C1", set(), 1, "RUN INCOMPLETE:"),
+        ("env:new-skip-reason", "R1", set(), 1, "RUN INCOMPLETE:"),
     ],
 )
-def test_run_live_completeness_skip_taxonomy(tmp_path, monkeypatch, capsys, reason, expected_rc, verdict):
+def test_run_live_completeness_skip_taxonomy(
+    tmp_path, monkeypatch, capsys, reason, task_id, needs, expected_rc, verdict
+):
     out = tmp_path / "out.jsonl"
 
     def skip_seed(*_args, **_kwargs):
@@ -987,18 +1012,124 @@ def test_run_live_completeness_skip_taxonomy(tmp_path, monkeypatch, capsys, reas
     monkeypatch.setattr(runner_live, "seed", skip_seed)
     monkeypatch.setattr(runner_live, "teardown", lambda *a, **k: None)
     monkeypatch.setattr(runner_live, "get_driver", lambda *a, **k: MagicMock())
-    tasks = [_taxonomy_task("R1", None), _taxonomy_task("R2", None)]
+    tasks = [_taxonomy_task(task_id, None, needs=needs)]
 
     rc = asyncio.run(run_live(tasks, model_alias="standard", reps=1, label="local", out_path=out))
 
     assert rc == expected_rc
     output = capsys.readouterr().out
     assert "success: 0/0" in output
-    assert "EXECUTION COVERAGE: 0/2 rows evaluated (0.0%)" in output
-    assert f"R1,R2 ({reason})" in output
+    assert "EXECUTION COVERAGE: 0/1 rows evaluated (0.0%)" in output
+    assert f"{task_id} ({reason})" in output
     assert verdict in output
     if reason.startswith("env:fixture-collision:"):
-        assert "unexpected skips=2 [fixture-collision=2]" in output
+        assert "unexpected skips=1 [fixture-collision=1]" in output
+
+
+def test_persisted_seed_artifacts_never_contain_run_random_truth_or_entity_ids(tmp_path, monkeypatch):
+    out = tmp_path / "forensics.jsonl"
+    namespace = "C2.release"
+    seeded_values: dict[str, str] = {}
+
+    def seed_forensics(_plane, run_id, needs, ctx, task_id=None):
+        del needs, task_id
+        ctx["run_id"] = run_id
+        sentinel = random_truth_token(ctx, namespace)
+        seeded_values.update(run_id=run_id, sentinel=sentinel)
+        ctx.update(
+            {
+                "project_name": "EVAL forensic",
+                "project_id": "project-1",
+                "evidence_sentinels": {TARGET_ENTITY_EVIDENCE: [sentinel]},
+                "evidence_targets": {TARGET_ENTITY_EVIDENCE: ["item-1"]},
+            }
+        )
+        record_seeded_entity(ctx, "work_item", "item-1")
+        record_seeded_entity(ctx, "project", "project-1")
+        record_randomized_truth(
+            ctx,
+            namespace,
+            {
+                "intended_name": f"1.6.10-eval.{sentinel[:8]}",
+                "intended_changelog": f"ticket EVAL-{sentinel}",
+            },
+        )
+
+    class InspectingDriver:
+        def run_task(self, *_args, **kwargs):
+            assert _data_rows(out) == []
+            assert kwargs["evidence_sentinels"] == {TARGET_ENTITY_EVIDENCE: [seeded_values["sentinel"]]}
+            return AgentRun(calls=[], final_text="done", usage=None, stopped_reason="end_turn")
+
+    async def verify_ok(_plane, _ctx, _run):
+        return True, "ok"
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "ws"))
+    monkeypatch.setattr(runner_live, "seed", seed_forensics)
+    monkeypatch.setattr(runner_live, "teardown", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_live, "get_driver", lambda *args, **kwargs: InspectingDriver())
+    task = {
+        "id": "R1",
+        "prompt": "do {project}",
+        "tags": {"read"},
+        "needs": {"items"},
+        "verify": verify_ok,
+    }
+
+    assert asyncio.run(run_live([task], model_alias="standard", reps=1, label="local", out_path=out)) == 0
+    row = _data_rows(out)[0]
+    assert row["fixture_seed_id"] == seeded_values["run_id"]
+    assert row["run_id"] != row["fixture_seed_id"]
+    assert row["seeded_entity_kinds"] == ["project", "work_item"]
+    assert row["randomized_seed_namespaces"] == [namespace]
+    persisted = json.dumps(row, sort_keys=True)
+    assert seeded_values["sentinel"] not in persisted
+    assert "project-1" not in persisted
+    assert "item-1" not in persisted
+    assert "seeded_entity_ids" not in row
+    assert "randomized_seed_choices" not in row
+    assert "evidence_sentinels" not in row
+    assert "evidence_targets" not in row
+
+
+def test_same_run_repetitions_produce_different_random_truth_sentinels(tmp_path, monkeypatch):
+    out = tmp_path / "per-repetition-truth.jsonl"
+    namespace = "R7.states"
+    seeded: list[tuple[str, str]] = []
+
+    def seed_with_sentinel(_plane, run_id, needs, ctx, task_id=None):
+        del needs, task_id
+        ctx.update({"run_id": run_id, "project_name": f"EVAL {run_id[:8]}", "project_id": run_id})
+        sentinel = random_truth_token(ctx, namespace)
+        seeded.append((run_id, sentinel))
+        ctx["evidence_sentinels"] = {TARGET_ENTITY_EVIDENCE: [sentinel]}
+        ctx["evidence_targets"] = {TARGET_ENTITY_EVIDENCE: [run_id]}
+
+    class OkDriver:
+        def run_task(self, *_args, **_kwargs):
+            return AgentRun(calls=[], final_text="done", usage=None, stopped_reason="end_turn")
+
+    async def verify_ok(_plane, _ctx, _run):
+        return True, "ok"
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "ws"))
+    monkeypatch.setattr(runner_live, "seed", seed_with_sentinel)
+    monkeypatch.setattr(runner_live, "teardown", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_live, "get_driver", lambda *args, **kwargs: OkDriver())
+    task = {
+        "id": "R7",
+        "prompt": "do {project}",
+        "tags": {"read"},
+        "needs": {"items"},
+        "verify": verify_ok,
+    }
+
+    assert asyncio.run(run_live([task], model_alias="standard", reps=2, label="local", out_path=out)) == 0
+    rows = _data_rows(out)
+    assert len({row["run_id"] for row in rows}) == 1
+    assert [row["fixture_seed_id"] for row in rows] == [seed_id for seed_id, _ in seeded]
+    assert seeded[0][0] != seeded[1][0]
+    assert seeded[0][1] != seeded[1][1]
 
 
 def test_run_live_cleanup_failure_is_incomplete_without_changing_success(tmp_path, monkeypatch, capsys):

@@ -15,11 +15,12 @@ from typing import Any
 from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api import MODEL_TIERS
 from evals.evidence import configured_evidence_labels
-from evals.report.load import load_rows
+from evals.report.load import RunExpectation, dedupe_rows_latest, load_rows, validate_run_keys
 from evals.report.summary import completeness_statement, execution_coverage_statement, summarize
 from evals.results import TaskResult, agent_run_to_task_result
 from evals.seed import make_plane_client, seed, teardown
-from evals.tasks.catalog import battery_fingerprint, task_author
+from evals.seed.identities import capture_seed_artifacts
+from evals.tasks.catalog import battery_fingerprint, task_author, task_fingerprint
 from evals.tasks.prompts import PromptBindError, format_task_prompt
 from evals.tasks.skip import TaskSkipped
 
@@ -117,6 +118,7 @@ async def run_agent_task_via_driver(
         cwd=Path(__file__).resolve().parent.parent.parent,
         evidence_sentinels=ctx.get("evidence_sentinels"),
         evidence_targets=ctx.get("evidence_targets"),
+        evidence_aggregates=ctx.get("evidence_aggregates"),
     )
     return agent_run_to_task_result(agent_run)
 
@@ -139,9 +141,11 @@ def _make_task_row(
 ) -> TaskResult:
     return TaskResult(
         run_id=run_id,
+        fixture_seed_id=uuid.uuid4().hex,
         ts=datetime.now(timezone.utc).isoformat(),
         git_sha=git_revision,
         battery=battery,
+        task_fingerprint=task_fingerprint(task),
         label=label,
         driver=driver_name,
         provider=provider,
@@ -171,7 +175,7 @@ def _seed_fixtures(
     try:
         seed(
             plane,
-            run_id=uuid.uuid4().hex,
+            run_id=row.fixture_seed_id,
             needs=task_needs,
             ctx=context,
             task_id=str(task["id"]),
@@ -248,6 +252,10 @@ async def _drive_agent(
         )
         return None
     except Exception as exc:
+        if hasattr(exc, "trace_integrity"):
+            row.trace_integrity = bool(exc.trace_integrity)
+            row.trace_integrity_reason = getattr(exc, "trace_integrity_reason", None)
+            row.tool_manifest_fingerprint = getattr(exc, "tool_manifest_fingerprint", None)
         if is_api_driver:
             agent_error_class = "infra_api"
         else:
@@ -311,6 +319,36 @@ def _record_cli_infra_stop(
     return True
 
 
+def _record_trace_infra(
+    row: TaskResult,
+    agent: TaskResult,
+    *,
+    task: dict[str, Any],
+    repetition: int,
+) -> bool:
+    """Make recorder/protocol trace loss completeness-visible infrastructure."""
+    if agent.trace_integrity or agent.trace_integrity_reason == "result_pair_mismatch":
+        return False
+    error_class = "infra_protocol" if agent.trace_integrity_reason == "protocol_violation" else "infra_trace"
+    detail = next(
+        (
+            note
+            for note in agent.driver_notes
+            if isinstance(note, str) and note.startswith(("proxy_sidecar_incomplete", "proxy_sidecar_empty"))
+        ),
+        f"trace_integrity={agent.trace_integrity_reason or 'recorder_loss'}",
+    )
+    row.success = False
+    row.error_class = error_class
+    row.error = detail
+    row.verify_note = ""
+    print(
+        f"  {task['id']} rep={repetition} ERROR[{error_class}]: {detail}",
+        file=sys.stderr,
+    )
+    return True
+
+
 async def _verify_task(
     plane: Any,
     task: dict[str, Any],
@@ -334,6 +372,8 @@ async def _verify_task(
                 "evidence_trace_available": agent.evidence_trace_available,
                 "driver_notes": list(agent.driver_notes),
                 "result_pair_mismatch": agent.result_pair_mismatch,
+                "trace_integrity": agent.trace_integrity,
+                "trace_integrity_reason": agent.trace_integrity_reason,
             },
         )
         row.success = bool(ok)
@@ -448,18 +488,31 @@ async def _run_task_repetition(
                     requested_tier=requested_tier,
                     model_id=model_id,
                 )
-                if not _record_cli_infra_stop(
+                infra_stop = _record_cli_infra_stop(
                     row,
                     agent,
                     task=task,
                     repetition=repetition,
                     driver_name=driver_name,
-                ):
+                )
+                trace_infra = False
+                if not infra_stop:
+                    trace_infra = _record_trace_infra(
+                        row,
+                        agent,
+                        task=task,
+                        repetition=repetition,
+                    )
+                if not infra_stop and not trace_infra:
                     await _verify_task(plane, task, context, agent, row=row, repetition=repetition)
     except Exception as exc:
         # Anything outside seed/driver/verify wraps.
         _record_unexpected(row, exc, task=task, repetition=repetition, context=context)
     finally:
+        try:
+            row.seeded_entity_kinds, row.randomized_seed_namespaces = capture_seed_artifacts(context)
+        except Exception as exc:
+            _record_unexpected(row, exc, task=task, repetition=repetition, context=context)
         _remove_fixtures(plane, context, row)
     return row
 
@@ -531,6 +584,8 @@ async def run_live(
         provider=provider_id,
         git_sha=git_revision,
         expected_rows=total_runs,
+        expected_task_ids=[str(task["id"]) for task in tasks],
+        expected_reps=reps,
     )
     if maybe_write_run_meta(out_path, meta):
         print(f"wrote meta header battery={battery} label={label}", flush=True)
@@ -618,15 +673,20 @@ async def run_live(
         flush=True,
     )
     selected_task_ids = {str(task["id"]) for task in tasks}
+    raw_result_rows = load_rows(out_path, dedupe="none")
+    run_keys = validate_run_keys(
+        raw_result_rows,
+        RunExpectation(tuple(str(task["id"]) for task in tasks), reps, label),
+    )
     result_rows = [
         row
-        for row in load_rows(out_path)
+        for row in dedupe_rows_latest(raw_result_rows)
         if row.label == label
         and (not row.battery or row.battery == battery)
         and row.task_id in selected_task_ids
         and 0 <= row.rep < reps
     ]
-    summary = summarize(result_rows, expected_rows=total_runs)
+    summary = summarize(result_rows, expected_rows=total_runs, run_keys=run_keys)
     if summary.aggregate_n:
         rate = summary.aggregate_k / summary.aggregate_n
         print(f"success: {summary.aggregate_k}/{summary.aggregate_n} ({rate:.1%})", flush=True)

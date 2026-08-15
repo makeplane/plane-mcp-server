@@ -52,3 +52,13 @@ def test_plan_gated_capability_allowlist_matches_reviewed_seed_surfaces():
     )
     for capability in PLAN_GATED_CAPABILITIES:
         assert classify_skip_reason(f"env:plan-gated:{capability}") == "expected-capability", capability
+
+
+def test_task_capability_pairs_are_derived_from_fixture_needs_and_fail_closed():
+    assert classify_skip_reason("env:plan-gated:customers", task_id="L4") == "expected-capability"
+    assert classify_skip_reason("env:plan-gated:customers", task_id="W1") == "unexpected"
+    assert classify_skip_reason("env:plan-gated:releases", task_id="C2") == "expected-capability"
+    assert classify_skip_reason("env:plan-gated:releases", task_id="L3") == "unexpected"
+    assert classify_skip_reason("env:plan-gated:work-item-types", task_id="S1") == "expected-capability"
+    assert classify_skip_reason("env:no-activity-worker", task_id="L2") == "expected-capability"
+    assert classify_skip_reason("env:no-activity-worker", task_id="R1") == "unexpected"

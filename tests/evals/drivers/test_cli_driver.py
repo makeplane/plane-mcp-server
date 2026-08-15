@@ -26,7 +26,7 @@ from evals.drivers import (
     run_cli_subprocess,
     wait_for_proxy_meta,
 )
-from evals.drivers.driver import CliDriver, CliLaunch, CliOutput
+from evals.drivers.driver import CliDriver, CliLaunch, CliOutput, CliOutputError
 from evals.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE
 from tests.evals.conftest import case_params
 
@@ -333,7 +333,13 @@ def _cli_driver_template_inherits_proxy_first_and_timeout_harvest(tmp_path, monk
                 "duration_ms": 1,
                 "seq": 1,
             },
-            {"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False},
+            {
+                "row_type": "proxy_meta",
+                "pending_left": 0,
+                "pumps_alive": False,
+                "last_seq": 1,
+                "tool_request_count": 1,
+            },
         ]
         path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
@@ -390,7 +396,15 @@ def test_old_payload_free_sidecar_still_parses(tmp_path: Path):
             }
         )
         + "\n"
-        + json.dumps({"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False})
+        + json.dumps(
+            {
+                "row_type": "proxy_meta",
+                "pending_left": 0,
+                "pumps_alive": False,
+                "last_seq": 1,
+                "tool_request_count": 1,
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -399,6 +413,52 @@ def test_old_payload_free_sidecar_still_parses(tmp_path: Path):
     assert status["state"] == "complete"
     assert calls[0]["result_chars"] == 17
     assert "result_text" not in calls[0]
+
+
+def test_cli_parse_failure_retains_lossy_sidecar_integrity(tmp_path: Path):
+    class BrokenOutputDriver(CliDriver):
+        name = "broken-output-cli"
+
+        def write_mcp_config(self, temp_dir, *, task_cwd, server_command, child_env):
+            del temp_dir, child_env
+            self.sidecar_path = Path(server_command[server_command.index("--log") + 1])
+            return CliLaunch(cwd=task_cwd)
+
+        def build_command(self, prompt, *, model, max_turns, system, launch):
+            del prompt, model, max_turns, system, launch
+            return ["broken-output"]
+
+        def parse_output(self, proc, *, task_cwd, max_turns, notes):
+            del proc, task_cwd, max_turns, notes
+            raise CliOutputError("cannot parse output")
+
+    driver: BrokenOutputDriver
+
+    def fake_run(command, **kwargs):
+        del kwargs
+        rows = [
+            {
+                "row_type": "proxy_meta",
+                "unmatched_responses": 1,
+                "pending_left": 0,
+                "non_tool_pending_left": 0,
+                "last_seq": 0,
+                "tool_request_count": 0,
+            }
+        ]
+        driver.sidecar_path.write_text(
+            "\n".join(json.dumps(row) for row in rows) + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="bad", stderr="")
+
+    driver = BrokenOutputDriver(runner=fake_run, use_proxy=True)
+
+    with pytest.raises(RuntimeError, match="cannot parse output") as exc_info:
+        driver.run_task("go", {}, None, 1, cwd=tmp_path)
+
+    assert exc_info.value.trace_integrity is False
+    assert exc_info.value.trace_integrity_reason == "recorder_loss"
 
 
 def _apply_proxy_sidecar_replaces_when_nonempty(tmp_path):
@@ -484,7 +544,15 @@ def _apply_proxy_with_skipped_row_defers_to_richer_cli(tmp_path):
             }
         ),
         "{corrupted mid-stream row",
-        json.dumps({"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False}),
+        json.dumps(
+            {
+                "row_type": "proxy_meta",
+                "pending_left": 0,
+                "pumps_alive": False,
+                "last_seq": 1,
+                "tool_request_count": 1,
+            }
+        ),
     ]
     p.write_text("\n".join(rows) + "\n", encoding="utf-8")
     cli = [
@@ -546,6 +614,9 @@ def _load_proxy_sidecar_sorts_by_seq(tmp_path):
             "unmatched_responses": 0,
             "notifications": 0,
             "pending_left": 0,
+            "non_tool_pending_left": 0,
+            "last_seq": 1,
+            "tool_request_count": 1,
             "child_killed": False,
         },
     ]
@@ -685,6 +756,96 @@ def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
         assert "record-result-payloads" in blob or "record-result-payloads" in seen.get("cmd_joined", "")
 
 
+@pytest.mark.parametrize(
+    ("Driver", "bin_key"),
+    [
+        pytest.param(ClaudeCliDriver, "claude_bin", id="claude-config"),
+        pytest.param(CodexCliDriver, "codex_bin", id="codex-argv"),
+        pytest.param(AntigravityCliDriver, "agy_bin", id="antigravity-home-config"),
+        pytest.param(OpencodeCliDriver, "opencode_bin", id="opencode-cwd-config"),
+    ],
+)
+def test_cli_agent_surfaces_never_contain_evidence_sentinel(
+    tmp_path: Path,
+    Driver: type[CliDriver],
+    bin_key: str,
+):
+    sentinel = "hidden-target-fact-7b0a1f9c"
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        configs: list[dict] = []
+        proxy_args: list[str] | None = None
+        if Driver is ClaudeCliDriver:
+            config_path = Path(cmd[cmd.index("--mcp-config") + 1])
+            configs.append(json.loads(config_path.read_text()))
+            proxy_args = configs[0]["mcpServers"]["plane"]["args"]
+        elif Driver is CodexCliDriver:
+            for value in cmd:
+                prefix = "mcp_servers.plane.args="
+                if value.startswith(prefix):
+                    proxy_args = json.loads(value[len(prefix) :])
+        elif Driver is AntigravityCliDriver:
+            fake_home = Path(kwargs["env"]["HOME"])
+            for rel in (
+                Path(".gemini/config/mcp_config.json"),
+                Path(".gemini/antigravity-cli/mcp_config.json"),
+            ):
+                configs.append(json.loads((fake_home / rel).read_text()))
+            proxy_args = configs[0]["mcpServers"]["plane"]["args"]
+        else:
+            config_path = Path(kwargs["cwd"]) / "opencode.json"
+            configs.append(json.loads(config_path.read_text()))
+            proxy_args = configs[0]["mcp"]["plane"]["command"]
+
+        assert proxy_args is not None and "--evidence-file" in proxy_args
+        evidence_path = Path(proxy_args[proxy_args.index("--evidence-file") + 1])
+        launch_cwd = Path(kwargs["cwd"]).resolve()
+        assert not evidence_path.resolve().is_relative_to(launch_cwd)
+        # Even a lazy MCP launcher leaves only non-invertible fingerprints for a
+        # shell-capable agent that follows the pathname before proxy startup.
+        evidence_config = evidence_path.read_text(encoding="utf-8")
+        seen["surface"] = json.dumps({"argv": cmd, "configs": configs, "evidence_file": evidence_config})
+        out = (
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "ok",
+                    "session_id": "s",
+                    "num_turns": 1,
+                }
+            )
+            if Driver is ClaudeCliDriver
+            else "{}"
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+    kwargs = {
+        "runner": fake_run,
+        "python_bin": sys.executable,
+        "use_proxy": True,
+        bin_key: "fake-bin",
+    }
+    if Driver is CodexCliDriver:
+        kwargs["allow_live"] = True
+    driver = Driver(**kwargs)
+    driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="test-model",
+        max_turns=1,
+        cwd=tmp_path,
+        evidence_sentinels={TARGET_ENTITY_EVIDENCE: [sentinel]},
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target-1"]},
+    )
+
+    surface = str(seen["surface"])
+    assert sentinel not in surface
+    assert EVIDENCE_SENTINELS_ENV not in surface
+
+
 def test_use_proxy_false_call_source_not_proxy(tmp_path: Path):
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 0, stdout='{"result":"x"}', stderr="")
@@ -727,6 +888,9 @@ def _timeout_harvests_sidecar_calls(tmp_path):
             "unmatched_responses": 0,
             "notifications": 0,
             "pending_left": 0,
+            "non_tool_pending_left": 0,
+            "last_seq": 1,
+            "tool_request_count": 1,
             "child_killed": False,
             "evidence_trace_available": True,
         },
@@ -738,8 +902,9 @@ def _timeout_harvests_sidecar_calls(tmp_path):
         # Sidecar path is in the same temp dir as mcp.json for Claude.
         # Find sidecar from proxy args in mcp config.
         mcp = json.loads(cfg.read_text())
-        assert EVIDENCE_SENTINELS_ENV in mcp["mcpServers"]["plane"]["env"]
+        assert EVIDENCE_SENTINELS_ENV not in mcp["mcpServers"]["plane"]["env"]
         args = mcp["mcpServers"]["plane"]["args"]
+        assert "--evidence-file" in args
         log_idx = args.index("--log") + 1
         side = Path(args[log_idx])
         side.write_text("\n".join(json.dumps(r) for r in side_calls) + "\n", encoding="utf-8")
@@ -753,6 +918,7 @@ def _timeout_harvests_sidecar_calls(tmp_path):
         max_turns=1,
         cwd=tmp_path,
         evidence_sentinels={TARGET_ENTITY_EVIDENCE: ["hidden-target-fact-7b0a1f9c"]},
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target-1"]},
     )
     assert run.stopped_reason == "timeout"
     assert run.call_source == "proxy"
@@ -842,6 +1008,8 @@ def _timeout_incomplete_sidecar_cannot_supply_response_evidence(tmp_path):
             "row_type": "proxy_meta",
             "pending_left": 0,
             "pumps_alive": False,
+            "last_seq": 1,
+            "tool_request_count": 1,
             "evidence_trace_available": True,
         }
         side.write_text(
@@ -858,6 +1026,7 @@ def _timeout_incomplete_sidecar_cannot_supply_response_evidence(tmp_path):
         max_turns=1,
         cwd=tmp_path,
         evidence_sentinels={TARGET_ENTITY_EVIDENCE: ["hidden-target-fact-7b0a1f9c"]},
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target-1"]},
     )
 
     assert run.call_source == "proxy"

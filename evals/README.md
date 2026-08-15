@@ -114,9 +114,12 @@ habit; use it only when the more sensitive, larger sidecar is justified.
 
 Read-task provenance is stricter than “a call happened.” Seeders place a hidden per-run
 sentinel on the target entity, and the API driver or CLI proxy records only whether a
-successful response exposed it. Result rows contain the matched sentinel label, never the
-sentinel value or response body. Thus an unrelated successful call cannot satisfy provenance;
-a driver path where response matching is unavailable is diagnosed and fails closed.
+successful response exposed it **and its request targeted that seeded entity ID**. CLI
+proxies receive only target IDs and one-way value fingerprints through a private one-shot
+file; the raw sentinel is absent even if that file is inspected. The proxy unlinks it before
+Plane MCP starts. Result rows contain the matched label, never the sentinel value or response body. Thus an unrelated
+successful response cannot satisfy provenance; unavailable or incomplete matching is
+diagnosed and fails closed.
 
 ### Reading results
 
@@ -150,11 +153,17 @@ independent sampling units and assumes comparable task instances under both labe
 printed paired task count—and the resulting wide interval for small samples—matters.
 
 Every result row carries a `battery` fingerprint derived from the selected catalog's task IDs,
-prompts, and catalog revision. It contains exactly what the agent is asked and no expectation
-about how the answer should be produced. A table that mixes fingerprints normally compares
-different questions, even when task IDs are the same, so `evals.report --table` warns when its
-input rows span fingerprints. A revision can document a deliberately comparable structural
-change when prompts and verifiers remain unchanged.
+prompts, and catalog revision, plus a `task_fingerprint` over that row's task ID, prompt, and
+fixture names. The battery contains exactly what the agent is asked and no expectation about
+how the answer should be produced. All report paths refuse with exit 2 before printing
+measurements when persisted battery identities differ, including mixed rows within one file.
+
+Canonical model, provider, driver, and server differences are comparison treatments. Declare
+each intentional difference with `--vary`, for example `--vary resolved_model` or
+`--vary provider,resolved_model`; any undeclared difference also refuses. Battery cannot be
+declared as varying. Requested tier/model names remain provenance rather than canonical
+identity, and the provider-reported realized model is printed as evidence instead of being
+mechanically equated with the configured model.
 
 The hash excludes fixtures and verifier bodies. `CATALOG_REVISION` in `tasks/catalog.py`
 closes that gap: bump it whenever an excluded change redefines what a task asks, and explain
@@ -277,9 +286,17 @@ Keep such scripts outside version control — `localdev/` is ignored for exactly
 - Run completeness uses an explicit skip taxonomy: known capabilities the environment does
   not provide (an allowlisted `env:plan-gated:<feature>` or the exact reason
   `env:no-activity-worker`) are expected skips.
+  The task/capability pair must also match the task's declared fixture needs: for example,
+  `env:plan-gated:customers` is expected for L4 but unexpected for W1 or C1.
   They reduce **EXECUTION COVERAGE** but do not break **RUN COMPLETE**. A dirty environment
   (`env:fixture-collision:*`) and every unrecognised reason are unexpected and make the run
   incomplete; there is intentionally no catch-all for new `env:*` reasons.
+- New result headers declare the exact task-id subset and repetition count. Completeness
+  compares raw `(task_id, rep)` occurrences with that declaration before latest-wins
+  deduplication, naming missing and unexpected keys (including duplicate excess).
+- Report headlines use a task-cluster bootstrap interval; the pooled repetition rate and
+  Wilson interval remain visible but are explicitly labeled as pooled. A/B and surface-table
+  reports warn when any input lacks a tool-manifest fingerprint.
 - A feature switched **off for a project** is not a plan gate — it is configuration the
   harness sets itself, and W11 exists to measure what an agent does when it meets one.
 - **Gated endpoints returning 402 on a workspace that should work.** Feature flags are

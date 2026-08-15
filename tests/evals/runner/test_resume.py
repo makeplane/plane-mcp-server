@@ -47,8 +47,9 @@ def _should_skip_resume_row_non_null_error_retries():
 
 
 def _should_skip_resume_row_only_plan_gated_skip_is_terminal():
-    assert should_skip_resume_row({"skipped": "env:plan-gated:customers"}) is True
-    assert should_skip_resume_row({"skipped": "env:no-activity-worker"}) is True
+    assert should_skip_resume_row({"task_id": "L4", "skipped": "env:plan-gated:customers"}) is True
+    assert should_skip_resume_row({"task_id": "L2", "skipped": "env:no-activity-worker"}) is True
+    assert should_skip_resume_row({"task_id": "W1", "skipped": "env:plan-gated:customers"}) is False
     assert should_skip_resume_row({"skipped": "env:no-activity-worker (worker disabled)"}) is False
     assert should_skip_resume_row({"skipped": "env:plan-gated:customerz"}) is False
     assert should_skip_resume_row({"skipped": "env:fixture-collision:customers:Acme Corp"}) is False
@@ -269,7 +270,7 @@ def test_run_live_resume_retries_infra_and_unexpected_skips_but_not_plan_gates(t
             "success": False,
         },
         {
-            "task_id": "C1",
+            "task_id": "L4",
             "rep": 0,
             "label": "local",
             "driver": "claude-cli",
@@ -286,6 +287,15 @@ def test_run_live_resume_retries_infra_and_unexpected_skips_but_not_plan_gates(t
         },
     ]
     out.write_text("\n".join(json.dumps(r) for r in prior) + "\n", encoding="utf-8")
+    original_bytes = out.read_bytes()
+    original_write_text = Path.write_text
+
+    def reject_results_rewrite(path, *args, **kwargs):
+        if path == out:
+            raise AssertionError("resume must not rewrite its append-only results file")
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", reject_results_rewrite)
 
     fake_plane = MagicMock()
     monkeypatch.setattr(runner_live, "make_plane_client", lambda: (fake_plane, "test-ws"))
@@ -331,7 +341,7 @@ def test_run_live_resume_retries_infra_and_unexpected_skips_but_not_plan_gates(t
             "verify": verify_ok,
         },
         {
-            "id": "C1",
+            "id": "L4",
             "prompt": "do {project}",
             "tags": set(),
             "needs": set(),
@@ -358,10 +368,11 @@ def test_run_live_resume_retries_infra_and_unexpected_skips_but_not_plan_gates(t
         )
     )
     assert rc == 0
-    # R1 completed and C1 was plan-gated. R2 infra and C2 collision are retried.
+    # R1 completed and L4 was plan-gated. R2 infra and C2 collision are retried.
     assert seed_calls == ["R2", "C2"]
+    assert out.read_bytes().startswith(original_bytes)
     data = _data_rows(out)
-    # Prior four + two retries (meta may also exist if file was empty — it wasn't).
+    # Resume is append-only: both retryable failures remain before their replacements.
     assert len(data) == 6
     new_r2, new_c2 = data[-2:]
     assert new_r2["task_id"] == "R2"
@@ -382,9 +393,13 @@ def test_make_run_meta_row_and_write_once(tmp_path: Path):
         model="sonnet",
         driver="claude-cli",
         git_sha="deadbeef",
+        expected_task_ids=["R1", "W1"],
+        expected_reps=3,
         ts="2026-01-01T00:00:00+00:00",
     )
     assert meta["row_type"] == "meta"
+    assert meta["expected_task_ids"] == ["R1", "W1"]
+    assert meta["expected_reps"] == 3
     assert is_meta_row(meta)
     assert is_meta_or_non_task_row(meta)
     assert maybe_write_run_meta(path, meta) is True
@@ -396,3 +411,19 @@ def test_make_run_meta_row_and_write_once(tmp_path: Path):
     assert len(lines) == 2
     assert json.loads(lines[0])["row_type"] == "meta"
     assert json.loads(lines[1])["task_id"] == "R1"
+
+
+def test_make_run_meta_row_rejects_count_disagreement_with_exact_keys():
+    with pytest.raises(ValueError, match="exact expectation=4"):
+        make_run_meta_row(
+            run_id="rid",
+            label="candidate",
+            server="local",
+            battery="abcd1234ef00",
+            model="sonnet",
+            driver="api",
+            git_sha="deadbeef",
+            expected_rows=3,
+            expected_task_ids=["R1", "W1"],
+            expected_reps=2,
+        )
