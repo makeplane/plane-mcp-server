@@ -34,7 +34,8 @@ ACTIONS = (
         "update",
         ("page_id",),
         ("project_id", "name", "description_html"),
-        note="pass name, description_html, or both; a locked or archived page is refused",
+        note="pass name, description_html, or both; description_html replaces the whole body, "
+        "so retrieve the page first when editing part of it; a locked or archived page is refused",
     ),
     Action(
         "archive",
