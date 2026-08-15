@@ -27,6 +27,8 @@ from evals.drivers import (
     wait_for_proxy_meta,
 )
 from evals.drivers.driver import CliDriver, CliLaunch, CliOutput
+from evals.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE
+from tests.evals.conftest import case_params
 
 
 def _pid_alive(pid: int) -> bool:
@@ -42,13 +44,12 @@ def _pid_alive(pid: int) -> bool:
 REPO = Path(__file__).resolve().parents[3]
 
 
-def test_run_behaviours(tmp_path, monkeypatch):
-    def test_run_cli_subprocess_kills_process_group_on_timeout(tmp_path):
-        pidfile = tmp_path / "pids.txt"
-        script = tmp_path / "sticky_cli.py"
-        script.write_text(
-            textwrap.dedent(
-                f"""
+def _run_cli_subprocess_kills_process_group_on_timeout(tmp_path, _monkeypatch):
+    pidfile = tmp_path / "pids.txt"
+    script = tmp_path / "sticky_cli.py"
+    script.write_text(
+        textwrap.dedent(
+            f"""
                 import os, subprocess, sys, time
                 from pathlib import Path
                 pidfile = Path({str(pidfile)!r})
@@ -60,43 +61,44 @@ def test_run_behaviours(tmp_path, monkeypatch):
                 # Hold our stdout open forever (simulates grandchild pipe hold).
                 time.sleep(9999)
                 """
-            ),
-            encoding="utf-8",
+        ),
+        encoding="utf-8",
+    )
+
+    t0 = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired) as ei:
+        run_cli_subprocess(
+            [sys.executable, str(script)],
+            timeout=1.0,
+            capture_output=True,
+            text=True,
         )
+    elapsed = time.monotonic() - t0
+    assert elapsed < 6.0, f"timeout path took {elapsed:.1f}s (unbounded communicate hang?)"
+    assert getattr(ei.value, "killed_process_group", False) is True
 
-        t0 = time.monotonic()
-        with pytest.raises(subprocess.TimeoutExpired) as ei:
-            run_cli_subprocess(
-                [sys.executable, str(script)],
-                timeout=1.0,
-                capture_output=True,
-                text=True,
-            )
-        elapsed = time.monotonic() - t0
-        assert elapsed < 6.0, f"timeout path took {elapsed:.1f}s (unbounded communicate hang?)"
-        assert getattr(ei.value, "killed_process_group", False) is True
+    # Wait briefly for reaping
+    deadline = time.monotonic() + 3.0
+    pids: list[int] = []
+    while time.monotonic() < deadline:
+        if pidfile.is_file():
+            pids = [int(x) for x in pidfile.read_text().splitlines() if x.strip()]
+            if len(pids) == 2 and not any(_pid_alive(p) for p in pids):
+                break
+        time.sleep(0.05)
+    assert len(pids) == 2, f"pidfile incomplete: {pidfile} {pids}"
+    alive = [p for p in pids if _pid_alive(p)]
+    assert not alive, f"process group members still alive: {alive}"
 
-        # Wait briefly for reaping
-        deadline = time.monotonic() + 3.0
-        pids: list[int] = []
-        while time.monotonic() < deadline:
-            if pidfile.is_file():
-                pids = [int(x) for x in pidfile.read_text().splitlines() if x.strip()]
-                if len(pids) == 2 and not any(_pid_alive(p) for p in pids):
-                    break
-            time.sleep(0.05)
-        assert len(pids) == 2, f"pidfile incomplete: {pidfile} {pids}"
-        alive = [p for p in pids if _pid_alive(p)]
-        assert not alive, f"process group members still alive: {alive}"
 
-    def test_run_cli_subprocess_baseexception_kills_group(tmp_path, monkeypatch):
-        import evals.drivers as drivers_mod
+def _run_cli_subprocess_baseexception_kills_group(tmp_path, monkeypatch):
+    import evals.drivers as drivers_mod
 
-        pidfile = tmp_path / "pids.txt"
-        script = tmp_path / "sticky.py"
-        script.write_text(
-            textwrap.dedent(
-                f"""
+    pidfile = tmp_path / "pids.txt"
+    script = tmp_path / "sticky.py"
+    script.write_text(
+        textwrap.dedent(
+            f"""
                 import os, subprocess, sys, time
                 from pathlib import Path
                 pidfile = Path({str(pidfile)!r})
@@ -104,58 +106,58 @@ def test_run_behaviours(tmp_path, monkeypatch):
                 pidfile.write_text(f"{{os.getpid()}}\\n{{child.pid}}\\n")
                 time.sleep(9999)
                 """
-            ),
-            encoding="utf-8",
-        )
+        ),
+        encoding="utf-8",
+    )
 
-        real_comm = subprocess.Popen.communicate
-        calls = {"n": 0}
+    real_comm = subprocess.Popen.communicate
+    calls = {"n": 0}
 
-        def boom_communicate(self, *a, **k):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                # Wait until pidfile is written so we can assert both die.
-                deadline = time.monotonic() + 2.0
-                while time.monotonic() < deadline:
-                    if pidfile.is_file() and len(pidfile.read_text().splitlines()) >= 2:
-                        break
-                    time.sleep(0.02)
-                raise KeyboardInterrupt("injected mid-communicate")
-            return real_comm(self, *a, **k)
-
-        monkeypatch.setattr(subprocess.Popen, "communicate", boom_communicate)
-
-        t0 = time.monotonic()
-        with pytest.raises(KeyboardInterrupt):
-            run_cli_subprocess(
-                [sys.executable, str(script)],
-                timeout=30.0,
-                capture_output=True,
-                text=True,
-            )
-        assert time.monotonic() - t0 < 6.0
-
-        deadline = time.monotonic() + 3.0
-        pids: list[int] = []
-        while time.monotonic() < deadline:
-            if pidfile.is_file():
-                pids = [int(x) for x in pidfile.read_text().splitlines() if x.strip()]
-                if len(pids) == 2 and not any(_pid_alive(p) for p in pids):
+    def boom_communicate(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # Wait until pidfile is written so we can assert both die.
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                if pidfile.is_file() and len(pidfile.read_text().splitlines()) >= 2:
                     break
-            time.sleep(0.05)
-        assert len(pids) == 2
-        alive = [p for p in pids if _pid_alive(p)]
-        assert not alive, f"group survived BaseException path: {alive}"
-        # silence unused import lint if any
-        assert drivers_mod.run_cli_subprocess is run_cli_subprocess
+                time.sleep(0.02)
+            raise KeyboardInterrupt("injected mid-communicate")
+        return real_comm(self, *a, **k)
 
-    _d0 = tmp_path / "test_run_cli_subprocess_kills_process_group_on_timeout"
-    _d0.mkdir()
-    test_run_cli_subprocess_kills_process_group_on_timeout(_d0)
-    _d1 = tmp_path / "test_run_cli_subprocess_baseexception_kills_group"
-    _d1.mkdir()
-    with pytest.MonkeyPatch.context() as mp:
-        test_run_cli_subprocess_baseexception_kills_group(_d1, mp)
+    monkeypatch.setattr(subprocess.Popen, "communicate", boom_communicate)
+
+    t0 = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        run_cli_subprocess(
+            [sys.executable, str(script)],
+            timeout=30.0,
+            capture_output=True,
+            text=True,
+        )
+    assert time.monotonic() - t0 < 6.0
+
+    deadline = time.monotonic() + 3.0
+    pids: list[int] = []
+    while time.monotonic() < deadline:
+        if pidfile.is_file():
+            pids = [int(x) for x in pidfile.read_text().splitlines() if x.strip()]
+            if len(pids) == 2 and not any(_pid_alive(p) for p in pids):
+                break
+        time.sleep(0.05)
+    assert len(pids) == 2
+    alive = [p for p in pids if _pid_alive(p)]
+    assert not alive, f"group survived BaseException path: {alive}"
+    # silence unused import lint if any
+    assert drivers_mod.run_cli_subprocess is run_cli_subprocess
+
+
+@pytest.mark.parametrize(
+    "case",
+    case_params(_run_cli_subprocess_kills_process_group_on_timeout, _run_cli_subprocess_baseexception_kills_group),
+)
+def test_run_behaviours(case, tmp_path, monkeypatch):
+    case(tmp_path, monkeypatch)
 
 
 def test_killpg_reaps_grandchild_when_leader_already_dead(tmp_path: Path):
@@ -234,141 +236,144 @@ def test_killpg_reaps_grandchild_when_leader_already_dead(tmp_path: Path):
                 pass
 
 
-def test_cli_behaviours(tmp_path, monkeypatch):
-    def test_cli_driver_timeout_notes_process_group_kill(tmp_path):
-        script = tmp_path / "slow.py"
-        script.write_text(
-            textwrap.dedent(
-                """
+def _cli_driver_timeout_notes_process_group_kill(tmp_path, _monkeypatch):
+    script = tmp_path / "slow.py"
+    script.write_text(
+        textwrap.dedent(
+            """
                 import time
                 time.sleep(9999)
                 """
-            ),
-            encoding="utf-8",
-        )
+        ),
+        encoding="utf-8",
+    )
 
-        # Use real run_cli_subprocess with a tiny timeout via fake that wraps it.
-        from evals.drivers import run_cli_subprocess as real_runner
+    # Use real run_cli_subprocess with a tiny timeout via fake that wraps it.
+    from evals.drivers import run_cli_subprocess as real_runner
 
-        def short_timeout_runner(cmd, **kwargs):
-            kwargs = dict(kwargs)
-            kwargs["timeout"] = 0.5
-            # Replace the CLI binary with our sticky sleeper
-            return real_runner([sys.executable, str(script)], **kwargs)
+    def short_timeout_runner(cmd, **kwargs):
+        kwargs = dict(kwargs)
+        kwargs["timeout"] = 0.5
+        # Replace the CLI binary with our sticky sleeper
+        return real_runner([sys.executable, str(script)], **kwargs)
 
-        driver = ClaudeCliDriver(runner=short_timeout_runner, use_proxy=False)
-        t0 = time.monotonic()
-        run = driver.run_task(
-            "hi",
-            mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
-            model="sonnet",
-            max_turns=1,
-            cwd=tmp_path,
-        )
-        assert time.monotonic() - t0 < 6.0
-        assert run.stopped_reason == "timeout"
-        assert "timeout_killed_process_group" in run.notes
+    driver = ClaudeCliDriver(runner=short_timeout_runner, use_proxy=False)
+    t0 = time.monotonic()
+    run = driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="sonnet",
+        max_turns=1,
+        cwd=tmp_path,
+    )
+    assert time.monotonic() - t0 < 6.0
+    assert run.stopped_reason == "timeout"
+    assert "timeout_killed_process_group" in run.notes
 
-    def test_cli_driver_template_inherits_proxy_first_and_timeout_harvest(tmp_path, monkeypatch):
-        clock = {"now": 0.0}
-        monkeypatch.setattr("evals.drivers.driver.time.perf_counter", lambda: clock["now"])
 
-        class MinimalCliDriver(CliDriver):
-            name = "minimal-cli"
-            temp_dir_prefix = "plane-eval-minimal-"
+def _cli_driver_template_inherits_proxy_first_and_timeout_harvest(tmp_path, monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr("evals.drivers.driver.time.perf_counter", lambda: clock["now"])
 
-            def write_mcp_config(
-                self,
-                temp_dir: Path,
-                *,
-                task_cwd: Path,
-                server_command: list[str],
-                child_env: dict[str, str],
-            ) -> CliLaunch:
-                del temp_dir, child_env
-                # Harness-owned setup takes five seconds on the fake clock. The
-                # persisted wall time must start after this hook returns.
-                clock["now"] = 5.0
-                self.sidecar_path = Path(server_command[server_command.index("--log") + 1])
-                return CliLaunch(cwd=task_cwd)
+    class MinimalCliDriver(CliDriver):
+        name = "minimal-cli"
+        temp_dir_prefix = "plane-eval-minimal-"
 
-            def build_command(
-                self,
-                prompt: str,
-                *,
-                model: str | None,
-                max_turns: int,
-                system: str | None,
-                launch: CliLaunch,
-            ) -> list[str]:
-                del model, max_turns, system, launch
-                return ["minimal", prompt]
+        def write_mcp_config(
+            self,
+            temp_dir: Path,
+            *,
+            task_cwd: Path,
+            server_command: list[str],
+            child_env: dict[str, str],
+        ) -> CliLaunch:
+            del temp_dir, child_env
+            # Harness-owned setup takes five seconds on the fake clock. The
+            # persisted wall time must start after this hook returns.
+            clock["now"] = 5.0
+            self.sidecar_path = Path(server_command[server_command.index("--log") + 1])
+            return CliLaunch(cwd=task_cwd)
 
-            def parse_output(
-                self,
-                proc: subprocess.CompletedProcess[str],
-                *,
-                task_cwd: Path,
-                max_turns: int,
-                notes: list[str],
-            ) -> CliOutput:
-                del proc, task_cwd, max_turns, notes
-                return CliOutput(
-                    final_text="done",
-                    calls=[
-                        {"tool": "cli_fallback_one", "args": {}, "origin": "plane"},
-                        {"tool": "cli_fallback_two", "args": {}, "origin": "plane"},
-                    ],
-                )
+        def build_command(
+            self,
+            prompt: str,
+            *,
+            model: str | None,
+            max_turns: int,
+            system: str | None,
+            launch: CliLaunch,
+        ) -> list[str]:
+            del model, max_turns, system, launch
+            return ["minimal", prompt]
 
-        def write_complete_sidecar(path: Path, tool: str) -> None:
-            rows = [
-                {
-                    "tool": tool,
-                    "args": {},
-                    "is_error": False,
-                    "result_chars": 2,
-                    "duration_ms": 1,
-                    "seq": 1,
-                },
-                {"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False},
-            ]
-            path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+        def parse_output(
+            self,
+            proc: subprocess.CompletedProcess[str],
+            *,
+            task_cwd: Path,
+            max_turns: int,
+            notes: list[str],
+        ) -> CliOutput:
+            del proc, task_cwd, max_turns, notes
+            return CliOutput(
+                final_text="done",
+                calls=[
+                    {"tool": "cli_fallback_one", "args": {}, "origin": "plane"},
+                    {"tool": "cli_fallback_two", "args": {}, "origin": "plane"},
+                ],
+            )
 
-        success_driver: MinimalCliDriver
+    def write_complete_sidecar(path: Path, tool: str) -> None:
+        rows = [
+            {
+                "tool": tool,
+                "args": {},
+                "is_error": False,
+                "result_chars": 2,
+                "duration_ms": 1,
+                "seq": 1,
+            },
+            {"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False},
+        ]
+        path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
-        def success_runner(cmd, **kwargs):
-            write_complete_sidecar(success_driver.sidecar_path, "proxy_first")
-            clock["now"] = 7.0
-            return subprocess.CompletedProcess(cmd, 0, stdout="ignored", stderr="")
+    success_driver: MinimalCliDriver
 
-        success_driver = MinimalCliDriver(runner=success_runner, use_proxy=True)
-        success = success_driver.run_task("go", {}, None, 1, cwd=tmp_path)
-        assert success.call_source == "proxy"
-        assert [call["tool"] for call in success.calls] == ["proxy_first"]
-        assert success.wall_time_s == 2.0
+    def success_runner(cmd, **kwargs):
+        write_complete_sidecar(success_driver.sidecar_path, "proxy_first")
+        clock["now"] = 7.0
+        return subprocess.CompletedProcess(cmd, 0, stdout="ignored", stderr="")
 
-        timeout_driver: MinimalCliDriver
+    success_driver = MinimalCliDriver(runner=success_runner, use_proxy=True)
+    success = success_driver.run_task("go", {}, None, 1, cwd=tmp_path)
+    assert success.call_source == "proxy"
+    assert [call["tool"] for call in success.calls] == ["proxy_first"]
+    assert success.wall_time_s == 2.0
 
-        def timeout_runner(cmd, **kwargs):
-            write_complete_sidecar(timeout_driver.sidecar_path, "before_timeout")
-            clock["now"] = 8.0
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs["timeout"])
+    timeout_driver: MinimalCliDriver
 
-        timeout_driver = MinimalCliDriver(runner=timeout_runner, use_proxy=True)
-        timed_out = timeout_driver.run_task("go", {}, None, 1, cwd=tmp_path)
-        assert timed_out.stopped_reason == "timeout"
-        assert timed_out.call_source == "proxy"
-        assert [call["tool"] for call in timed_out.calls] == ["before_timeout"]
-        assert timed_out.wall_time_s == 3.0
+    def timeout_runner(cmd, **kwargs):
+        write_complete_sidecar(timeout_driver.sidecar_path, "before_timeout")
+        clock["now"] = 8.0
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs["timeout"])
 
-    _d0 = tmp_path / "test_cli_driver_timeout_notes_process_group_kill"
-    _d0.mkdir()
-    test_cli_driver_timeout_notes_process_group_kill(_d0)
-    _d1 = tmp_path / "test_cli_driver_template_inherits_proxy_first_and_timeout_harvest"
-    _d1.mkdir()
-    with pytest.MonkeyPatch.context() as mp:
-        test_cli_driver_template_inherits_proxy_first_and_timeout_harvest(_d1, mp)
+    timeout_driver = MinimalCliDriver(runner=timeout_runner, use_proxy=True)
+    timed_out = timeout_driver.run_task("go", {}, None, 1, cwd=tmp_path)
+    assert timed_out.stopped_reason == "timeout"
+    assert timed_out.call_source == "proxy"
+    assert [call["tool"] for call in timed_out.calls] == ["before_timeout"]
+    assert timed_out.wall_time_s == 3.0
+
+
+@pytest.mark.parametrize(
+    "case",
+    case_params(
+        _cli_driver_timeout_notes_process_group_kill,
+        _cli_driver_template_inherits_proxy_first_and_timeout_harvest,
+    ),
+)
+def test_cli_behaviours(case, tmp_path, monkeypatch):
+    case(tmp_path, monkeypatch)
 
 
 def test_old_payload_free_sidecar_still_parses(tmp_path: Path):
@@ -396,82 +401,117 @@ def test_old_payload_free_sidecar_still_parses(tmp_path: Path):
     assert "result_text" not in calls[0]
 
 
-def test_apply_behaviours(tmp_path):
-    def test_apply_proxy_sidecar_replaces_when_nonempty(tmp_path):
-        side = tmp_path / "s.jsonl"
-        side.write_text(
-            json.dumps(
-                {
-                    "tool": "find_work_items",
-                    "args": {"q": "x"},
-                    "is_error": False,
-                    "result_chars": 12,
-                    "duration_ms": 5,
-                    "seq": 1,
-                }
-            )
-            + "\n",
-            encoding="utf-8",
+def _apply_proxy_sidecar_replaces_when_nonempty(tmp_path):
+    side = tmp_path / "s.jsonl"
+    side.write_text(
+        json.dumps(
+            {
+                "tool": "find_work_items",
+                "args": {"q": "x"},
+                "is_error": False,
+                "result_chars": 12,
+                "duration_ms": 5,
+                "seq": 1,
+            }
         )
-        notes: list[str] = []
-        calls, client, src = apply_proxy_sidecar(
-            [{"tool": "old", "args": {}, "origin": "plane"}],
-            [],
-            side,
-            notes,
+        + "\n",
+        encoding="utf-8",
+    )
+    notes: list[str] = []
+    calls, client, src = apply_proxy_sidecar(
+        [{"tool": "old", "args": {}, "origin": "plane"}],
+        [],
+        side,
+        notes,
+    )
+    assert src == "proxy"
+    assert calls[0]["tool"] == "find_work_items"
+    assert calls[0]["duration_ms"] == 5
+    assert any("calls_from_proxy" in n for n in notes)
+
+
+def _apply_proxy_sidecar_empty_fallback(tmp_path):
+    side = tmp_path / "empty.jsonl"
+    side.write_text("", encoding="utf-8")
+    notes: list[str] = []
+    original = [{"tool": "from_cli", "args": {}, "origin": "plane"}]
+    calls, _client, src = apply_proxy_sidecar(original, [], side, notes)
+    assert calls is original or calls == original
+    assert "proxy_sidecar_empty" in notes
+    assert src != "proxy" or calls == original
+
+
+def _apply_proxy_incomplete_defers_to_richer_cli(tmp_path):
+    p = tmp_path / "s.jsonl"
+    # Incomplete: one proxy call, no meta.
+    p.write_text(
+        json.dumps(
+            {
+                "tool": "from_proxy",
+                "args": {},
+                "is_error": False,
+                "result_chars": 1,
+                "duration_ms": 1,
+                "seq": 1,
+            }
         )
-        assert src == "proxy"
-        assert calls[0]["tool"] == "find_work_items"
-        assert calls[0]["duration_ms"] == 5
-        assert any("calls_from_proxy" in n for n in notes)
+        + "\n",
+        encoding="utf-8",
+    )
+    cli = [
+        {"tool": "c1", "args": {}, "origin": "plane"},
+        {"tool": "c2", "args": {}, "origin": "plane"},
+    ]
+    notes: list[str] = []
+    calls, _client, src = apply_proxy_sidecar(cli, [], p, notes)
+    assert src != "proxy"
+    assert [c["tool"] for c in calls] == ["c1", "c2"]
+    assert any("proxy_sidecar_incomplete" in n for n in notes)
+    assert any("deferred_to_cli" in n for n in notes)
 
-    def test_apply_proxy_sidecar_empty_fallback(tmp_path):
-        side = tmp_path / "empty.jsonl"
-        side.write_text("", encoding="utf-8")
-        notes: list[str] = []
-        original = [{"tool": "from_cli", "args": {}, "origin": "plane"}]
-        calls, _client, src = apply_proxy_sidecar(original, [], side, notes)
-        assert calls is original or calls == original
-        assert "proxy_sidecar_empty" in notes
-        assert src != "proxy" or calls == original
 
-    def test_apply_proxy_incomplete_defers_to_richer_cli(tmp_path):
-        p = tmp_path / "s.jsonl"
-        # Incomplete: one proxy call, no meta.
-        p.write_text(
-            json.dumps(
-                {
-                    "tool": "from_proxy",
-                    "args": {},
-                    "is_error": False,
-                    "result_chars": 1,
-                    "duration_ms": 1,
-                    "seq": 1,
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        cli = [
-            {"tool": "c1", "args": {}, "origin": "plane"},
-            {"tool": "c2", "args": {}, "origin": "plane"},
-        ]
-        notes: list[str] = []
-        calls, _client, src = apply_proxy_sidecar(cli, [], p, notes)
-        assert src != "proxy"
-        assert [c["tool"] for c in calls] == ["c1", "c2"]
-        assert any("proxy_sidecar_incomplete" in n for n in notes)
-        assert any("deferred_to_cli" in n for n in notes)
+def _apply_proxy_with_skipped_row_defers_to_richer_cli(tmp_path):
+    p = tmp_path / "s.jsonl"
+    rows = [
+        json.dumps(
+            {
+                "tool": "from_proxy",
+                "args": {},
+                "is_error": False,
+                "result_chars": 1,
+                "duration_ms": 1,
+                "seq": 1,
+            }
+        ),
+        "{corrupted mid-stream row",
+        json.dumps({"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False}),
+    ]
+    p.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    cli = [
+        {"tool": "c1", "args": {}, "origin": "plane"},
+        {"tool": "c2", "args": {}, "origin": "plane"},
+    ]
+    notes: list[str] = []
 
-    _d0 = tmp_path / "test_apply_proxy_sidecar_replaces_when_nonempty"
-    _d0.mkdir()
-    test_apply_proxy_sidecar_replaces_when_nonempty(_d0)
-    _d1 = tmp_path / "test_apply_proxy_sidecar_empty_fallback"
-    _d1.mkdir()
-    test_apply_proxy_sidecar_empty_fallback(_d1)
-    _d2 = tmp_path / "test_apply_proxy_incomplete_defers_to_richer_cli"
-    _d2.mkdir()
-    test_apply_proxy_incomplete_defers_to_richer_cli(_d2)
+    calls, _client, src = apply_proxy_sidecar(cli, [], p, notes)
+
+    assert src == "json"
+    assert [call["tool"] for call in calls] == ["c1", "c2"]
+    assert "proxy_sidecar_incomplete:skipped_rows=1" in notes
+    assert "proxy_sidecar_deferred_to_cli_trace" in notes
+
+
+@pytest.mark.parametrize(
+    "case",
+    case_params(
+        _apply_proxy_sidecar_replaces_when_nonempty,
+        _apply_proxy_sidecar_empty_fallback,
+        _apply_proxy_incomplete_defers_to_richer_cli,
+        _apply_proxy_with_skipped_row_defers_to_richer_cli,
+    ),
+)
+def test_apply_behaviours(case, tmp_path):
+    case(tmp_path)
 
 
 def test_proxy_wrap_server_command():
@@ -493,51 +533,81 @@ def test_proxy_wrap_server_command():
     assert with_payloads[5:7] == ["--record-result-payloads", "--"]
 
 
-def test_load_behaviours(tmp_path):
-    def test_load_proxy_sidecar_sorts_by_seq(tmp_path):
-        p = tmp_path / "s.jsonl"
-        # Append in reverse response order.
-        rows = [
-            {"tool": "b", "args": {}, "is_error": False, "result_chars": 1, "duration_ms": 1, "seq": 2},
-            {"tool": "a", "args": {}, "is_error": False, "result_chars": 1, "duration_ms": 1, "seq": 1},
-            {
-                "row_type": "proxy_meta",
-                "relayed_lines": 2,
-                "unparsed_lines": 0,
-                "unmatched_responses": 0,
-                "notifications": 0,
-                "pending_left": 0,
-                "child_killed": False,
-            },
-        ]
-        p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-        calls = load_proxy_sidecar_calls(p)
-        assert [c["tool"] for c in calls] == ["a", "b"]
+def _load_proxy_sidecar_sorts_by_seq(tmp_path):
+    p = tmp_path / "s.jsonl"
+    # Append in reverse response order.
+    rows = [
+        {"tool": "b", "args": {}, "is_error": False, "result_chars": 1, "duration_ms": 1, "seq": 2},
+        {"tool": "a", "args": {}, "is_error": False, "result_chars": 1, "duration_ms": 1, "seq": 1},
+        {
+            "row_type": "proxy_meta",
+            "relayed_lines": 2,
+            "unparsed_lines": 0,
+            "unmatched_responses": 0,
+            "notifications": 0,
+            "pending_left": 0,
+            "child_killed": False,
+        },
+    ]
+    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    calls = load_proxy_sidecar_calls(p)
+    assert [c["tool"] for c in calls] == ["a", "b"]
 
-    def test_load_proxy_sidecar_torn_final_line(tmp_path):
-        p = tmp_path / "s.jsonl"
-        good = {
-            "tool": "a",
-            "args": {},
-            "is_error": False,
-            "result_chars": 1,
-            "duration_ms": 1,
-            "seq": 1,
-        }
-        # Complete call row + torn final line (no proxy_meta).
-        p.write_text(json.dumps(good) + "\n" + '{"tool": "b", "args":', encoding="utf-8")
-        calls, status = load_proxy_sidecar(p)
-        assert status["state"] == "incomplete"
-        assert status["torn_line"] is True
-        assert status["meta"] is None
-        assert [c["tool"] for c in calls] == ["a"]
 
-    _d0 = tmp_path / "test_load_proxy_sidecar_sorts_by_seq"
-    _d0.mkdir()
-    test_load_proxy_sidecar_sorts_by_seq(_d0)
-    _d1 = tmp_path / "test_load_proxy_sidecar_torn_final_line"
-    _d1.mkdir()
-    test_load_proxy_sidecar_torn_final_line(_d1)
+def _load_proxy_sidecar_torn_final_line(tmp_path):
+    p = tmp_path / "s.jsonl"
+    good = {
+        "tool": "a",
+        "args": {},
+        "is_error": False,
+        "result_chars": 1,
+        "duration_ms": 1,
+        "seq": 1,
+    }
+    # Complete call row + torn final line (no proxy_meta).
+    p.write_text(json.dumps(good) + "\n" + '{"tool": "b", "args":', encoding="utf-8")
+    calls, status = load_proxy_sidecar(p)
+    assert status["state"] == "incomplete"
+    assert status["torn_line"] is True
+    assert status["meta"] is None
+    assert [c["tool"] for c in calls] == ["a"]
+
+
+@pytest.mark.parametrize(
+    "case",
+    case_params(_load_proxy_sidecar_sorts_by_seq, _load_proxy_sidecar_torn_final_line),
+)
+def test_load_behaviours(case, tmp_path):
+    case(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("bad_row", "case_id"),
+    [
+        ("{corrupted mid-stream row", "invalid-json"),
+        (json.dumps(["not", "an", "object"]), "non-object-json"),
+        (json.dumps({"args": {"lost": "tool"}}), "missing-tool"),
+    ],
+    ids=lambda value: value if value in {"invalid-json", "non-object-json", "missing-tool"} else None,
+)
+def test_load_proxy_sidecar_skipped_row_makes_trace_incomplete(tmp_path: Path, bad_row: str, case_id: str):
+    path = tmp_path / f"{case_id}.jsonl"
+    call = {
+        "tool": "visible",
+        "args": {},
+        "is_error": False,
+        "result_chars": 1,
+        "duration_ms": 1,
+        "seq": 1,
+    }
+    meta = {"row_type": "proxy_meta", "pending_left": 0, "pumps_alive": False}
+    path.write_text("\n".join((json.dumps(call), bad_row, json.dumps(meta))) + "\n", encoding="utf-8")
+
+    calls, status = load_proxy_sidecar(path)
+
+    assert [row["tool"] for row in calls] == ["visible"]
+    assert status["skipped_rows"] == 1
+    assert status["state"] == "incomplete"
 
 
 def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
@@ -639,66 +709,18 @@ def test_ensure_proxy_pythonpath_injects_repo():
     assert env2["PYTHONPATH"].count(str(REPO)) == 1
 
 
-def test_timeout_behaviours(tmp_path):
-    def test_timeout_harvests_sidecar_calls(tmp_path):
-        side_calls = [
-            {
-                "tool": "pre_timeout",
-                "args": {"a": 1},
-                "is_error": False,
-                "result_chars": 3,
-                "duration_ms": 1,
-                "seq": 1,
-            },
-            {
-                "row_type": "proxy_meta",
-                "relayed_lines": 1,
-                "unparsed_lines": 0,
-                "unmatched_responses": 0,
-                "notifications": 0,
-                "pending_left": 0,
-                "child_killed": False,
-            },
-        ]
-
-        def fake_run(cmd, **kwargs):
-            # Plant a complete sidecar next to the mcp config (temp dir still alive).
-            cfg = Path(cmd[cmd.index("--mcp-config") + 1])
-            # Sidecar path is in the same temp dir as mcp.json for Claude.
-            # Find sidecar from proxy args in mcp config.
-            mcp = json.loads(cfg.read_text())
-            args = mcp["mcpServers"]["plane"]["args"]
-            log_idx = args.index("--log") + 1
-            side = Path(args[log_idx])
-            side.write_text("\n".join(json.dumps(r) for r in side_calls) + "\n", encoding="utf-8")
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
-
-        driver = ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
-        run = driver.run_task(
-            "hi",
-            mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
-            model="sonnet",
-            max_turns=1,
-            cwd=tmp_path,
-        )
-        assert run.stopped_reason == "timeout"
-        assert run.call_source == "proxy"
-        assert len(run.calls) == 1
-        assert run.calls[0]["tool"] == "pre_timeout"
-
-    def test_timeout_harvest_waits_for_delayed_meta(tmp_path):
-        import threading
-        import time as time_mod
-
-        call_row = {
-            "tool": "late_meta_tool",
-            "args": {"n": 1},
+def _timeout_harvests_sidecar_calls(tmp_path):
+    side_calls = [
+        {
+            "tool": "pre_timeout",
+            "args": {"a": 1},
             "is_error": False,
-            "result_chars": 2,
+            "result_chars": 3,
             "duration_ms": 1,
             "seq": 1,
-        }
-        meta_row = {
+            "observed_sentinels": [TARGET_ENTITY_EVIDENCE],
+        },
+        {
             "row_type": "proxy_meta",
             "relayed_lines": 1,
             "unparsed_lines": 0,
@@ -706,52 +728,155 @@ def test_timeout_behaviours(tmp_path):
             "notifications": 0,
             "pending_left": 0,
             "child_killed": False,
-            "pumps_alive": False,
+            "evidence_trace_available": True,
+        },
+    ]
+
+    def fake_run(cmd, **kwargs):
+        # Plant a complete sidecar next to the mcp config (temp dir still alive).
+        cfg = Path(cmd[cmd.index("--mcp-config") + 1])
+        # Sidecar path is in the same temp dir as mcp.json for Claude.
+        # Find sidecar from proxy args in mcp config.
+        mcp = json.loads(cfg.read_text())
+        assert EVIDENCE_SENTINELS_ENV in mcp["mcpServers"]["plane"]["env"]
+        args = mcp["mcpServers"]["plane"]["args"]
+        log_idx = args.index("--log") + 1
+        side = Path(args[log_idx])
+        side.write_text("\n".join(json.dumps(r) for r in side_calls) + "\n", encoding="utf-8")
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+
+    driver = ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
+    run = driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="sonnet",
+        max_turns=1,
+        cwd=tmp_path,
+        evidence_sentinels={TARGET_ENTITY_EVIDENCE: ["hidden-target-fact-7b0a1f9c"]},
+    )
+    assert run.stopped_reason == "timeout"
+    assert run.call_source == "proxy"
+    assert len(run.calls) == 1
+    assert run.calls[0]["tool"] == "pre_timeout"
+    assert run.calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert run.evidence_trace_available is True
+
+
+def _timeout_harvest_waits_for_delayed_meta(tmp_path):
+    import threading
+    import time as time_mod
+
+    call_row = {
+        "tool": "late_meta_tool",
+        "args": {"n": 1},
+        "is_error": False,
+        "result_chars": 2,
+        "duration_ms": 1,
+        "seq": 1,
+    }
+    meta_row = {
+        "row_type": "proxy_meta",
+        "relayed_lines": 1,
+        "unparsed_lines": 0,
+        "unmatched_responses": 0,
+        "notifications": 0,
+        "pending_left": 0,
+        "child_killed": False,
+        "pumps_alive": False,
+    }
+    seen: dict = {"waited": False}
+
+    def fake_run(cmd, **kwargs):
+        cfg = Path(cmd[cmd.index("--mcp-config") + 1])
+        mcp = json.loads(cfg.read_text())
+        args = mcp["mcpServers"]["plane"]["args"]
+        side = Path(args[args.index("--log") + 1])
+        # Call row first — no meta yet (simulates proxy still finalizing).
+        side.write_text(json.dumps(call_row) + "\n", encoding="utf-8")
+
+        def write_meta_later() -> None:
+            time_mod.sleep(0.45)
+            with side.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(meta_row) + "\n")
+            seen["waited"] = True
+
+        threading.Thread(target=write_meta_later, daemon=True).start()
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+
+    t0 = time_mod.monotonic()
+    driver = ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
+    run = driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="sonnet",
+        max_turns=1,
+        cwd=tmp_path,
+    )
+    elapsed = time_mod.monotonic() - t0
+    assert run.stopped_reason == "timeout"
+    assert run.call_source == "proxy"
+    assert len(run.calls) == 1
+    assert run.calls[0]["tool"] == "late_meta_tool"
+    assert seen["waited"] is True
+    # Must have waited for the delayed meta (~0.45s), not returned instantly.
+    assert elapsed >= 0.4
+    assert "proxy_meta_wait_timeout" not in run.notes
+
+
+def _timeout_incomplete_sidecar_cannot_supply_response_evidence(tmp_path):
+    def fake_run(cmd, **kwargs):
+        cfg = Path(cmd[cmd.index("--mcp-config") + 1])
+        mcp = json.loads(cfg.read_text())
+        args = mcp["mcpServers"]["plane"]["args"]
+        side = Path(args[args.index("--log") + 1])
+        call = {
+            "tool": "evidence_call",
+            "args": {},
+            "is_error": False,
+            "result_chars": 5,
+            "duration_ms": 1,
+            "seq": 1,
+            "observed_sentinels": [TARGET_ENTITY_EVIDENCE],
         }
-        seen: dict = {"waited": False}
-
-        def fake_run(cmd, **kwargs):
-            cfg = Path(cmd[cmd.index("--mcp-config") + 1])
-            mcp = json.loads(cfg.read_text())
-            args = mcp["mcpServers"]["plane"]["args"]
-            side = Path(args[args.index("--log") + 1])
-            # Call row first — no meta yet (simulates proxy still finalizing).
-            side.write_text(json.dumps(call_row) + "\n", encoding="utf-8")
-
-            def write_meta_later() -> None:
-                time_mod.sleep(0.45)
-                with side.open("a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(meta_row) + "\n")
-                seen["waited"] = True
-
-            threading.Thread(target=write_meta_later, daemon=True).start()
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
-
-        t0 = time_mod.monotonic()
-        driver = ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
-        run = driver.run_task(
-            "hi",
-            mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
-            model="sonnet",
-            max_turns=1,
-            cwd=tmp_path,
+        meta = {
+            "row_type": "proxy_meta",
+            "pending_left": 0,
+            "pumps_alive": False,
+            "evidence_trace_available": True,
+        }
+        side.write_text(
+            "\n".join((json.dumps(call), "{corrupted mid-stream row", json.dumps(meta))) + "\n",
+            encoding="utf-8",
         )
-        elapsed = time_mod.monotonic() - t0
-        assert run.stopped_reason == "timeout"
-        assert run.call_source == "proxy"
-        assert len(run.calls) == 1
-        assert run.calls[0]["tool"] == "late_meta_tool"
-        assert seen["waited"] is True
-        # Must have waited for the delayed meta (~0.45s), not returned instantly.
-        assert elapsed >= 0.4
-        assert "proxy_meta_wait_timeout" not in run.notes
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
 
-    _d0 = tmp_path / "test_timeout_harvests_sidecar_calls"
-    _d0.mkdir()
-    test_timeout_harvests_sidecar_calls(_d0)
-    _d1 = tmp_path / "test_timeout_harvest_waits_for_delayed_meta"
-    _d1.mkdir()
-    test_timeout_harvest_waits_for_delayed_meta(_d1)
+    driver = ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
+    run = driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="sonnet",
+        max_turns=1,
+        cwd=tmp_path,
+        evidence_sentinels={TARGET_ENTITY_EVIDENCE: ["hidden-target-fact-7b0a1f9c"]},
+    )
+
+    assert run.call_source == "proxy"
+    assert run.calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert run.evidence_trace_available is False
+    assert "proxy_sidecar_incomplete:skipped_rows=1" in run.notes
+    assert "proxy_response_evidence_unavailable" in run.notes
+
+
+@pytest.mark.parametrize(
+    "case",
+    case_params(
+        _timeout_harvests_sidecar_calls,
+        _timeout_harvest_waits_for_delayed_meta,
+        _timeout_incomplete_sidecar_cannot_supply_response_evidence,
+    ),
+)
+def test_timeout_behaviours(case, tmp_path):
+    case(tmp_path)
 
 
 def test_wait_for_proxy_meta_unit(tmp_path: Path):

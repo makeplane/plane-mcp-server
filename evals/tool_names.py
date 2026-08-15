@@ -2,9 +2,8 @@
 
 Agent CLIs expose MCP tools under a vendor prefix (``mcp__plane__list_work_items``)
 and mix them with their own built-ins (``Bash``, ``ToolSearch``). Drivers and the
-result mapper both have to tell those apart before anything is classified or
-counted, so this sits beside the result schema rather than inside one driver
-package.
+result mapper both have to tell those apart before calls are counted, so this
+sits beside the result schema rather than inside one driver package.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ _MCP_PREFIX_RE2 = re.compile(r"^mcp__.+?__(.+)$")
 
 
 def strip_mcp_prefix(name: str) -> str:
-    """Strip Claude/Codex MCP tool name prefixes for classification.
+    """Strip Claude/Codex MCP tool name prefixes.
 
     Examples:
       mcp__plane__list_work_items → list_work_items
@@ -48,7 +47,7 @@ def is_plane_mcp_tool(name: str) -> bool:
 
 
 def normalize_tool_call(name: str, args: Any) -> dict[str, Any]:
-    """Tag a tool call as plane (classifiable) or client (excluded from mispicks)."""
+    """Tag a tool call as Plane or client-owned."""
     raw = str(name or "")
     if not isinstance(args, dict):
         args = {"_raw": args}

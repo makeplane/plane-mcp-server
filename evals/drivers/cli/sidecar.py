@@ -18,12 +18,15 @@ def proxy_wrap_server_command(
     sidecar_path: Path,
     python_bin: str | None = None,
     record_result_payloads: bool = False,
+    evidence_path: Path | None = None,
 ) -> list[str]:
     """Return ``[python, -m, evals.proxy, --log, sidecar, --, *real_command]``."""
     py = python_bin or sys.executable
     command = [py, "-m", "evals.proxy", "--log", str(sidecar_path)]
     if record_result_payloads:
         command.append("--record-result-payloads")
+    if evidence_path is not None:
+        command.extend(["--evidence-file", str(evidence_path)])
     return [*command, "--", *real_command]
 
 
@@ -50,12 +53,14 @@ def load_proxy_sidecar(
     Status keys:
       - missing / empty / complete / incomplete
       - torn_line: final line failed to parse
+      - skipped_rows: non-final rows that could not produce a call or metadata row
       - meta: proxy_meta row if present
       - pending_left: from meta when present
     """
     status: dict[str, Any] = {
         "state": "missing",
         "torn_line": False,
+        "skipped_rows": 0,
         "meta": None,
         "pending_left": None,
     }
@@ -75,6 +80,7 @@ def load_proxy_sidecar(
     calls: list[dict[str, Any]] = []
     meta: dict[str, Any] | None = None
     torn = False
+    skipped_rows = 0
     for i, line in enumerate(lines):
         s = line.strip()
         if not s:
@@ -86,14 +92,17 @@ def load_proxy_sidecar(
             if i == len(lines) - 1:
                 torn = True
                 break
+            skipped_rows += 1
             continue
         if not isinstance(row, dict):
+            skipped_rows += 1
             continue
         if row.get("row_type") == "proxy_meta":
             meta = row
             continue
         tool = row.get("tool")
         if not tool:
+            skipped_rows += 1
             continue
         call = {
             "tool": str(tool),
@@ -107,23 +116,27 @@ def load_proxy_sidecar(
         # Optional in new sidecars; old payload-free rows remain valid.
         if isinstance(row.get("result_text"), str):
             call["result_text"] = row["result_text"]
+        if isinstance(row.get("observed_sentinels"), list):
+            call["observed_sentinels"] = [str(value) for value in row["observed_sentinels"]]
         calls.append(call)
 
     # Score order must match request seq, not response-append order.
     calls.sort(key=lambda c: (c.get("seq") is None, c.get("seq") if c.get("seq") is not None else 0))
 
     status["torn_line"] = torn
+    status["skipped_rows"] = skipped_rows
     status["meta"] = meta
     if meta is not None:
         status["pending_left"] = meta.get("pending_left")
         status["pumps_alive"] = bool(meta.get("pumps_alive"))
     incomplete = bool(
         torn
+        or skipped_rows > 0
         or meta is None
         or (meta is not None and int(meta.get("pending_left") or 0) > 0)
         or (meta is not None and bool(meta.get("pumps_alive")))
     )
-    if not calls and not meta and not torn:
+    if not calls and not meta and not torn and skipped_rows == 0:
         status["state"] = "empty"
     elif incomplete:
         status["state"] = "incomplete"
@@ -146,8 +159,8 @@ def apply_proxy_sidecar(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
     """Prefer a complete proxy sidecar; fall back to CLI-parsed when incomplete/empty.
 
-    Incomplete sidecar (torn line, missing meta, pending_left>0) yields to the
-    CLI trace when the CLI has *more* plane calls. Returns
+    Incomplete sidecar (torn/skipped row, missing meta, pending_left>0) yields
+    to the CLI trace when the CLI has *more* plane calls. Returns
     ``(plane_calls, client_calls, call_source)``.
     """
     proxy_calls, status = load_proxy_sidecar(sidecar_path)
@@ -159,6 +172,7 @@ def apply_proxy_sidecar(
         notes.append(
             "proxy_sidecar_incomplete"
             + (":torn" if status.get("torn_line") else "")
+            + (f":skipped_rows={status.get('skipped_rows')}" if status.get("skipped_rows") else "")
             + (":no_meta" if status.get("meta") is None else "")
             + (f":pending_left={status.get('pending_left')}" if status.get("pending_left") else "")
             + (":pumps_alive" if status.get("pumps_alive") else "")

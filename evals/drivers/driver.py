@@ -33,7 +33,15 @@ from evals.drivers.cli.sidecar import (
     apply_proxy_sidecar,
     ensure_proxy_pythonpath,
     harvest_proxy_after_cli_timeout,
+    load_proxy_sidecar,
     proxy_wrap_server_command,
+)
+from evals.evidence import (
+    configured_evidence_labels,
+    normalize_evidence_sentinels,
+    normalize_evidence_targets,
+    observed_sentinel_labels,
+    write_evidence_config,
 )
 from evals.results import AgentRun, Usage
 from evals.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
@@ -189,6 +197,8 @@ class ApiDriver:
         *,
         system: str | None = None,
         cwd: Path | None = None,
+        evidence_sentinels: dict[str, Any] | None = None,
+        evidence_targets: dict[str, Any] | None = None,
     ) -> AgentRun:
         if not model:
             raise ValueError("the API driver requires a model ID")
@@ -202,6 +212,8 @@ class ApiDriver:
                 max_turns=max_turns,
                 system=system,
                 cwd=cwd,
+                evidence_sentinels=evidence_sentinels,
+                evidence_targets=evidence_targets,
             )
         )
 
@@ -214,8 +226,13 @@ class ApiDriver:
         max_turns: int,
         system: str | None,
         cwd: Path | None,
+        evidence_sentinels: dict[str, Any] | None,
+        evidence_targets: dict[str, Any] | None,
     ) -> AgentRun:
         backend = self._make_backend(model)
+        evidence = normalize_evidence_sentinels(evidence_sentinels)
+        targets = normalize_evidence_targets(evidence_targets)
+        evidence_active = bool(configured_evidence_labels(evidence, targets))
         calls: list[dict[str, Any]] = []
         pending_results: list[tuple[int, str]] = []
         usage_per_iteration: list[Usage] = []
@@ -303,6 +320,13 @@ class ApiDriver:
                         calls[idx]["result_kind"] = result.kind
                         calls[idx]["is_error"] = result.is_error
                         calls[idx]["duration_ms"] = duration_ms
+                        if evidence_active:
+                            calls[idx]["observed_sentinels"] = observed_sentinel_labels(
+                                result.text,
+                                evidence,
+                                request_args=calls[idx]["args"],
+                                evidence_targets=targets,
+                            )
                         pending_results.append((idx, result.text))
                     if matched_ids != set(call_indices) or len(call_indices) != len(turn.tool_calls):
                         result_pair_mismatch = True
@@ -366,6 +390,7 @@ class ApiDriver:
             result_pair_mismatch=result_pair_mismatch,
             token_count_failures=token_count_failures,
             result_tokens_estimated=result_tokens_estimated,
+            evidence_trace_available=evidence_active,
             provider=str(backend.provider),
             model=str(backend.actual_model),
             requested_model=model,
@@ -507,6 +532,8 @@ class CliDriver(ABC):
         *,
         system: str | None = None,
         cwd: Path | None = None,
+        evidence_sentinels: dict[str, Any] | None = None,
+        evidence_targets: dict[str, Any] | None = None,
     ) -> AgentRun:
         """Run one CLI task using the shared configuration/proxy/timeout flow."""
         task_cwd = (cwd or REPO_ROOT).resolve()
@@ -520,16 +547,24 @@ class CliDriver(ABC):
             child_env = {
                 key: value for key, value in mcp_env.items() if key.startswith("PLANE_") or key in ("PATH", "HOME")
             }
+            evidence = normalize_evidence_sentinels(evidence_sentinels)
+            targets = normalize_evidence_targets(evidence_targets)
+            evidence_active = bool(configured_evidence_labels(evidence, targets))
             real_command = (
                 list(self.server_command) if self.server_command else [self.python_bin, "-m", "plane_mcp", "stdio"]
             )
             server_command = real_command
             if self.use_proxy:
+                evidence_path = None
+                if evidence_active:
+                    evidence_path = temp_dir / "proxy-evidence.json"
+                    write_evidence_config(evidence_path, evidence, targets)
                 server_command = proxy_wrap_server_command(
                     real_command,
                     sidecar_path=sidecar,
                     python_bin=self.python_bin,
                     record_result_payloads=self.record_result_payloads,
+                    evidence_path=evidence_path,
                 )
                 child_env = ensure_proxy_pythonpath(child_env)
 
@@ -566,6 +601,17 @@ class CliDriver(ABC):
                         sidecar,
                         notes,
                     )
+                evidence_available = False
+                if evidence_active and call_source == "proxy":
+                    _proxy_calls, status = load_proxy_sidecar(sidecar)
+                    meta = status.get("meta") if isinstance(status, dict) else None
+                    evidence_available = bool(
+                        status.get("state") == "complete"
+                        and isinstance(meta, dict)
+                        and meta.get("evidence_trace_available")
+                    )
+                    if not evidence_available:
+                        notes.append("proxy_response_evidence_unavailable")
                 return AgentRun(
                     calls=calls,
                     client_tool_calls=client_calls,
@@ -577,6 +623,7 @@ class CliDriver(ABC):
                     call_source=call_source,
                     hit_max_turns=False,
                     wall_time_s=round(wall, 3),
+                    evidence_trace_available=evidence_available,
                     experimental=self.experimental,
                     notes=notes,
                 )
@@ -607,6 +654,18 @@ class CliDriver(ABC):
                 if proxy_source == "proxy":
                     output.call_source = "proxy"
 
+            evidence_available = False
+            if evidence_active and output.call_source == "proxy":
+                _proxy_calls, status = load_proxy_sidecar(sidecar)
+                meta = status.get("meta") if isinstance(status, dict) else None
+                evidence_available = bool(
+                    status.get("state") == "complete"
+                    and isinstance(meta, dict)
+                    and meta.get("evidence_trace_available")
+                )
+                if not evidence_available:
+                    notes.append("proxy_response_evidence_unavailable")
+
             self.finalize_run(proc, output=output, notes=notes)
             return AgentRun(
                 calls=output.calls,
@@ -620,6 +679,7 @@ class CliDriver(ABC):
                 call_source=output.call_source,
                 hit_max_turns=output.hit_max_turns,
                 wall_time_s=round(wall, 3),
+                evidence_trace_available=evidence_available,
                 experimental=self.experimental,
                 notes=notes,
             )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -14,7 +13,63 @@ from evals.token_counting import (
 )
 from evals.tool_names import split_plane_and_client_calls
 
-RESULT_SCHEMA_VERSION = 1
+RESULT_SCHEMA_VERSION = 3
+
+# ``apply_agent_result`` owns this explicit partition. A reflection test compares
+# it with every TaskResult dataclass field so additions cannot disappear silently.
+AGENT_RESULT_COPY_FIELDS = (
+    "final_text",
+    "stop_reason",
+    "provider_stop_reason",
+    "hit_max_iterations",
+    "result_pair_mismatch",
+    "token_count_failures",
+    "result_tokens_estimated",
+    "calls",
+    "num_calls",
+    "errored_calls",
+    "total_result_tokens",
+    "usage_per_iteration",
+    "cum_input_tokens",
+    "cum_input_tokens_reason",
+    "wall_time_s",
+    "client_tool_calls",
+    "client_tool_call_count",
+    "result_tokens_mode",
+    "result_token_count_method",
+    "usage_scope",
+    "call_source",
+    "evidence_trace_available",
+    "driver_raw_ref",
+    "driver_notes",
+    "usage",
+    "usage_total",
+    "result_tokens_skipped_reason",
+)
+AGENT_RESULT_OPTIONAL_IDENTITY_FIELDS = ("provider", "model", "requested_model")
+TASK_RESULT_HARNESS_FIELDS = (
+    "schema_version",
+    "row_type",
+    "run_id",
+    "ts",
+    "git_sha",
+    "battery",
+    "label",
+    "driver",
+    "server",
+    "requested_tier",
+    "resolved_model",
+    "task_id",
+    "author",
+    "rep",
+    "expected_rows",
+    "success",
+    "verify_note",
+    "skipped",
+    "error",
+    "error_class",
+    "cleanup_error",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +87,6 @@ class CallRecord:
     """Persisted metrics for one Plane or client tool call."""
 
     tool: str
-    classification: str | None = None
     args_chars: int = 0
     result_tokens: int | None = None
     result_chars: int = 0
@@ -44,19 +98,21 @@ class CallRecord:
     action: str | None = None
     raw_tool: str | None = None
     result_tokens_skipped: str | None = None
+    # None means the response was not checked; [] means checked with no match.
+    observed_sentinels: list[str] | None = None
 
 
 @dataclass
 class AgentRun:
     """Normalized result of one agent task execution."""
 
-    # Plane MCP tools only for classification: {tool, args, origin='plane', raw_tool?}
+    # Plane MCP tools only: {tool, args, origin='plane', raw_tool?}
     calls: list[dict[str, Any]]
     final_text: str
     usage: Usage | dict[str, Any] | None
     stopped_reason: str
     raw_ref: str | None = None
-    # Client/harness built-ins (ToolSearch, Bash, …) — excluded from mispick metrics
+    # Client/harness built-ins (ToolSearch, Bash, …) are retained separately.
     client_tool_calls: list[dict[str, Any]] = field(default_factory=list)
     # Cache-aware run totals (CLI); do not put uncached-only input_tokens into cum_input_tokens
     usage_total: dict[str, Any] | None = None
@@ -75,6 +131,7 @@ class AgentRun:
     # means at least one result used the shared character estimate. None lets
     # the common row mapper determine the status from the recorded calls.
     result_tokens_estimated: bool | None = None
+    evidence_trace_available: bool = False
     provider: str | None = None
     model: str | None = None
     requested_model: str | None = None
@@ -89,7 +146,9 @@ class TaskResult:
 
     schema_version 0 marks rows written before this type existed; from_row defaults every
     field added since. Version 1 defines wall_time_s as CLI invocation time only — earlier
-    Claude/Antigravity/OpenCode rows also include a few ms of harness setup.
+    Claude/Antigravity/OpenCode rows also include a few ms of harness setup. Version 2 adds
+    run-completeness metadata and cleanup failure recording. Version 3 records only
+    response-evidence labels (never Plane response bodies) plus trace availability.
     """
 
     schema_version: int = RESULT_SCHEMA_VERSION
@@ -109,11 +168,13 @@ class TaskResult:
     task_id: str = ""
     author: str = ""
     rep: int = 0
+    expected_rows: int = 0
     success: bool = False
     verify_note: str = ""
     skipped: str | None = None
     error: str | None = None
     error_class: str | None = None
+    cleanup_error: str | None = None
     final_text: str = ""
     stop_reason: str | None = None
     provider_stop_reason: str | None = None
@@ -124,8 +185,6 @@ class TaskResult:
     calls: list[CallRecord] = field(default_factory=list)
     num_calls: int = 0
     errored_calls: int = 0
-    alternate_calls: int | None = 0
-    out_of_set_calls: int | None = 0
     total_result_tokens: int = 0
     usage_per_iteration: list[Usage] = field(default_factory=list)
     cum_input_tokens: int | None = 0
@@ -137,6 +196,7 @@ class TaskResult:
     result_token_count_method: str | None = None
     usage_scope: str | None = None
     call_source: str | None = None
+    evidence_trace_available: bool = False
     driver_raw_ref: str | None = None
     driver_notes: list[str] = field(default_factory=list)
     usage: Usage | dict[str, Any] | None = None
@@ -145,39 +205,12 @@ class TaskResult:
 
     def apply_agent_result(self, agent: TaskResult) -> None:
         """Copy the driver-owned portion of an agent result onto this task row."""
-        self.final_text = agent.final_text
-        self.stop_reason = agent.stop_reason
-        self.provider_stop_reason = agent.provider_stop_reason
-        self.hit_max_iterations = agent.hit_max_iterations
-        self.result_pair_mismatch = agent.result_pair_mismatch
-        self.token_count_failures = agent.token_count_failures
-        self.result_tokens_estimated = agent.result_tokens_estimated
-        self.calls = agent.calls
-        self.num_calls = agent.num_calls
-        self.errored_calls = agent.errored_calls
-        self.alternate_calls = agent.alternate_calls
-        self.out_of_set_calls = agent.out_of_set_calls
-        self.total_result_tokens = agent.total_result_tokens
-        self.usage_per_iteration = agent.usage_per_iteration
-        self.cum_input_tokens = agent.cum_input_tokens
-        self.cum_input_tokens_reason = agent.cum_input_tokens_reason
-        self.wall_time_s = agent.wall_time_s
-        self.client_tool_calls = agent.client_tool_calls
-        self.client_tool_call_count = agent.client_tool_call_count
-        self.result_tokens_mode = agent.result_tokens_mode
-        self.result_token_count_method = agent.result_token_count_method
-        self.usage_scope = agent.usage_scope
-        self.call_source = agent.call_source
-        self.driver_raw_ref = agent.driver_raw_ref
-        self.driver_notes = agent.driver_notes
-        self.usage = agent.usage
-        self.usage_total = agent.usage_total
-        if agent.provider is not None:
-            self.provider = agent.provider
-        if agent.model is not None:
-            self.model = agent.model
-        if agent.requested_model is not None:
-            self.requested_model = agent.requested_model
+        for field_name in AGENT_RESULT_COPY_FIELDS:
+            setattr(self, field_name, getattr(agent, field_name))
+        for field_name in AGENT_RESULT_OPTIONAL_IDENTITY_FIELDS:
+            value = getattr(agent, field_name)
+            if value is not None:
+                setattr(self, field_name, value)
 
     def to_row(self) -> dict[str, Any]:
         """Serialize the versioned persisted JSONL row schema.
@@ -200,7 +233,6 @@ class TaskResult:
         for call in self.calls:
             item: dict[str, Any] = {
                 "tool": call.tool,
-                "class": call.classification,
                 "args_chars": call.args_chars,
                 "result_tokens": call.result_tokens,
                 "result_chars": call.result_chars,
@@ -215,6 +247,8 @@ class TaskResult:
                 item["action"] = call.action
             if call.result_tokens_skipped is not None:
                 item["result_tokens_skipped"] = call.result_tokens_skipped
+            if call.observed_sentinels is not None:
+                item["observed_sentinels"] = list(call.observed_sentinels)
             calls.append(item)
 
         client_calls = [
@@ -242,11 +276,13 @@ class TaskResult:
             "task_id": self.task_id,
             "author": self.author,
             "rep": self.rep,
+            "expected_rows": self.expected_rows,
             "success": self.success,
             "verify_note": self.verify_note,
             "skipped": self.skipped,
             "error": self.error,
             "error_class": self.error_class,
+            "cleanup_error": self.cleanup_error,
             "final_text": self.final_text,
             "stop_reason": self.stop_reason,
             "provider_stop_reason": self.provider_stop_reason,
@@ -257,8 +293,6 @@ class TaskResult:
             "calls": calls,
             "num_calls": self.num_calls,
             "errored_calls": self.errored_calls,
-            "alternate_calls": self.alternate_calls,
-            "out_of_set_calls": self.out_of_set_calls,
             "total_result_tokens": self.total_result_tokens,
             "usage_per_iteration": [usage_row(item) for item in self.usage_per_iteration],
             "cum_input_tokens": self.cum_input_tokens,
@@ -270,6 +304,7 @@ class TaskResult:
             "result_token_count_method": self.result_token_count_method,
             "usage_scope": self.usage_scope,
             "call_source": self.call_source,
+            "evidence_trace_available": self.evidence_trace_available,
             "driver_raw_ref": self.driver_raw_ref,
             "driver_notes": list(self.driver_notes),
             "usage": usage_row(self.usage) if isinstance(self.usage, Usage) else self.usage,
@@ -283,7 +318,7 @@ class TaskResult:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> TaskResult:
-        """Read current or pre-versioned persisted rows with stable defaults."""
+        """Read a persisted row, retaining defaults for unrelated older fields."""
         raw_calls = row.get("calls") if isinstance(row.get("calls"), list) else []
         calls: list[CallRecord] = []
         for raw in raw_calls:
@@ -292,7 +327,6 @@ class TaskResult:
             calls.append(
                 CallRecord(
                     tool=str(raw.get("tool") or ""),
-                    classification=(str(raw["class"]) if raw.get("class") is not None else None),
                     args_chars=int(raw.get("args_chars") or 0),
                     result_tokens=(int(raw["result_tokens"]) if raw.get("result_tokens") is not None else None),
                     result_chars=int(raw.get("result_chars") or 0),
@@ -310,6 +344,11 @@ class TaskResult:
                     action=(str(raw["action"]) if raw.get("action") is not None else None),
                     result_tokens_skipped=(
                         str(raw["result_tokens_skipped"]) if raw.get("result_tokens_skipped") is not None else None
+                    ),
+                    observed_sentinels=(
+                        [str(value) for value in raw["observed_sentinels"]]
+                        if isinstance(raw.get("observed_sentinels"), list)
+                        else None
                     ),
                 )
             )
@@ -342,8 +381,6 @@ class TaskResult:
                     )
                 )
 
-        alternate_default = sum(1 for call in calls if call.classification == "alternate")
-        out_of_set_default = sum(1 for call in calls if call.classification == "out_of_set")
         return cls(
             schema_version=int(row.get("schema_version") or 0),
             row_type=(str(row["row_type"]) if row.get("row_type") is not None else None),
@@ -362,11 +399,13 @@ class TaskResult:
             task_id=str(row.get("task_id") or ""),
             author=str(row.get("author") or ""),
             rep=int(row.get("rep") or 0),
+            expected_rows=int(row.get("expected_rows") or 0),
             success=bool(row.get("success")),
             verify_note=str(row.get("verify_note") or ""),
             skipped=(str(row["skipped"]) if row.get("skipped") is not None else None),
             error=(str(row["error"]) if row.get("error") is not None else None),
             error_class=(str(row["error_class"]) if row.get("error_class") is not None else None),
+            cleanup_error=(str(row["cleanup_error"]) if row.get("cleanup_error") is not None else None),
             final_text=str(row.get("final_text") or ""),
             stop_reason=(str(row["stop_reason"]) if row.get("stop_reason") is not None else None),
             provider_stop_reason=(
@@ -384,20 +423,6 @@ class TaskResult:
                 row.get("errored_calls")
                 if row.get("errored_calls") is not None
                 else sum(1 for call in calls if call.is_error)
-            ),
-            alternate_calls=(
-                int(row["alternate_calls"])
-                if row.get("alternate_calls") is not None
-                else None
-                if "alternate_calls" in row
-                else alternate_default
-            ),
-            out_of_set_calls=(
-                int(row["out_of_set_calls"])
-                if row.get("out_of_set_calls") is not None
-                else None
-                if "out_of_set_calls" in row
-                else out_of_set_default
             ),
             total_result_tokens=int(
                 row.get("total_result_tokens")
@@ -422,6 +447,7 @@ class TaskResult:
             ),
             usage_scope=(str(row["usage_scope"]) if row.get("usage_scope") is not None else None),
             call_source=(str(row["call_source"]) if row.get("call_source") is not None else None),
+            evidence_trace_available=bool(row.get("evidence_trace_available")),
             driver_raw_ref=(str(row["driver_raw_ref"]) if row.get("driver_raw_ref") is not None else None),
             driver_notes=[str(item) for item in row.get("driver_notes") or []],
             usage=row.get("usage") if isinstance(row.get("usage"), dict) else None,
@@ -436,16 +462,12 @@ class TaskResult:
 
 def agent_run_to_task_result(
     run: AgentRun,
-    *,
-    optimal: set[str],
-    alternate: set[str],
-    classify: Callable[[str, set[str], set[str]], str],
 ) -> TaskResult:
     """Map an ``AgentRun`` onto the typed driver-owned portion of a task result.
 
-    Only Plane MCP tools count toward num_calls and mispicks; client built-ins go to
-    client_tool_calls. CLI drivers never fill cum_input_tokens from bare usage.input_tokens
-    — under Claude Code that is uncached-only and misreads cached runs as ~10 tokens.
+    Only Plane MCP tools count toward num_calls; client built-ins go to client_tool_calls.
+    CLI drivers never fill cum_input_tokens from bare usage.input_tokens — under Claude
+    Code that is uncached-only and misreads cached runs as ~10 tokens.
     """
     # Re-split in case callers passed a mixed list
     plane_src, client_extra = split_plane_and_client_calls(list(run.calls))
@@ -484,7 +506,6 @@ def agent_run_to_task_result(
 
         rec = CallRecord(
             tool=str(tool),
-            classification=classify(str(tool), optimal, alternate),
             args_chars=args_chars,
             result_tokens=result_tokens,
             result_chars=result_chars,
@@ -493,6 +514,11 @@ def agent_run_to_task_result(
             result_tokens_estimated=bool(estimated),
             result_token_count_method=str(count_method),
             duration_ms=c.get("duration_ms"),
+            observed_sentinels=(
+                [str(value) for value in c["observed_sentinels"]]
+                if isinstance(c.get("observed_sentinels"), list)
+                else None
+            ),
         )
         # Action-dispatch surfaces: the action arg IS the second half of the
         # tool choice — keep it (args content is otherwise not persisted).
@@ -522,8 +548,6 @@ def agent_run_to_task_result(
         stop_reason = stop_reason if stop_reason not in ("end_turn", "completed", None, "") else "max_turns"
 
     errored = sum(1 for c in calls if c.is_error)
-    alternate_n = sum(1 for c in calls if c.classification == "alternate")
-    out_of_set_n = sum(1 for c in calls if c.classification == "out_of_set")
 
     # CLI path: never write misleading cum_input_tokens from uncached-only field.
     # usage_total is driver-owned — do not re-derive it here (Claude vs Codex
@@ -578,8 +602,6 @@ def agent_run_to_task_result(
         client_tool_calls=client_tool_calls,
         client_tool_call_count=len(client_tool_calls),
         errored_calls=errored,
-        alternate_calls=alternate_n,
-        out_of_set_calls=out_of_set_n,
         total_result_tokens=sum(int(c.result_tokens or 0) for c in calls),
         usage_per_iteration=usage_per_iteration,
         cum_input_tokens=cum_input,
@@ -595,6 +617,7 @@ def agent_run_to_task_result(
         result_token_count_method=result_token_count_method,
         usage_scope=run.usage_scope,
         call_source=run.call_source,
+        evidence_trace_available=run.evidence_trace_available,
         driver_raw_ref=run.raw_ref,
         driver_notes=list(run.notes),
         usage=run.usage,
@@ -607,22 +630,16 @@ def agent_run_to_task_result(
 
 def agent_run_to_harness_dict(
     run: AgentRun,
-    *,
-    optimal: set[str],
-    alternate: set[str],
-    classify: Callable[[str, set[str], set[str]], str],
 ) -> dict[str, Any]:
-    """Compatibility wrapper returning the public persisted-row dictionary."""
-    return agent_run_to_task_result(
-        run,
-        optimal=optimal,
-        alternate=alternate,
-        classify=classify,
-    ).to_row()
+    """Map an agent run to the public persisted-row dictionary."""
+    return agent_run_to_task_result(run).to_row()
 
 
 __all__ = [
+    "AGENT_RESULT_COPY_FIELDS",
+    "AGENT_RESULT_OPTIONAL_IDENTITY_FIELDS",
     "RESULT_SCHEMA_VERSION",
+    "TASK_RESULT_HARNESS_FIELDS",
     "AgentRun",
     "CallRecord",
     "TaskResult",

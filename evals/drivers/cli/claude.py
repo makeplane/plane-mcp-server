@@ -171,7 +171,7 @@ def parse_claude_transcript_calls(transcript_path: Path) -> list[dict[str, Any]]
     """Parse ``tool_use`` blocks from a Claude Code session JSONL transcript.
 
     Returns tagged calls (``origin`` plane|client). Use
-    ``split_plane_and_client_calls`` before classification.
+    ``split_plane_and_client_calls`` before counting.
     """
     calls: list[dict[str, Any]] = []
     if not transcript_path.is_file():

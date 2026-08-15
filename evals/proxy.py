@@ -19,6 +19,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+from evals.evidence import (
+    EVIDENCE_SENTINELS_ENV,
+    configured_evidence_labels,
+    consume_evidence_config,
+    normalize_evidence_sentinels,
+    normalize_evidence_targets,
+    observed_sentinel_labels,
+)
+
 # Single post-EOF / child-exit deadline for the whole shutdown sequence.
 SHUTDOWN_DEADLINE_S = 10.0
 READ_CHUNK = 65536
@@ -44,6 +53,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--record-result-payloads",
         action="store_true",
         help="Also store serialized tool-result text (off by default; may contain workspace data)",
+    )
+    p.add_argument(
+        "--evidence-file",
+        type=Path,
+        help="One-shot target-evidence configuration consumed before the MCP child starts",
     )
     p.add_argument(
         "command",
@@ -92,6 +106,9 @@ def scrub_child_pythonpath(env: dict[str, str] | None = None) -> dict[str, str]:
     ``plane_mcp`` from its own venv).
     """
     base = dict(env if env is not None else os.environ)
+    # Matching configuration belongs only to the recorder. The real Plane MCP server
+    # neither needs nor receives hidden sentinel values.
+    base.pop(EVIDENCE_SENTINELS_ENV, None)
     root = str(REPO_ROOT)
     raw = base.get("PYTHONPATH", "")
     if not raw:
@@ -114,9 +131,19 @@ class SidecarRecorder:
     last sidecar line even if daemon pumps keep running briefly.
     """
 
-    def __init__(self, log_path: Path, *, record_result_payloads: bool = False) -> None:
+    def __init__(
+        self,
+        log_path: Path,
+        *,
+        record_result_payloads: bool = False,
+        evidence_sentinels: dict[str, Any] | None = None,
+        evidence_targets: dict[str, Any] | None = None,
+    ) -> None:
         self.log_path = log_path
         self.record_result_payloads = record_result_payloads
+        self.evidence_sentinels = normalize_evidence_sentinels(evidence_sentinels)
+        self.evidence_targets = normalize_evidence_targets(evidence_targets)
+        self.evidence_active = bool(configured_evidence_labels(self.evidence_sentinels, self.evidence_targets))
         self._lock = threading.Lock()
         self._pending: dict[Any, dict[str, Any]] = {}
         self._seq = 0
@@ -226,6 +253,14 @@ class SidecarRecorder:
             "duration_ms": duration_ms,
             "seq": pending["seq"],
         }
+        if self.evidence_active:
+            # Persist labels only. The matching values and result body stay in memory.
+            row["observed_sentinels"] = observed_sentinel_labels(
+                result_text,
+                self.evidence_sentinels,
+                request_args=pending["args"],
+                evidence_targets=self.evidence_targets,
+            )
         if self.record_result_payloads:
             row["result_text"] = result_text
         self._append(row)
@@ -246,6 +281,7 @@ class SidecarRecorder:
                 "pending_left": len(self._pending),
                 "child_killed": self.child_killed,
                 "pumps_alive": self.pumps_alive,
+                "evidence_trace_available": self.evidence_active,
             }
             line = json.dumps(row, default=str, ensure_ascii=False) + "\n"
             with self.log_path.open("a", encoding="utf-8") as fh:
@@ -395,6 +431,8 @@ def run_proxy(
     log_path: Path,
     *,
     record_result_payloads: bool = False,
+    evidence_sentinels: dict[str, Any] | None = None,
+    evidence_targets: dict[str, Any] | None = None,
 ) -> int:
     """Spawn ``command`` as the real MCP server and relay with recording.
 
@@ -403,7 +441,12 @@ def run_proxy(
     crash paths. Pump threads are daemon so a blocked write cannot hold the
     process past the shutdown deadline.
     """
-    recorder = SidecarRecorder(log_path, record_result_payloads=record_result_payloads)
+    recorder = SidecarRecorder(
+        log_path,
+        record_result_payloads=record_result_payloads,
+        evidence_sentinels=evidence_sentinels,
+        evidence_targets=evidence_targets,
+    )
     child: subprocess.Popen[bytes] | None = None
     # Scrub repo PYTHONPATH so the real server does not import from this tree.
     child_env = scrub_child_pythonpath()
@@ -571,6 +614,8 @@ def run_proxy(
         try:
             recorder.write_meta()
         except Exception as exc:
+            # Safe to continue: no meta marks the sidecar incomplete, so the parent
+            # driver rejects it as authoritative and falls back to the CLI trace.
             print(f"evals.proxy: failed to write proxy_meta: {exc}", file=sys.stderr)
 
 
@@ -585,10 +630,13 @@ def main(argv: list[str] | None = None) -> int:
         # Already a session leader, or platform forbids setsid — continue.
         pass
     args = parse_args(argv)
+    evidence_sentinels, evidence_targets = consume_evidence_config(args.evidence_file)
     return run_proxy(
         list(args.command),
         Path(args.log),
         record_result_payloads=bool(args.record_result_payloads),
+        evidence_sentinels=evidence_sentinels,
+        evidence_targets=evidence_targets,
     )
 
 
