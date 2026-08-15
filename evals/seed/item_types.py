@@ -9,6 +9,60 @@ from plane.models.work_item_types import CreateWorkItemType
 
 from .projects import is_plan_gate
 
+BUG_TYPE_NAME = "Bug"
+INCIDENT_TYPE_NAME = "Incident"
+SEVERITY_PROPERTY_NAME = "Severity"
+
+
+def is_work_item_type_named(row: Any, name: str) -> bool:
+    """Return whether a type row has the exact fixture name, ignoring case/space."""
+    return (getattr(row, "name", None) or "").strip().casefold() == name.casefold()
+
+
+def is_severity_property(row: Any) -> bool:
+    """Return whether a property row is the S1 Severity fixture."""
+    display = getattr(row, "display_name", None) or getattr(row, "name", None) or ""
+    return display.strip().casefold() == SEVERITY_PROPERTY_NAME.casefold()
+
+
+def list_workspace_work_item_types(plane: PlaneClient, workspace_slug: str) -> list[Any]:
+    """List workspace-owned work-item types using the SDK's non-paginated surface."""
+    result = plane.workspace_work_item_types.list(workspace_slug=workspace_slug)
+    return list((result.results if hasattr(result, "results") else result) or [])
+
+
+def workspace_owns_work_item_types(plane: PlaneClient, workspace_slug: str) -> bool:
+    """Return the authoritative workspace-vs-project ownership mode for types."""
+    features = plane.workspaces.get_features(workspace_slug=workspace_slug)
+    dump = features.model_dump() if hasattr(features, "model_dump") else {}
+    return bool(dump.get("is_work_item_types_enabled"))
+
+
+def list_workspace_properties_for_type(
+    plane: PlaneClient,
+    workspace_slug: str,
+    type_name: str,
+) -> list[Any]:
+    """Resolve full workspace property rows linked to every type named ``type_name``."""
+    item_types = list_workspace_work_item_types(plane, workspace_slug)
+    target_types = [row for row in item_types if is_work_item_type_named(row, type_name)]
+    if not target_types:
+        return []
+
+    linked_ids: set[str] = set()
+    for item_type in target_types:
+        linked = plane.workspace_work_item_types.properties.list(
+            workspace_slug=workspace_slug,
+            type_id=item_type.id,
+        )
+        for value in linked or []:
+            object_id = getattr(value, "id", None) or value
+            linked_ids.add(str(object_id))
+
+    properties = plane.workspace_work_item_properties.list(workspace_slug=workspace_slug)
+    rows = list((properties.results if hasattr(properties, "results") else properties) or [])
+    return [row for row in rows if getattr(row, "id", None) is not None and str(row.id) in linked_ids]
+
 
 def seed_item_type(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:
     """Create or resolve a 'Bug' work item type.
@@ -17,12 +71,11 @@ def seed_item_type(plane: PlaneClient, workspace_slug: str, context: dict[str, A
     Workspace feature probe uses the real key `is_work_item_types_enabled` (F10).
     """
     project_id = context["project_id"]
-    target = "Bug"
+    target = BUG_TYPE_NAME
     try:
-        features = plane.workspaces.get_features(workspace_slug=workspace_slug)
-        dump = features.model_dump() if hasattr(features, "model_dump") else {}
-        # Real API key (extra='allow' on WorkspaceFeature); never trust the fictional work_item_types key alone.
-        workspace_owns = bool(dump.get("is_work_item_types_enabled"))
+        # Real API key (extra='allow' on WorkspaceFeature); never trust the fictional
+        # work_item_types key alone.
+        workspace_owns = workspace_owns_work_item_types(plane, workspace_slug)
 
         if workspace_owns:
             existing = next(
@@ -74,6 +127,6 @@ def seed_item_type(plane: PlaneClient, workspace_slug: str, context: dict[str, A
     except Exception as exc:
         if is_plan_gate(exc):
             context["bug_type"] = None
-            context["bug_type_skip_reason"] = f"bug_type plan-gated: {exc}"
+            context["bug_type_skip_reason"] = "env:plan-gated:work-item-types"
             return
         raise

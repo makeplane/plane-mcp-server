@@ -1,7 +1,7 @@
 """Characterization of `is_plan_gate` against the payloads `api/` actually returns.
 
 A gate becomes an environment skip and anything else stays a real error, so a
-misclassification here either hides a defect or invents one.
+a wrong category here either hides a defect or invents one.
 """
 
 from __future__ import annotations

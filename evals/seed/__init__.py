@@ -1,12 +1,12 @@
 """Evaluation fixture creation and removal."""
 
-from .build import remove_stale_workspace_artifacts, seed
-from .build import remove_stale_workspace_artifacts as _preclean_ws3_workspace_artifacts
+from .build import check_workspace_fixture_collisions, collision_categories, seed
 from .client import make_plane_client
 from .customers import (
     CUSTOMER_NAME,
     CUSTOMER_REQUEST_NAME,
     EVALUATION_CUSTOMER_PROPERTY_NAME,
+    is_evaluation_customer_name,
     seed_customer,
 )
 from .customers import (
@@ -14,12 +14,18 @@ from .customers import (
 )
 from .cycles import CYCLE_CURRENT, CYCLE_PAST, seed_cycles
 from .intake import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE, seed_intake
-from .item_types import seed_item_type
+from .item_types import (
+    BUG_TYPE_NAME,
+    INCIDENT_TYPE_NAME,
+    SEVERITY_PROPERTY_NAME,
+    seed_item_type,
+)
 from .labels import LABEL_NAMES, seed_labels
 from .modules import MODULE_COMPLETED_TITLES, MODULE_NAME, seed_module
 from .plan import seed_plan
 from .projects import (
     MAIN_PROJECT_BUG_TITLES,
+    PLANE_PROJECT_IDENTIFIER_MAX_LENGTH,
     SECOND_PROJECT_BUG_TITLES,
     create_project_with_identifier_retry,
     enable_project_features,
@@ -44,7 +50,7 @@ from .releases import (
 from .releases import (
     EVALUATION_RELEASE_TAG_VERSION as DEBIAS_RELEASE_TAG_VERSION,
 )
-from .remove import teardown
+from .remove import CleanupFailure, TeardownError, teardown
 from .work_items import (
     BLOCKING_REFERENCE_ADDRESS,
     BLOCKING_SOURCE_TITLE,
@@ -101,8 +107,10 @@ from .work_items import (
 from .work_items import require_activities as _gate_activity_worker
 
 __all__ = [
+    "BUG_TYPE_NAME",
     "CUSTOMER_NAME",
     "CUSTOMER_REQUEST_NAME",
+    "CleanupFailure",
     "CYCLE_CURRENT",
     "CYCLE_PAST",
     "DEBIAS_CUSTOMER_PROP_DISPLAY",
@@ -114,11 +122,13 @@ __all__ = [
     "INTAKE_BILLING_TITLE",
     "INTAKE_SPAM_TITLE",
     "ITEM_FIXTURES",
+    "INCIDENT_TYPE_NAME",
     "LABEL_NAMES",
     "MAIN_PROJECT_BUG_TITLES",
     "MODULE_COMPLETED_TITLES",
     "MODULE_NAME",
     "PAYMENT_WEBHOOK_TITLE",
+    "PLANE_PROJECT_IDENTIFIER_MAX_LENGTH",
     "R1_TITLE",
     "R3_DUE_TITLES",
     "R5_COMMENT_PHRASES",
@@ -128,7 +138,9 @@ __all__ = [
     "RELEASE_CHANGELOG_TEXT",
     "RELEASE_NAME",
     "SECOND_PROJECT_BUG_TITLES",
+    "SEVERITY_PROPERTY_NAME",
     "SIDEBAR_TITLE",
+    "TeardownError",
     "UNFINISHED_CYCLE_TITLES",
     "W2_TITLE",
     "W3_TITLE",
@@ -144,16 +156,17 @@ __all__ = [
     "CHECKOUT_COMMENT_PHRASES",
     "CHECKOUT_TIMEOUT_TITLE",
     "_gate_activity_worker",
-    "_preclean_ws3_workspace_artifacts",
+    "check_workspace_fixture_collisions",
+    "collision_categories",
     "create_project_with_identifier_retry",
     "enable_project_features",
     "enable_workspace_features",
     "find_completed_state",
     "is_identifier_collision",
+    "is_evaluation_customer_name",
     "is_plan_gate",
     "list_states",
     "make_plane_client",
-    "remove_stale_workspace_artifacts",
     "require_activities",
     "secrets",
     "seed",

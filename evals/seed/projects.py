@@ -13,8 +13,18 @@ from plane.models.projects import CreateProject, ProjectFeature, UpdateProject
 from plane.models.work_items import CreateWorkItem
 from plane.models.workspaces import WorkspaceFeature
 
-# Soft-deleted projects reserve identifiers; create may 409 — retry with a new suffix.
-PROJECT_CREATE_ATTEMPT_LIMIT = 3
+from evals.errors import TaskSkipped
+from evals.evidence import set_target_evidence
+
+from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
+
+# Plane's project identifier field is capped at 12 characters. Keep two characters
+# for the eval prefix and use eight hex characters (32 bits), leaving two spare.
+PLANE_PROJECT_IDENTIFIER_MAX_LENGTH = 12
+PROJECT_IDENTIFIER_SUFFIX_LENGTH = 8
+# Soft-deleted projects reserve identifiers; a long-lived workspace needs more than
+# three chances even with the larger suffix space.
+PROJECT_CREATE_ATTEMPT_LIMIT = 8
 
 MAIN_PROJECT_BUG_TITLES = ("Main bug alpha", "Main bug beta")
 SECOND_PROJECT_BUG_TITLES = (
@@ -55,10 +65,9 @@ def plan_gate_skips(feature: str) -> Iterator[None]:
 
     An uncaught seed exception becomes infra_seed and kills the task-rep; a capability the
     plan excludes is an environment fact, recorded like L2's missing activity worker.
-    TaskSkipped is imported inside because evals.tasks imports this package at module load.
+    ``TaskSkipped`` lives in a neutral module, so seed and task packages can import in
+    either order without a cycle.
     """
-    from evals.tasks.skip import TaskSkipped
-
     try:
         yield
     except Exception as exc:
@@ -92,16 +101,22 @@ def create_project_with_identifier_retry(
     """Create a project, regenerating the identifier suffix on soft-delete collisions.
 
     Plane soft-deletes reserve identifiers; a 409 (or identifier-in-message error)
-    triggers a new random 4-char hex suffix. At most three attempts are made,
+    triggers a new random 8-char hex suffix. At most eight attempts are made,
     then the last collision error is raised again.
     """
-    suffix = (initial_suffix or "")[:4].upper()
-    if len(suffix) < 4:
-        suffix = (suffix + secrets.token_hex(2).upper())[:4]
+    if len(identifier_prefix) + PROJECT_IDENTIFIER_SUFFIX_LENGTH > PLANE_PROJECT_IDENTIFIER_MAX_LENGTH:
+        raise ValueError(
+            f"identifier prefix {identifier_prefix!r} leaves fewer than "
+            f"{PROJECT_IDENTIFIER_SUFFIX_LENGTH} suffix characters under Plane's "
+            f"{PLANE_PROJECT_IDENTIFIER_MAX_LENGTH}-character limit"
+        )
+    suffix = (initial_suffix or "")[:PROJECT_IDENTIFIER_SUFFIX_LENGTH].upper()
+    if len(suffix) < PROJECT_IDENTIFIER_SUFFIX_LENGTH:
+        suffix = (suffix + secrets.token_hex(4).upper())[:PROJECT_IDENTIFIER_SUFFIX_LENGTH]
     last_exc: BaseException | None = None
     for attempt in range(PROJECT_CREATE_ATTEMPT_LIMIT):
         if attempt > 0:
-            suffix = secrets.token_hex(2).upper()  # 4 hex chars
+            suffix = secrets.token_hex(4).upper()  # 8 hex chars / 32 bits
         identifier = f"{identifier_prefix}{suffix}"
         try:
             return plane.projects.create(
@@ -129,8 +144,8 @@ def workspace_feature_state(plane: PlaneClient, workspace_slug: str) -> dict[str
     """
     try:
         features = plane.workspaces.get_features(workspace_slug=workspace_slug)
-    except Exception:
-        return {"customers": None}
+    except Exception as exc:
+        raise RuntimeError(f"workspace feature snapshot failed before mutation: {exc}") from exc
     dump = features.model_dump() if hasattr(features, "model_dump") else {}
     value = dump.get("customers")
     if value is None:
@@ -204,7 +219,7 @@ def enable_project_features(
 
 
 def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:
-    """Seed a second project with more open Bug items than the main project."""
+    """Seed two API-confirmed Bug counts, randomising R6's winner per row."""
     from .item_types import seed_item_type
 
     run_prefix = context["run8"]
@@ -214,13 +229,11 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         workspace_slug,
         name=name,
         identifier_prefix="EB",
-        initial_suffix=run_prefix[:4].upper(),
+        initial_suffix=run_prefix.upper(),
     )
     context["second_project_id"] = project.id
     context["second_project_name"] = name
     context["second_project_identifier"] = getattr(project, "identifier", None)
-    # Track for teardown (project delete covers it; still record).
-    context["second_project_ids"] = [project.id]
     enable_project_features(plane, workspace_slug, project.id)
 
     # Ensure Bug type exists on both projects.
@@ -246,9 +259,24 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
                     raise
 
     main_id = context["project_id"]
-    # Main project: fewer bugs
+    task_id = str(context.get("task_id") or "")
+    if task_id == "R6":
+        rng = random_truth_rng(context, "R6:project-bugs")
+        hidden_token = random_truth_token(context, "R6:project-bugs")
+        main_count, second_count = rng.sample(range(1, 6), 2)
+        main_titles = tuple(f"Main bug case {hidden_token}-{index + 1}" for index in range(main_count))
+        second_titles = tuple(f"Second bug case {hidden_token}-{index + 1}" for index in range(second_count))
+        record_randomized_truth(
+            context,
+            "R6.open_bug_counts",
+            {"intended_main": main_count, "intended_second": second_count},
+        )
+    else:
+        main_titles = MAIN_PROJECT_BUG_TITLES
+        second_titles = SECOND_PROJECT_BUG_TITLES
+
     main_bug_ids: list[str] = []
-    for title in MAIN_PROJECT_BUG_TITLES:
+    for title in main_titles:
         item = plane.work_items.create(
             workspace_slug=workspace_slug,
             project_id=main_id,
@@ -257,15 +285,51 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         main_bug_ids.append(item.id)
         context["items"][title] = item.id
         context["item_ids"].append(item.id)
-    # Second project: more bugs
     second_bug_ids: list[str] = []
-    for title in SECOND_PROJECT_BUG_TITLES:
+    for title in second_titles:
         item = plane.work_items.create(
             workspace_slug=workspace_slug,
             project_id=project.id,
             data=CreateWorkItem(name=title, priority="high", type_id=str(bug_id)),  # type: ignore[arg-type]
         )
         second_bug_ids.append(item.id)
-    context["r6_main_bug_count"] = len(main_bug_ids)
-    context["r6_second_bug_count"] = len(second_bug_ids)
-    context["r6_more_bugs_project"] = name  # second project has more
+    if task_id != "R6":
+        context["r6_main_bug_count"] = len(main_bug_ids)
+        context["r6_second_bug_count"] = len(second_bug_ids)
+        context["r6_more_bugs_project"] = name
+        return
+
+    def confirmed_open_bug_count(project_id: str, work_item_ids: list[str]) -> int:
+        count = 0
+        for work_item_id in work_item_ids:
+            detail = plane.work_items.retrieve(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_id=work_item_id,
+            )
+            if str(getattr(detail, "type_id", None) or "") != str(bug_id):
+                continue
+            if getattr(detail, "completed_at", None) or getattr(detail, "archived_at", None):
+                continue
+            count += 1
+        return count
+
+    confirmed_main = confirmed_open_bug_count(main_id, main_bug_ids)
+    confirmed_second = confirmed_open_bug_count(str(project.id), second_bug_ids)
+    if confirmed_main == confirmed_second:
+        raise RuntimeError(f"seed R6: API-confirmed open Bug counts tie ({confirmed_main} each)")
+    main_project = plane.projects.retrieve(workspace_slug=workspace_slug, project_id=main_id)
+    second_project = plane.projects.retrieve(workspace_slug=workspace_slug, project_id=project.id)
+    main_name = str(getattr(main_project, "name", None) or "")
+    second_name = str(getattr(second_project, "name", None) or "")
+    if not main_name or not second_name:
+        raise RuntimeError("seed R6: API project readback returned a project without a name")
+    context["r6_main_bug_count"] = confirmed_main
+    context["r6_second_bug_count"] = confirmed_second
+    context["r6_more_bugs_project"] = main_name if confirmed_main > confirmed_second else second_name
+    context["randomized_truth"]["R6.open_bug_counts"]["confirmed"] = {
+        "main": confirmed_main,
+        "second": confirmed_second,
+        "winner": context["r6_more_bugs_project"],
+    }
+    set_target_evidence(context, [*main_titles, *second_titles], target_ids=[main_id, project.id])

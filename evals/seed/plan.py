@@ -10,7 +10,6 @@ from .modules import MODULE_COMPLETED_TITLES, MODULE_NAME
 from .releases import RELEASE_NAME
 from .work_items import (
     CHECKOUT_TIMEOUT_TITLE,
-    DUE_THIS_WEEK_TITLES,
     PAYMENT_WEBHOOK_TITLE,
     WORK_ITEM_FIXTURES,
 )
@@ -22,10 +21,11 @@ def seed_plan(needs: set[str]) -> list[str]:
         "project: EVAL {run8} (identifier EV{XXXX})",
     ]
     if "items" in needs:
-        lines.append(f"items: {len(WORK_ITEM_FIXTURES)} work items (exactly 4 urgent open)")
-        lines.append(f"  - {PAYMENT_WEBHOOK_TITLE!r} (urgent, non-default started-group state)  # R1 target")
-        lines.append(f"  - {len(DUE_THIS_WEEK_TITLES)} assigned-to-me with due this week  # R3")
-        lines.append(f"  - comments on {CHECKOUT_TIMEOUT_TITLE!r}  # R5 discussion")
+        lines.append(f"items: {len(WORK_ITEM_FIXTURES)} work items (read truth randomised per row; default 4 urgent)")
+        lines.append(f"  - {PAYMENT_WEBHOOK_TITLE!r} (random started-group state for R1)")
+        lines.append("  - random assigned-to-me due-this-week selection  # R3")
+        lines.append(f"  - random comments on {CHECKOUT_TIMEOUT_TITLE!r}  # R5/L2")
+        lines.append(f"  - random attachment count on {PAYMENT_WEBHOOK_TITLE!r}  # L5")
     if "activity_feed" in needs:
         lines.append(
             f"activity_feed: gate that activities exist for {CHECKOUT_TIMEOUT_TITLE!r} "
@@ -39,7 +39,10 @@ def seed_plan(needs: set[str]) -> list[str]:
         )
     if "cycles" in needs:
         past_state = "ends tomorrow, still OPEN so it can be closed" if "cycles_open_past" in needs else "past-dated"
-        lines.append(f"cycles: {CYCLE_PAST!r} ({past_state}) + {CYCLE_CURRENT!r} (current); unfinished on past")
+        lines.append(
+            f"cycles: default {CYCLE_PAST!r} ({past_state}) + {CYCLE_CURRENT!r} (current); "
+            "R4 names/inventory randomised"
+        )
     if "module" in needs:
         lines.append(f"module: {MODULE_NAME!r} with {len(MODULE_COMPLETED_TITLES)} completed items")
     if "intake" in needs:
@@ -49,7 +52,7 @@ def seed_plan(needs: set[str]) -> list[str]:
     if "release" in needs:
         lines.append(f"release: {RELEASE_NAME!r} with changelog body (2 entries as plain text)")
     if "second_project" in needs:
-        lines.append("second_project: EVAL {run8} B with more open Bug-typed items than main (R6)")
+        lines.append("second_project: EVAL {run8} B with random unequal open Bug counts across both projects (R6)")
     if "leave_cycles_worklogs_off" in needs:
         lines.append(
             "feature_exclusions (S5): project cycles+worklogs OFF; workspace customers OFF "

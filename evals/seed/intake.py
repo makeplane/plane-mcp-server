@@ -7,8 +7,7 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.intake import CreateIntakeWorkItem, WorkItemForIntakeRequest
 
-INTAKE_BILLING_TITLE = "Billing: invoice PDF missing line items"
-INTAKE_SPAM_TITLE = "SPAM: cheap crypto pumps guaranteed"
+from evals.fixtures import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE
 
 
 def seed_intake(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:

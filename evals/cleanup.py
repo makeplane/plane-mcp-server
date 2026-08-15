@@ -1,7 +1,7 @@
-"""Delete leftover projects whose names start with a prefix (default ``"EVAL "``).
+"""Delete leftover eval projects or fixed-name workspace sentinels.
 
-``python -m evals.cleanup [--prefix "EVAL " | --yes]`` — dry-run lists only; ``--yes`` is
-required before anything is deleted. Credentials come from EVAL_PLANE_* via make_plane_client.
+``python -m evals.cleanup [--prefix "EVAL " | --sentinels] [--yes]`` — dry-run lists only;
+``--yes`` is required before anything is deleted. Credentials come from EVAL_PLANE_*.
 """
 
 from __future__ import annotations
@@ -11,6 +11,21 @@ import sys
 from typing import Any
 
 from plane.models.query_params import PaginatedQueryParams
+
+from evals.seed.customers import (
+    EVALUATION_CUSTOMER_PROPERTY_NAME,
+    is_evaluation_customer_name,
+)
+from evals.seed.item_types import (
+    BUG_TYPE_NAME,
+    INCIDENT_TYPE_NAME,
+    is_severity_property,
+    is_work_item_type_named,
+    list_workspace_properties_for_type,
+    list_workspace_work_item_types,
+)
+from evals.seed.releases import EVALUATION_RELEASE_TAG_VERSION
+from evals.seed.workspace import list_workspace_rows
 
 
 def list_projects_with_prefix(plane: Any, workspace_slug: str, prefix: str) -> list[Any]:
@@ -61,13 +76,126 @@ def delete_projects(
     return deleted, failed
 
 
+def list_sentinel_workspace_artifacts(plane: Any, workspace_slug: str) -> list[dict[str, Any]]:
+    """Return fixed-name workspace fixtures that can false-pass eval tasks."""
+    customers = plane.customers
+    specs = (
+        (
+            "customer",
+            customers,
+            lambda row: is_evaluation_customer_name(getattr(row, "name", None)),
+            lambda row: (getattr(row, "name", None) or "").strip(),
+        ),
+        (
+            "release_tag",
+            plane.releases.tags,
+            lambda row: (getattr(row, "version", None) or "").strip() == EVALUATION_RELEASE_TAG_VERSION,
+            lambda row: (getattr(row, "version", None) or "").strip(),
+        ),
+        (
+            "customer_property",
+            customers.properties,
+            lambda row: (
+                (getattr(row, "display_name", None) or getattr(row, "name", None) or "").strip().casefold()
+                == EVALUATION_CUSTOMER_PROPERTY_NAME.casefold()
+            ),
+            lambda row: (getattr(row, "display_name", None) or getattr(row, "name", None) or "").strip(),
+        ),
+    )
+    artifacts: list[dict[str, Any]] = []
+    for kind, api, matches, display_name in specs:
+        for row in list_workspace_rows(api, workspace_slug):
+            object_id = getattr(row, "id", None)
+            if object_id is not None and matches(row):
+                artifacts.append({"kind": kind, "id": object_id, "name": display_name(row)})
+
+    type_api = getattr(plane, "workspace_work_item_types", None)
+    if callable(getattr(type_api, "list", None)):
+        for row in list_workspace_work_item_types(plane, workspace_slug):
+            object_id = getattr(row, "id", None)
+            if object_id is not None and is_work_item_type_named(row, INCIDENT_TYPE_NAME):
+                artifacts.append({"kind": "work_item_type", "id": object_id, "name": INCIDENT_TYPE_NAME})
+
+    property_api = getattr(plane, "workspace_work_item_properties", None)
+    links_api = getattr(type_api, "properties", None)
+    if callable(getattr(property_api, "list", None)) and callable(getattr(links_api, "list", None)):
+        for row in list_workspace_properties_for_type(plane, workspace_slug, BUG_TYPE_NAME):
+            object_id = getattr(row, "id", None)
+            if object_id is not None and is_severity_property(row):
+                display = getattr(row, "display_name", None) or getattr(row, "name", None) or ""
+                artifacts.append({"kind": "work_item_property", "id": object_id, "name": display.strip()})
+    return artifacts
+
+
+def _sentinel_description(artifact: dict[str, Any]) -> str:
+    kind = str(artifact["kind"]).replace("_", " ")
+    return f"{kind} {artifact['name']!r} ({artifact['id']})"
+
+
+def delete_sentinel_workspace_artifacts(
+    plane: Any,
+    workspace_slug: str,
+    artifacts: list[dict[str, Any]],
+    *,
+    yes: bool,
+) -> tuple[int, int]:
+    """Delete explicitly selected sentinel artifacts. Returns (deleted, failed)."""
+    if not yes:
+        return 0, 0
+    deleted = failed = 0
+    for artifact in artifacts:
+        try:
+            if artifact["kind"] == "customer":
+                plane.customers.delete(workspace_slug=workspace_slug, customer_id=artifact["id"])
+            elif artifact["kind"] == "release_tag":
+                plane.releases.tags.delete(workspace_slug=workspace_slug, tag_id=artifact["id"])
+            elif artifact["kind"] == "customer_property":
+                plane.customers.properties.delete(workspace_slug=workspace_slug, property_id=artifact["id"])
+            elif artifact["kind"] == "work_item_type":
+                plane.workspace_work_item_types.delete(workspace_slug=workspace_slug, type_id=artifact["id"])
+            elif artifact["kind"] == "work_item_property":
+                plane.workspace_work_item_properties.delete(
+                    workspace_slug=workspace_slug,
+                    property_id=artifact["id"],
+                )
+            else:
+                raise ValueError(f"unknown sentinel kind: {artifact['kind']}")
+            deleted += 1
+            print(f"  deleted sentinel {_sentinel_description(artifact)}")
+        except Exception as exc:
+            failed += 1
+            print(f"  FAILED sentinel {_sentinel_description(artifact)}: {exc}", file=sys.stderr)
+    return deleted, failed
+
+
+def _cleanup_sentinels(plane: Any, workspace_slug: str, *, yes: bool) -> int:
+    artifacts = list_sentinel_workspace_artifacts(plane, workspace_slug)
+    print(f"workspace={workspace_slug} sentinel_matches={len(artifacts)}")
+    if not artifacts:
+        print("nothing to delete")
+        return 0
+    if not yes:
+        for artifact in artifacts:
+            print(f"  would delete sentinel {_sentinel_description(artifact)}")
+        print("dry-run: re-run with --sentinels --yes to delete these sentinel fixture(s)")
+        return 0
+    deleted, failed = delete_sentinel_workspace_artifacts(plane, workspace_slug, artifacts, yes=True)
+    print(f"summary: deleted={deleted} failed={failed} matched={len(artifacts)}")
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Clean up leftover EVAL projects (dry-run by default)")
+    p = argparse.ArgumentParser(description="Clean up leftover eval fixtures (dry-run by default)")
     p.add_argument("--prefix", type=str, default="EVAL ", help='Project name prefix (default: "EVAL ")')
+    p.add_argument(
+        "--sentinels",
+        action="store_true",
+        help="Clean fixed-name workspace sentinels instead of projects",
+    )
     p.add_argument(
         "--yes",
         action="store_true",
-        help="Actually delete matched projects (default is dry-run list only)",
+        help="Actually delete matched objects (default is dry-run list only)",
     )
     args = p.parse_args(argv)
 
@@ -78,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    if args.sentinels:
+        return _cleanup_sentinels(plane, workspace_slug, yes=args.yes)
 
     projects = list_projects_with_prefix(plane, workspace_slug, args.prefix)
     print(f"workspace={workspace_slug} prefix={args.prefix!r} matches={len(projects)}")

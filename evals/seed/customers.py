@@ -7,11 +7,22 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.customers import CreateCustomer, CreateCustomerRequest
 
+from evals.fixtures import (
+    CUSTOMER_NAME,
+    CUSTOMER_REQUEST_NAME,
+    EVALUATION_CUSTOMER_PROPERTY_NAME,
+    is_evaluation_customer_name,
+)
+
 from .projects import plan_gate_skips
 
-CUSTOMER_NAME = "Acme Corp"
-CUSTOMER_REQUEST_NAME = "SSO support"
-EVALUATION_CUSTOMER_PROPERTY_NAME = "Eval Industry"
+__all__ = [
+    "CUSTOMER_NAME",
+    "CUSTOMER_REQUEST_NAME",
+    "EVALUATION_CUSTOMER_PROPERTY_NAME",
+    "is_evaluation_customer_name",
+    "seed_customer",
+]
 
 
 def seed_customer(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:

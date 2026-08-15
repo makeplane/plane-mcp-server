@@ -8,14 +8,9 @@ from plane import PlaneClient
 from plane.models.modules import CreateModule
 from plane.models.work_items import CreateWorkItem, UpdateWorkItem
 
-from .work_items import find_completed_state, list_states
+from evals.fixtures import MODULE_COMPLETED_TITLES, MODULE_NAME
 
-MODULE_NAME = "Checkout revamp"
-MODULE_COMPLETED_TITLES = (
-    "Module done: cart totals",
-    "Module done: tax lines",
-    "Module done: shipping quote",
-)
+from .work_items import find_completed_state, list_states
 
 
 def seed_module(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:
