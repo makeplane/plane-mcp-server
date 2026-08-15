@@ -14,8 +14,9 @@ from plane.models.work_items import CreateWorkItem
 from plane.models.workspaces import WorkspaceFeature
 
 from evals.errors import TaskSkipped
-from evals.evidence import set_target_evidence
+from evals.evidence import set_target_evidence, set_target_grouped_count_evidence
 
+from .identities import record_seeded_entity
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
 
 # Plane's project identifier field is capped at 12 characters. Keep two characters
@@ -232,6 +233,7 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         initial_suffix=run_prefix.upper(),
     )
     context["second_project_id"] = project.id
+    record_seeded_entity(context, "project", project.id)
     context["second_project_name"] = name
     context["second_project_identifier"] = getattr(project, "identifier", None)
     enable_project_features(plane, workspace_slug, project.id)
@@ -285,6 +287,7 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         main_bug_ids.append(item.id)
         context["items"][title] = item.id
         context["item_ids"].append(item.id)
+        record_seeded_entity(context, "work_item", item.id)
     second_bug_ids: list[str] = []
     for title in second_titles:
         item = plane.work_items.create(
@@ -293,6 +296,7 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
             data=CreateWorkItem(name=title, priority="high", type_id=str(bug_id)),  # type: ignore[arg-type]
         )
         second_bug_ids.append(item.id)
+        record_seeded_entity(context, "work_item", item.id)
     if task_id != "R6":
         context["r6_main_bug_count"] = len(main_bug_ids)
         context["r6_second_bug_count"] = len(second_bug_ids)
@@ -333,3 +337,7 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         "winner": context["r6_more_bugs_project"],
     }
     set_target_evidence(context, [*main_titles, *second_titles], target_ids=[main_id, project.id])
+    set_target_grouped_count_evidence(
+        context,
+        {main_id: confirmed_main, str(project.id): confirmed_second},
+    )

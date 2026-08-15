@@ -10,6 +10,7 @@ from plane.models.work_items import CreateWorkItem, UpdateWorkItem
 
 from evals.fixtures import MODULE_COMPLETED_TITLES, MODULE_NAME
 
+from .identities import record_seeded_entity
 from .work_items import find_completed_state, list_states
 
 
@@ -26,6 +27,7 @@ def seed_module(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]
         data=CreateModule(name=MODULE_NAME, status="in-progress"),
     )
     context["module"] = {"id": module.id, "name": MODULE_NAME}
+    record_seeded_entity(context, "module", module.id)
     completed_ids: list[str] = []
     for title in MODULE_COMPLETED_TITLES:
         item = plane.work_items.create(
@@ -46,6 +48,7 @@ def seed_module(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]
         completed_ids.append(item.id)
         context["items"][title] = item.id
         context["item_ids"].append(item.id)
+        record_seeded_entity(context, "work_item", item.id)
     plane.modules.add_work_items(
         workspace_slug=workspace_slug,
         project_id=project_id,

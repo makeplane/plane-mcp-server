@@ -8,11 +8,12 @@ from typing import Any
 
 
 def random_truth_rng(context: dict[str, Any], namespace: str) -> random.Random:
-    """Return a reproducible RNG keyed by the full private run id and a namespace.
+    """Return a reproducible RNG keyed by the per-repetition fixture seed and a namespace.
 
-    Only the run-id prefix appears in the project name shown to the agent. The full id is
-    persisted on the result row, making a failed fixture reproducible without making its
-    hidden choices derivable from the prompt.
+    The caller supplies the repetition's private fixture seed as ``context["run_id"]``.
+    Its full value is persisted explicitly as ``TaskResult.fixture_seed_id``, making a
+    failed fixture reproducible without making later repetitions' independent choices
+    derivable from this one.
     """
     run_id = str(context.get("run_id") or "")
     if not run_id:
@@ -22,11 +23,11 @@ def random_truth_rng(context: dict[str, Any], namespace: str) -> random.Random:
 
 
 def random_truth_token(context: dict[str, Any], namespace: str, *, length: int = 10) -> str:
-    """Return a reproducible hidden token derived from the full private run id.
+    """Return a reproducible hidden token derived from the per-repetition fixture seed.
 
     Unlike the visible eight-character project prefix, this token depends on the full
-    run id and a task namespace. It gives response evidence a realistically unique value
-    without making failed fixture reproduction nondeterministic.
+    fixture seed id and a task namespace. It gives response evidence a realistically unique
+    value without making failed fixture reproduction nondeterministic.
     """
     run_id = str(context.get("run_id") or "")
     if not run_id:
@@ -37,8 +38,9 @@ def random_truth_token(context: dict[str, Any], namespace: str, *, length: int =
 
 
 def record_randomized_truth(context: dict[str, Any], key: str, value: Any) -> None:
-    """Retain the chosen hidden value in seed context for diagnostics."""
+    """Retain hidden truth in memory and separately register its persistable namespace."""
     context.setdefault("randomized_truth", {})[key] = value
+    context.setdefault("randomized_truth_namespaces", set()).add(str(key))
 
 
 __all__ = ["random_truth_rng", "random_truth_token", "record_randomized_truth"]

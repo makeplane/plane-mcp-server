@@ -46,7 +46,7 @@ R1_TASK: dict[str, Any] = {
 
 
 async def verify_r2(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R2: final text reports the API-confirmed seed count with call provenance."""
+    """R2: report the seed count with item-value or target-scoped total-count evidence."""
     expected = ctx.get("r2_urgent_open_count")
     if not isinstance(expected, int):
         return answer_with_provenance(False, "API-confirmed urgent-open seed count missing", run)
@@ -179,7 +179,7 @@ R5_TASK: dict[str, Any] = {
 
 
 async def verify_r6(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tuple[bool, str]:
-    """R6: final text reports the winning project via ``project: NAME``."""
+    """R6: report the winner with item-value or exact project-grouped-count evidence."""
     expected = str(ctx.get("r6_more_bugs_project") or "")
     if not expected:
         return answer_with_provenance(False, "API-confirmed R6 winner missing from seed ctx", run)

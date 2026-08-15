@@ -7,6 +7,7 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.work_item_types import CreateWorkItemType
 
+from .identities import record_seeded_entity
 from .projects import is_plan_gate
 
 BUG_TYPE_NAME = "Bug"
@@ -98,6 +99,7 @@ def seed_item_type(plane: PlaneClient, workspace_slug: str, context: dict[str, A
                 work_item_type_ids=[existing.id],
             )
             context["bug_type"] = {"id": existing.id, "name": target}
+            record_seeded_entity(context, "work_item_type", existing.id)
             context["bug_type_created"] = created
             context["bug_type_workspace_level"] = True
             if created:
@@ -122,6 +124,7 @@ def seed_item_type(plane: PlaneClient, workspace_slug: str, context: dict[str, A
             )
             created = True
         context["bug_type"] = {"id": existing.id, "name": target}
+        record_seeded_entity(context, "work_item_type", existing.id)
         context["bug_type_created"] = created
         context["bug_type_workspace_level"] = False
     except Exception as exc:

@@ -7,6 +7,8 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.labels import CreateLabel
 
+from .identities import record_seeded_entity
+
 LABEL_NAMES = ("auth", "triage", "perf")
 
 
@@ -18,3 +20,4 @@ def seed_labels(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]
             data=CreateLabel(name=name),
         )
         context["labels"][name] = label.id
+        record_seeded_entity(context, "label", label.id)

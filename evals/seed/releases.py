@@ -15,6 +15,7 @@ from evals.fixtures import (
     RELEASE_NAME,
 )
 
+from .identities import record_seeded_entity
 from .projects import plan_gate_skips
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
 
@@ -54,6 +55,7 @@ def seed_release(plane: PlaneClient, workspace_slug: str, context: dict[str, Any
             raise RuntimeError("release create response did not confirm the randomized release name")
         confirmed_release_name = confirmed_release_name or release_name
         context["release"] = {"id": release.id, "name": confirmed_release_name}
+        record_seeded_entity(context, "release", release.id)
         context["release_name"] = confirmed_release_name
         context["workspace_objects"].append({"kind": "release", "id": release.id})
         # Single changelog body; DESIGN's "2 entries" are encoded as plain text.

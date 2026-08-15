@@ -16,6 +16,7 @@ from .customers import (
     seed_customer,
 )
 from .cycles import seed_cycles
+from .identities import record_seeded_entity
 from .intake import seed_intake
 from .item_types import (
     BUG_TYPE_NAME,
@@ -311,8 +312,11 @@ def seed(
             "w6_unfinished_titles": list(UNFINISHED_CYCLE_TITLES),
             "workspace_objects": [],  # [{kind, id}, ...] surviving project delete
             "randomized_truth": {},
+            "randomized_truth_namespaces": set(),
+            "seeded_entity_kinds": set(),
             "evidence_sentinels": {},
             "evidence_targets": {},
+            "evidence_aggregates": {},
             # None means the category was unavailable and name-based teardown must fail closed.
             "workspace_baseline": dict.fromkeys(_WORKSPACE_BASELINE_CATEGORIES),
         }
@@ -331,6 +335,7 @@ def seed(
         initial_suffix=run_prefix.upper(),
     )
     ctx["project_id"] = project.id
+    record_seeded_entity(ctx, "project", project.id)
     ctx["project_identifier"] = getattr(project, "identifier", None)
 
     # Workspace first, then project. Seeding is per task-rep, so S5 turning workspace

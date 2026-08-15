@@ -179,6 +179,7 @@ def test_work_item_read_truth_is_randomized_and_api_confirmed(task_id, oracle_ke
     assert ctx[oracle_key] not in (None, "", [])
     assert "confirmed" in ctx["randomized_truth"][truth_key]
     assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE]
+    assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE]
 
 
 def test_r2_randomized_counts_differ_between_rows_after_api_readback():
@@ -213,6 +214,7 @@ def test_r4_cycle_inventory_is_randomized_and_api_confirmed():
         "overdue_titles": ctx["r4_overdue_titles"],
     }
     assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE]
+    assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE]
 
 
 def test_r7_state_truth_is_randomized_api_confirmed_and_evidence_bearing():
@@ -228,6 +230,7 @@ def test_r7_state_truth_is_randomized_api_confirmed_and_evidence_bearing():
         truth = ctx["randomized_truth"]["R7.states"]
         assert truth["confirmed"] == ctx["r7_state_pairs"]
         assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE]
+        assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE]
 
 
 def test_l1_seed_oracle_is_the_api_confirmed_target_id():
@@ -238,3 +241,4 @@ def test_l1_seed_oracle_is_the_api_confirmed_target_id():
 
     assert ctx["l1_expected_summary_ids"] == [ctx["fixture_item_ids"]["Payment webhook drops retries"]]
     assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE] == tuple(ctx["l1_expected_summary_ids"])
+    assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE] == (ctx["project_id"],)

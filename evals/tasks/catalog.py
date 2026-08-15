@@ -96,6 +96,25 @@ behaviour under the same name still does.
 """
 
 
+def task_fingerprint_payload(task: dict[str, Any]) -> dict[str, Any]:
+    """Return the canonical question payload shared by task and battery hashes."""
+    return {
+        "id": task.get("id"),
+        "prompt": task.get("prompt"),
+        "needs": sorted(task.get("needs") or []),
+    }
+
+
+def _short_fingerprint(document: Any) -> str:
+    blob = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def task_fingerprint(task: dict[str, Any]) -> str:
+    """Return a stable short hash of one task's own question payload."""
+    return _short_fingerprint(task_fingerprint_payload(task))
+
+
 def battery_fingerprint(tasks: list[dict[str, Any]] | None = None) -> str:
     """Stable short hash of the revision and each task's ID, prompt and fixture names.
 
@@ -106,18 +125,9 @@ def battery_fingerprint(tasks: list[dict[str, Any]] | None = None) -> str:
     from the full catalog.
     """
     src = list(TASKS if tasks is None else tasks)
-    payload: list[dict[str, Any]] = []
-    for t in sorted(src, key=lambda x: str(x.get("id") or "")):
-        payload.append(
-            {
-                "id": t.get("id"),
-                "prompt": t.get("prompt"),
-                "needs": sorted(t.get("needs") or []),
-            }
-        )
+    payload = [task_fingerprint_payload(task) for task in sorted(src, key=lambda item: str(item.get("id") or ""))]
     document = {"revision": CATALOG_REVISION, "tasks": payload}
-    blob = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+    return _short_fingerprint(document)
 
 
 __all__ = [
@@ -127,4 +137,6 @@ __all__ = [
     "battery_fingerprint",
     "get_tasks",
     "task_author",
+    "task_fingerprint",
+    "task_fingerprint_payload",
 ]

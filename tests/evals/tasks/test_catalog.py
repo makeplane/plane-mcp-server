@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 
 import pytest
 
 from evals import tasks as tasks_mod
-from evals.tasks.catalog import TASKS, TASKS_BY_ID, battery_fingerprint, get_tasks, task_author
+from evals.tasks.catalog import (
+    TASKS,
+    TASKS_BY_ID,
+    battery_fingerprint,
+    get_tasks,
+    task_author,
+    task_fingerprint,
+    task_fingerprint_payload,
+)
 from evals.tasks.debias import (
     I1_TITLE,
 )
@@ -265,6 +275,26 @@ def test_revision_bump_changes_the_fingerprint_for_an_unchanged_catalog():
 
     assert after != before, "bumping the revision must move the fingerprint"
     assert battery_fingerprint(tasks) == before, "restoring the revision must restore it"
+
+
+def test_task_and_battery_fingerprints_share_the_same_per_task_payload(monkeypatch):
+    from evals.tasks import catalog
+
+    task = {"id": "T1", "prompt": "prompt", "needs": {"projects", "states"}}
+    expected_payload = {"id": "T1", "prompt": "prompt", "needs": ["projects", "states"]}
+    assert task_fingerprint_payload(task) == expected_payload
+
+    def short_hash(document):
+        blob = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+    assert task_fingerprint(task) == short_hash(expected_payload)
+    sentinel_payload = {"id": "sentinel", "prompt": "shared", "needs": []}
+    monkeypatch.setattr(catalog, "task_fingerprint_payload", lambda _task: sentinel_payload)
+    assert catalog.task_fingerprint(task) == short_hash(sentinel_payload)
+    assert catalog.battery_fingerprint([task]) == short_hash(
+        {"revision": catalog.CATALOG_REVISION, "tasks": [sentinel_payload]}
+    )
 
 
 def test_fingerprint_records_the_revision_transition():

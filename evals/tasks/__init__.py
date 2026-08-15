@@ -18,6 +18,8 @@ from evals.tasks.catalog import (
     battery_fingerprint,
     get_tasks,
     task_author,
+    task_fingerprint,
+    task_fingerprint_payload,
 )
 from evals.tasks.cross import verify_c1, verify_c2
 from evals.tasks.debias import (
@@ -94,6 +96,8 @@ __all__ = [
     "state_group",
     "state_name",
     "task_author",
+    "task_fingerprint",
+    "task_fingerprint_payload",
     "whole_answer_int",
     "word_boundary",
     "I1_TITLE",

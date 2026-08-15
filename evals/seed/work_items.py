@@ -13,7 +13,7 @@ from plane.models.work_items import CreateWorkItem, CreateWorkItemComment, Updat
 
 from evals.changelog import normalize_changelog_text
 from evals.errors import TaskSkipped
-from evals.evidence import set_target_evidence
+from evals.evidence import set_target_count_evidence, set_target_evidence
 from evals.fixtures import (
     BLOCKING_REFERENCE_ADDRESS,
     BLOCKING_SOURCE_TITLE,
@@ -28,6 +28,7 @@ from evals.fixtures import (
     WORK_ITEM_FIXTURES,
 )
 
+from .identities import record_seeded_entity
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
 
 __all__ = [
@@ -172,6 +173,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
         if not getattr(random_state, "id", None):
             raise RuntimeError(f"seed {task_id}: random state create returned no id")
         state_targets[PAYMENT_WEBHOOK_TITLE if task_id == "R1" else SIDEBAR_TITLE] = random_state
+        record_seeded_entity(context, "state", random_state.id)
         record_randomized_truth(
             context,
             f"{task_id}.state",
@@ -239,6 +241,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
         context["fixture_item_ids"][fixture_title] = item.id
         context["fixture_item_titles"][fixture_title] = title
         context["item_ids"].append(item.id)
+        record_seeded_entity(context, "work_item", item.id)
         sequence = getattr(item, "sequence_id", None)
         if sequence is not None and context.get("project_identifier"):
             context["item_identifiers"][fixture_title] = f"{context['project_identifier']}-{sequence}"
@@ -275,6 +278,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
             )
             if getattr(created_comment, "id", None) is not None:
                 comment_ids.add(str(created_comment.id))
+                record_seeded_entity(context, "comment", created_comment.id)
 
     # Capture every affected read oracle from API-confirmed state, never from the random choice.
     if task_id in {"R1", "I2"}:
@@ -300,6 +304,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
         context["r2_urgent_open_count"] = len(confirmed_titles)
         context["randomized_truth"]["R2.urgent_open_count"]["confirmed"] = len(confirmed_titles)
         set_target_evidence(context, confirmed_titles, target_ids=[project_id])
+        set_target_count_evidence(context, len(confirmed_titles), target_ids=[project_id])
 
     if task_id == "R3":
         confirmed_due_titles: list[str] = []
@@ -385,6 +390,8 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
             work_item_id=attachment_target_id,
         )
         confirmed_rows = list(attachments.results or [])
+        for attachment in confirmed_rows:
+            record_seeded_entity(context, "attachment", getattr(attachment, "id", None))
         confirmed_attachment_count = len(confirmed_rows)
         context["l5_attachment_count"] = confirmed_attachment_count
         context["randomized_truth"]["L5.attachment_count"]["confirmed"] = confirmed_attachment_count

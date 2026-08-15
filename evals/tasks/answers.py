@@ -155,10 +155,7 @@ def answer_with_provenance(
     """
     calls = run.get("calls")
     source = str(run.get("call_source") or "unknown")
-    driver_notes = run.get("driver_notes")
-    trace_incomplete = isinstance(driver_notes, list) and any(
-        isinstance(note, str) and note.startswith("proxy_sidecar_incomplete") for note in driver_notes
-    )
+    trace_incomplete = run.get("trace_integrity") is False
     available = bool(run.get("evidence_trace_available"))
     provenance = not trace_incomplete and has_response_evidence(run)
     if trace_incomplete:

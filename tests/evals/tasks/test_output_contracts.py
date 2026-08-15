@@ -254,6 +254,8 @@ def test_read_provenance_matrix_and_canary_coverage():
             {
                 **_run("count: 4"),
                 "driver_notes": ["proxy_sidecar_incomplete:skipped_rows=1"],
+                "trace_integrity": False,
+                "trace_integrity_reason": "recorder_loss",
             },
         )
         assert incomplete_ok is False

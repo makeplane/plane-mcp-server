@@ -14,6 +14,7 @@ from evals.fixtures import (
     is_evaluation_customer_name,
 )
 
+from .identities import record_seeded_entity
 from .projects import plan_gate_skips
 
 __all__ = [
@@ -33,6 +34,7 @@ def seed_customer(plane: PlaneClient, workspace_slug: str, context: dict[str, An
             data=CreateCustomer(name=CUSTOMER_NAME),
         )
         context["customer"] = {"id": customer.id, "name": CUSTOMER_NAME}
+        record_seeded_entity(context, "customer", customer.id)
         context["workspace_objects"].append({"kind": "customer", "id": customer.id})
         request = plane.customers.requests.create(
             workspace_slug=workspace_slug,
@@ -44,3 +46,4 @@ def seed_customer(plane: PlaneClient, workspace_slug: str, context: dict[str, An
         "name": CUSTOMER_REQUEST_NAME,
         "customer_id": customer.id,
     }
+    record_seeded_entity(context, "customer_request", request.id)

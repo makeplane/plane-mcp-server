@@ -12,6 +12,7 @@ from plane.models.work_items import UpdateWorkItem
 from evals.evidence import set_target_evidence
 from evals.fixtures import CYCLE_CURRENT, CYCLE_PAST, PAYMENT_WEBHOOK_TITLE, UNFINISHED_CYCLE_TITLES
 
+from .identities import record_seeded_entity
 from .randomize import random_truth_rng, record_randomized_truth
 
 
@@ -94,6 +95,8 @@ def seed_cycles(
         past_name: past.id,
         current_name: current.id,
     }
+    record_seeded_entity(context, "cycle", past.id)
+    record_seeded_entity(context, "cycle", current.id)
     context["cycle_past_name"] = past_name
     context["cycle_current_name"] = current_name
     context["cycle_past_id"] = past.id

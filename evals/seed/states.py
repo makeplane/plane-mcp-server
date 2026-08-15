@@ -10,6 +10,7 @@ from plane.models.states import CreateState
 from evals.evidence import set_target_evidence
 from evals.state_oracle import state_name_group_pairs
 
+from .identities import record_seeded_entity
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
 
 
@@ -43,6 +44,7 @@ def seed_r7_state_oracle(plane: PlaneClient, workspace_slug: str, context: dict[
         )
     context["r7_state_pairs"] = pairs
     context["r7_random_state_id"] = created_id
+    record_seeded_entity(context, "state", created_id)
     record_randomized_truth(
         context,
         "R7.states",

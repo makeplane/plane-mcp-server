@@ -9,6 +9,8 @@ from plane.models.intake import CreateIntakeWorkItem, WorkItemForIntakeRequest
 
 from evals.fixtures import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE
 
+from .identities import record_seeded_entity
+
 
 def seed_intake(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:
     project_id = context["project_id"]
@@ -39,3 +41,6 @@ def seed_intake(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]
             "title": INTAKE_SPAM_TITLE,
         },
     }
+    for row in (billing, spam):
+        record_seeded_entity(context, "intake", row.id)
+        record_seeded_entity(context, "work_item", getattr(row, "issue", None) or row.id)
