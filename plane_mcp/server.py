@@ -48,7 +48,7 @@ def get_allowed_client_redirect_uris() -> list[str]:
     return allowed
 
 
-LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "false").lower() == "true"
+LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "true").lower() == "true"
 
 
 def _configured(mcp: FastMCP) -> FastMCP:

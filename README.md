@@ -179,8 +179,8 @@ Structured JSON. Each tool call logs its name, duration, status and — when
 available — an opaque user id and the workspace slug.
 
 ```bash
-export LOG_USER_INFO=true    # also log the display name (PII); default false
-export LOG_PAYLOADS=true     # also log request payloads
+export LOG_USER_INFO=true    # also log the display name (PII);
+export LOG_PAYLOADS=true     # also log request paylo
 ```
 
 Only the OAuth and PAT transports carry a display name; stdio is unaffected.
