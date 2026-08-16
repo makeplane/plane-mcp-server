@@ -31,6 +31,8 @@ GOVERNED_BY = {
     AUTOMATIONS: "states_owned_by_workspace",
 }
 
+NOT_MANAGED_PROSE = re.compile(r"workspace work item type.*not enabled", re.IGNORECASE)
+
 # Some validators raise 400 with the plan gate only in prose; matched as a fallback.
 PLAN_GATE_PROSE = "upgrade your plan"
 
@@ -60,14 +62,17 @@ def workspace_owns_resource(client: Any, workspace_slug: str, resource: str) -> 
 
 def project_owns(exc: HttpError) -> bool:
     """Whether a refusal means this resource still lives per project."""
-    return _body(exc).get("code") == WORKSPACE_NOT_MANAGED
+    body = _body(exc)
+    if body.get("code") == WORKSPACE_NOT_MANAGED:
+        return True
+    return bool(NOT_MANAGED_PROSE.search(str(body.get("error", ""))))
 
 
-def wrong_scope(exc: HttpError, resource: str, *fields: str) -> str | None:
+def wrong_scope(exc: HttpError, resource: str, *fields: str, project_id: str = "") -> str | None:
     """The message telling a caller which scope owns `resource`, or None."""
     if workspace_owns(exc, *fields):
         return f"Error: this workspace owns its {resource}. Omit project_id to work with the catalogue."
-    if project_owns(exc):
+    if not project_id and project_owns(exc):
         return f"Error: this workspace keeps {resource} per project. Pass project_id."
     return None
 
@@ -81,7 +86,7 @@ def scoped(resource: str, *fields: str) -> Callable[[F], F]:
             try:
                 return fn(*args, **kwargs)
             except HttpError as exc:
-                if message := wrong_scope(exc, resource, *fields):
+                if message := wrong_scope(exc, resource, *fields, project_id=kwargs.get("project_id", "")):
                     return message
                 raise
 
