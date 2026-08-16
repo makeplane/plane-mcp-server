@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from evals import report as report_mod
+from evals.report import identity
 
 
 def _row(task_id: str = "R1", **overrides: Any) -> dict[str, Any]:
@@ -424,3 +425,43 @@ def test_malformed_exact_run_expectation_is_refused_instead_of_treated_as_legacy
     assert captured.out == ""
     assert "invalid run expectation" in captured.err
     assert "expected_task_ids contains duplicates" in captured.err
+
+
+def test_infra_error_rows_without_a_manifest_do_not_refuse_the_comparison(tmp_path: Path):
+    """A row that died in seeding never ran an agent, so it has no manifest to carry.
+
+    The first live A/B was refused because six infra_seed rows (L2 and L5, identical on both
+    surfaces) had no tool_manifest_fingerprint — rows every statistic already excludes. Demanding
+    identity from a row that never reached the surface refuses sound comparisons.
+    """
+    path = tmp_path / "rows.jsonl"
+    surface = {
+        "task_id": "R1",
+        "rep": 0,
+        "label": "local",
+        "battery": "b1",
+        "server": "local",
+        "driver": "codex-cli",
+        "provider": "openai",
+        "resolved_model": "m",
+        "tool_manifest_fingerprint": "fp-a",
+        "success": True,
+    }
+    seed_failure = {
+        "task_id": "L5",
+        "rep": 0,
+        "label": "local",
+        "battery": "b1",
+        "server": "local",
+        "driver": "codex-cli",
+        "provider": "openai",
+        "resolved_model": "m",
+        "error_class": "infra_seed",
+        "error": "boom",
+    }
+    path.write_text(
+        json.dumps(surface) + "\n" + json.dumps(seed_failure) + "\n",
+        encoding="utf-8",
+    )
+    report = identity.validate_persisted_identity([path])
+    assert report.files[0].values[identity.TOOL_MANIFEST_FIELD] == "fp-a"
