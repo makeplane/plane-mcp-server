@@ -254,8 +254,15 @@ are not inherited.
 
 Result rows retain only seeded entity kinds and randomization namespaces. They never contain
 target entity IDs or randomized truth values. Each repetition has an independent persisted
-`fixture_seed_id`; its truth is reproducible from that seed plus namespace without exposing
-any later repetition's independent sentinel.
+`fixture_seed_id`, and the randomized truth it derives is recoverable from that seed plus
+namespace without exposing any later repetition's independent sentinel.
+
+That seed is not a replay recipe for the whole fixture. Seeding also reads `date.today()` for
+cycle and work-item dates, and identifier collisions retry with fresh `secrets` randomness
+drawn outside the seeded namespace, so re-running a seed on another day — or after a
+collision — does not reconstruct the same fixture. What the seed guarantees is narrower and is
+what it was built for: each repetition's sentinels are independent, so no repetition can leak
+another's answer.
 
 The first line of a new result file is a meta row containing the run identity, label, server,
 battery, requested model/tier, resolved model, driver, provider, Git SHA, exact task-id list,
