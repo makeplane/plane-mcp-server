@@ -212,6 +212,7 @@ def register(mcp: FastMCP) -> None:
             if error := needs(action, page_id=page_id, collection_id=collection_id):
                 return error
 
+            named = client.pages.retrieve_workspace_page(workspace_slug=workspace_slug, page_id=page_id)
             row = None
             for collection in client.collections.list(workspace_slug=workspace_slug):
                 filed_cursor = ""
@@ -219,7 +220,7 @@ def register(mcp: FastMCP) -> None:
                     rows = client.collections.pages.list(
                         workspace_slug=workspace_slug,
                         collection_id=str(collection.id),
-                        params=as_params(CollectionPageQueryParams, cursor=filed_cursor),
+                        params=as_params(CollectionPageQueryParams, search=opt(named.name), cursor=filed_cursor),
                     )
                     row = next((r for r in rows.results if str((r.page or {}).get("id")) == page_id), None)
                     if row is not None or not rows.next_page_results:
