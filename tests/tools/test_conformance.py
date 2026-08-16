@@ -251,3 +251,43 @@ def test_unmapped_stays_small(unmapped):
 
 def test_aliases_do_not_shadow_a_resource_tool(aliases, registered):
     assert not set(aliases) & set(registered)
+
+
+# A resource whose scope can be refused must say which noun it is refusing, or the
+# caller gets a raw 400 and no idea which scope to use. Structure is each resource's
+# own business; this is about what a caller sees.
+
+# Each scoped resource, the SDK call its project-scoped create makes, and the arguments
+# that reach it. Driven through the real dispatch so the guard is proven, not inferred.
+SCOPED_WRITES = [
+    ("state", "states.create", {"action": "create", "project_id": "p", "name": "S", "color": "#fff"}),
+    ("workitem_type", "work_item_types.create", {"action": "create", "project_id": "p", "name": "T"}),
+    (
+        "workitem_property",
+        "work_item_properties.create",
+        {
+            "action": "create",
+            "project_id": "p",
+            "workitem_type_id": "t",
+            "display_name": "P",
+            "property_type": "TEXT",
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize(("name", "method", "arguments"), SCOPED_WRITES, ids=[case[0] for case in SCOPED_WRITES])
+def test_a_wrong_scope_refusal_is_answered_not_raised(name, method, arguments, registered, spy):
+    """Without `@scoped` the caller gets a raw 400 and no idea which scope to use."""
+    from plane.errors.errors import HttpError
+
+    from plane_mcp.toolkit.governance import WORKSPACE_NOT_MANAGED
+
+    spy.returns[method] = HttpError("refused", status_code=400, response={"code": WORKSPACE_NOT_MANAGED})
+
+    result = registered[name].fn(**arguments)
+
+    assert isinstance(result, str) and result.startswith("Error:"), (
+        f"{name} let a wrong-scope refusal out raw; it needs @scoped"
+    )
+    assert "project_id" in result, "named the problem without naming the fix"

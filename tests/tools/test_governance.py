@@ -357,3 +357,67 @@ def test_an_unrelated_failure_on_a_property_write_still_surfaces(registered, spy
             display_name="Root cause",
             property_type="TEXT",
         )
+
+
+STATE_SCOPES = [
+    ("list", {}, "states.list", "workspace_states.list"),
+    ("retrieve", {"state_id": "s-1"}, "states.retrieve", "workspace_states.retrieve"),
+    ("delete", {"state_id": "s-1"}, "states.delete", "workspace_states.delete"),
+]
+
+
+@pytest.mark.parametrize(("action", "extra", "project_method", "workspace_method"), STATE_SCOPES)
+def test_project_id_selects_the_state_scope(registered, spy, action, extra, project_method, workspace_method):
+    tool = registered["state"].fn
+
+    tool(action=action, project_id=PROJECT, **extra)
+    assert spy.recorder.only().method == project_method
+
+    spy.recorder.calls.clear()
+    tool(action=action, **extra)
+    catalogue = spy.recorder.only()
+    assert catalogue.method == workspace_method
+    assert "project_id" not in catalogue.kwargs
+
+
+def test_creating_a_catalogue_state_uses_the_workspace_endpoint(registered, spy):
+    registered["state"].fn(action="create", name="Blocked", color="#EF4444", group="started")
+
+    call = spy.recorder.only()
+    assert call.method == "workspace_states.create"
+    assert "project_id" not in call.kwargs
+
+
+def test_a_catalogue_state_needs_a_group(registered, spy):
+    """The project endpoint defaults it; the catalogue one requires it."""
+    result = registered["state"].fn(action="create", name="Blocked", color="#EF4444")
+
+    assert isinstance(result, str) and "group" in result
+    assert not spy.recorder.calls, "asked Plane for something it would refuse"
+
+
+def test_triage_is_not_a_catalogue_group(registered, spy):
+    """Triage is system-managed at workspace scope, so the catalogue never accepts it."""
+    result = registered["state"].fn(action="create", name="Triage", color="#EF4444", group="triage")
+
+    assert isinstance(result, str) and "backlog" in result
+    assert not spy.recorder.calls
+
+
+@pytest.mark.parametrize("field", ["sequence", "is_triage", "default"])
+def test_project_only_fields_are_refused_at_workspace_scope(registered, spy, field):
+    """A catalogue state has no ordering, triage flag or default -- those live on a
+    workflow, and sending them would be dropped without a word."""
+    value = 1.0 if field == "sequence" else True
+    result = registered["state"].fn(action="create", name="Blocked", color="#EF4444", group="started", **{field: value})
+
+    assert isinstance(result, str) and field in result
+    assert not spy.recorder.calls
+
+
+def test_those_fields_still_work_on_a_project_state(registered, spy):
+    registered["state"].fn(
+        action="create", project_id=PROJECT, name="Blocked", color="#EF4444", group="started", default=True
+    )
+
+    assert spy.recorder.only().kwargs["data"].default is True

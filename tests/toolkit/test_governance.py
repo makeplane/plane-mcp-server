@@ -18,10 +18,13 @@ from plane_mcp.toolkit.governance import (
     WORK_ITEM_TYPES,
     WORKFLOWS,
     WORKSPACE_MANAGED,
+    WORKSPACE_NOT_MANAGED,
     migration_in_progress,
     plan_required,
+    scoped,
     workspace_owns,
     workspace_owns_resource,
+    wrong_scope,
 )
 
 
@@ -215,3 +218,72 @@ def test_a_governance_refusal_is_not_reported_as_a_plan_gate(body):
     """
     assert plan_required(_error(400, body), "This project feature") is None
     assert workspace_owns(_error(400, body), *body)
+
+
+# Plane refuses a write to the wrong scope in both directions, with a matched pair of
+# codes. A resource that later moves to the workspace catalogue -- labels, templates,
+# automations -- should need nothing here beyond its noun.
+
+WRONG_SCOPE = [
+    (WORKSPACE_MANAGED, "owns its states", "Omit project_id"),
+    (WORKSPACE_NOT_MANAGED, "keeps states per project", "Pass project_id"),
+]
+
+
+@pytest.mark.parametrize(("code", "says", "tells"), WRONG_SCOPE)
+def test_each_refusal_names_the_scope_that_owns_the_resource(code, says, tells):
+    message = wrong_scope(_error(400, {"code": code}), "states")
+    assert message and says in message
+    assert tells in message, "named the problem without naming the fix"
+
+
+def test_the_two_directions_do_not_give_the_same_advice():
+    """Telling a governed workspace to pass project_id would loop the caller."""
+    governed = wrong_scope(_error(400, {"code": WORKSPACE_MANAGED}), "states")
+    ungoverned = wrong_scope(_error(400, {"code": WORKSPACE_NOT_MANAGED}), "states")
+
+    assert "Omit project_id" in governed and "Pass project_id" not in governed
+    assert "Pass project_id" in ungoverned and "Omit project_id" not in ungoverned
+
+
+def test_the_field_keyed_refusal_is_still_recognised():
+    """work_item_types answers with a field rather than a code; both reach the message."""
+    refusal = _error(400, {"work_item_types": ["Cannot enable project-level work item types"]})
+    assert wrong_scope(refusal, "work item types", "work_item_types")
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [_error(400, {"detail": "bad request"}), _error(403, {"code": WORKSPACE_MANAGED}), _error(500, {})],
+)
+def test_anything_else_is_not_a_scope_refusal(exc):
+    assert wrong_scope(exc, "states") is None
+
+
+def test_a_new_governed_resource_needs_only_its_noun():
+    """The codes are generic, so labels moving to the workspace is a one-word change."""
+    for noun in ("labels", "templates", "automations"):
+        message = wrong_scope(_error(400, {"code": WORKSPACE_NOT_MANAGED}), noun)
+        assert message and noun in message
+
+
+def test_the_decorator_answers_a_scope_refusal_and_re_raises_everything_else():
+    @scoped("states")
+    def dispatch(code: str, status: int = 400):
+        raise HttpError("refused", status_code=status, response={"code": code})
+
+    assert "Omit project_id" in dispatch(WORKSPACE_MANAGED)
+    assert "Pass project_id" in dispatch(WORKSPACE_NOT_MANAGED)
+    with pytest.raises(HttpError):
+        dispatch(WORKSPACE_MANAGED, status=403)
+
+
+def test_the_scoped_decorator_keeps_the_signature_fastmcp_reads():
+    import inspect
+
+    @scoped("states")
+    def original(action: str, project_id: str = "") -> str:
+        return "ok"
+
+    assert list(inspect.signature(original).parameters) == ["action", "project_id"]
+    assert original("list") == "ok"

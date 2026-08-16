@@ -10,6 +10,8 @@ from typing import Any, TypeVar
 from plane.errors.errors import HttpError
 
 WORKSPACE_MANAGED = "workspace_managed"
+# Its inverse: a catalogue endpoint called in a workspace that still owns per project.
+WORKSPACE_NOT_MANAGED = "workspace_not_managed"
 MIGRATION_IN_PROGRESS = "governance_migration_in_progress"
 
 # The governed resources, named as this server refers to them.
@@ -54,6 +56,38 @@ def workspace_owns_resource(client: Any, workspace_slug: str, resource: str) -> 
     flag = GOVERNED_BY[resource]
     features = client.workspaces.get_features(workspace_slug=workspace_slug)
     return bool(features.model_dump().get(flag))
+
+
+def project_owns(exc: HttpError) -> bool:
+    """Whether a refusal means this resource still lives per project."""
+    return _body(exc).get("code") == WORKSPACE_NOT_MANAGED
+
+
+def wrong_scope(exc: HttpError, resource: str, *fields: str) -> str | None:
+    """The message telling a caller which scope owns `resource`, or None."""
+    if workspace_owns(exc, *fields):
+        return f"Error: this workspace owns its {resource}. Omit project_id to work with the catalogue."
+    if project_owns(exc):
+        return f"Error: this workspace keeps {resource} per project. Pass project_id."
+    return None
+
+
+def scoped(resource: str, *fields: str) -> Callable[[F], F]:
+    """Turn a wrong-scope refusal anywhere in a resource's dispatch into that message."""
+
+    def decorate(fn: F) -> F:
+        @functools.wraps(fn)
+        def guarded(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return fn(*args, **kwargs)
+            except HttpError as exc:
+                if message := wrong_scope(exc, resource, *fields):
+                    return message
+                raise
+
+        return guarded  # type: ignore[return-value]
+
+    return decorate
 
 
 def migration_in_progress(exc: HttpError) -> bool:
