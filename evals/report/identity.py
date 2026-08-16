@@ -121,10 +121,9 @@ def _validate_file(path: Path) -> tuple[FileIdentity, list[str]]:
         values[field] = next(iter(source))
 
     manifest_values = _record_values(rows, TOOL_MANIFEST_FIELD)
-    observed_manifests = {value: lines for value, lines in manifest_values.items() if value != MISSING}
-    if len(observed_manifests) > 1:
-        issues.append(f"{path}: rows disagree on {TOOL_MANIFEST_FIELD}: {_format_values(observed_manifests)}")
-    values[TOOL_MANIFEST_FIELD] = next(iter(observed_manifests), MISSING)
+    if len(manifest_values) > 1:
+        issues.append(f"{path}: rows disagree on {TOOL_MANIFEST_FIELD}: {_format_values(manifest_values)}")
+    values[TOOL_MANIFEST_FIELD] = next(iter(manifest_values), MISSING)
 
     realized_models = tuple(sorted(_record_values(rows, "model")))
     return FileIdentity(path=path, values=values, realized_models=realized_models), issues

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -38,6 +40,36 @@ def write_opencode_mcp_config(
         },
     }
     path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def prepare_opencode_isolated_environment(temp_dir: Path) -> dict[str, str]:
+    """Return an environment whose HOME/XDG roots cannot load user MCP config."""
+    fake_home = temp_dir / "home"
+    xdg_config = temp_dir / "xdg-config"
+    xdg_data = temp_dir / "xdg-data"
+    xdg_cache = temp_dir / "xdg-cache"
+    xdg_state = temp_dir / "xdg-state"
+    for directory in (fake_home, xdg_config, xdg_data, xdg_cache, xdg_state):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    real_data_root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    source_auth = real_data_root / "opencode" / "auth.json"
+    if source_auth.is_file():
+        destination = xdg_data / "opencode" / "auth.json"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(source_auth, destination)
+        except OSError:
+            pass
+
+    return {
+        **os.environ,
+        "HOME": str(fake_home),
+        "XDG_CONFIG_HOME": str(xdg_config),
+        "XDG_DATA_HOME": str(xdg_data),
+        "XDG_CACHE_HOME": str(xdg_cache),
+        "XDG_STATE_HOME": str(xdg_state),
+    }
 
 
 class OpencodeCliDriver(CliDriver):
@@ -90,7 +122,10 @@ class OpencodeCliDriver(CliDriver):
             env=child_env,
             server_name="plane",
         )
-        return CliLaunch(cwd=temp_dir)
+        run_env = prepare_opencode_isolated_environment(temp_dir)
+        if "PATH" in child_env:
+            run_env["PATH"] = child_env["PATH"]
+        return CliLaunch(cwd=temp_dir, env=run_env)
 
     def build_command(
         self,
@@ -148,5 +183,6 @@ class OpencodeCliDriver(CliDriver):
 
 __all__ = [
     "OpencodeCliDriver",
+    "prepare_opencode_isolated_environment",
     "write_opencode_mcp_config",
 ]

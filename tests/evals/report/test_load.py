@@ -86,8 +86,8 @@ def test_load_behaviours(case, tmp_path, capsys):
     case(tmp_path, capsys)
 
 
-def test_schema_v0_rows_parse_with_backward_defaults():
-    """Synthetic schema-0 rows retain defaults unrelated to this change."""
+def test_schema_v0_rows_parse_with_unknown_trace_integrity():
+    """Synthetic schema-0 rows keep data but do not claim verified traces."""
     fixture = Path(__file__).parents[2] / "fixtures" / "evals_schema_v0_rows.jsonl"
     rows = load_rows(fixture)
 
@@ -103,14 +103,16 @@ def test_schema_v0_rows_parse_with_backward_defaults():
     assert count_row.final_text.endswith("\n4")
     assert count_row.result_tokens_estimated is True
     assert [call.result_tokens for call in count_row.calls] == [315, 64]
+    assert release_row.trace_integrity is None
+    assert count_row.trace_integrity is None
 
     summary = summarize(rows)
     assert summary.tasks["L3"].success == "1/1"
-    assert summary.tasks["L3"].med_calls == 1
+    assert summary.tasks["L3"].med_calls is None
     assert summary.tasks["L3"].result_tokens_mode == "unavailable"
     assert summary.tasks["R2"].success == "1/1"
-    assert summary.tasks["R2"].med_calls == 2
-    assert summary.tasks["R2"].result_tokens_mode == "estimated"
+    assert summary.tasks["R2"].med_calls is None
+    assert summary.tasks["R2"].result_tokens_mode == "unavailable"
 
 
 def test_dedupe_rows_latest_pure():

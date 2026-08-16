@@ -276,11 +276,25 @@ def test_report_rejects_manifest_variation_within_one_result_file(tmp_path, caps
         _row("R1", tool_manifest_fingerprint="manifest-a"),
         _row("R2", tool_manifest_fingerprint="manifest-b"),
     )
-
     _assert_refused(
         report_mod.main([str(path)]),
         capsys,
         "rows disagree on tool_manifest_fingerprint",
+    )
+
+
+def test_report_rejects_mixed_present_and_missing_manifests_within_one_file(tmp_path, capsys):
+    path = tmp_path / "partially-identified.jsonl"
+    _write(
+        path,
+        _row("R1", tool_manifest_fingerprint="manifest-a"),
+        _row("R2", tool_manifest_fingerprint=None),
+    )
+
+    _assert_refused(
+        report_mod.main([str(path)]),
+        capsys,
+        "<missing>",
     )
 
 

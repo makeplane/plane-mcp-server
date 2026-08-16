@@ -43,6 +43,7 @@ from evals.evidence import (
     normalize_evidence_sentinels,
     normalize_evidence_targets,
     observed_aggregate_labels,
+    observed_aggregates,
     observed_sentinel_labels,
     write_evidence_config,
 )
@@ -358,6 +359,13 @@ class ApiDriver:
                         calls[idx]["is_error"] = result.is_error
                         calls[idx]["duration_ms"] = duration_ms
                         if evidence_active:
+                            aggregate_observations = observed_aggregates(
+                                result.text,
+                                aggregates,
+                                request_args=calls[idx]["args"],
+                                evidence_targets=targets,
+                            )
+                            calls[idx]["observed_aggregates"] = aggregate_observations
                             calls[idx]["observed_sentinels"] = sorted(
                                 set(
                                     observed_sentinel_labels(
@@ -367,14 +375,7 @@ class ApiDriver:
                                         evidence_targets=targets,
                                     )
                                 )
-                                | set(
-                                    observed_aggregate_labels(
-                                        result.text,
-                                        aggregates,
-                                        request_args=calls[idx]["args"],
-                                        evidence_targets=targets,
-                                    )
-                                )
+                                | set(observed_aggregate_labels(aggregate_observations, aggregates))
                             )
                         pending_results.append((idx, result.text))
                     if matched_ids != set(call_indices) or len(call_indices) != len(turn.tool_calls):
@@ -619,6 +620,15 @@ class CliDriver(ABC):
             targets = normalize_evidence_targets(evidence_targets)
             aggregates = normalize_evidence_aggregates(evidence_aggregates)
             evidence_active = bool(configured_evidence_labels(evidence, targets, aggregates))
+
+            def verify_aggregate_observations(calls: list[dict[str, Any]]) -> None:
+                """Turn observed proxy values into labels using harness-held seed truth."""
+                for call in calls:
+                    labels = set(call.get("observed_sentinels") or [])
+                    labels.update(observed_aggregate_labels(call.get("observed_aggregates"), aggregates))
+                    if evidence_active:
+                        call["observed_sentinels"] = sorted(labels)
+
             real_command = (
                 list(self.server_command) if self.server_command else [self.python_bin, "-m", "plane_mcp", "stdio"]
             )
@@ -674,17 +684,15 @@ class CliDriver(ABC):
                         notes,
                     )
                     calls, client_calls, call_source = sidecar_result
+                    verify_aggregate_observations(calls)
                     trace_integrity = sidecar_result.trace_integrity
                     trace_integrity_reason = sidecar_result.trace_integrity_reason
                     tool_manifest_fingerprint = sidecar_result.tool_manifest_fingerprint
                 evidence_available = False
                 if evidence_active and call_source == "proxy":
                     _proxy_calls, status = load_proxy_sidecar(sidecar)
-                    meta = status.get("meta") if isinstance(status, dict) else None
                     evidence_available = bool(
-                        status.get("state") == "complete"
-                        and isinstance(meta, dict)
-                        and meta.get("evidence_trace_available")
+                        status.get("state") == "complete" and status.get("evidence_trace_available")
                     )
                     if not evidence_available:
                         notes.append("proxy_response_evidence_unavailable")
@@ -735,6 +743,7 @@ class CliDriver(ABC):
                 calls, client_calls, proxy_source = sidecar_result
                 output.calls = calls
                 output.client_tool_calls = client_calls
+                verify_aggregate_observations(output.calls)
                 trace_integrity = sidecar_result.trace_integrity
                 trace_integrity_reason = sidecar_result.trace_integrity_reason
                 tool_manifest_fingerprint = sidecar_result.tool_manifest_fingerprint
@@ -744,12 +753,7 @@ class CliDriver(ABC):
             evidence_available = False
             if evidence_active and output.call_source == "proxy":
                 _proxy_calls, status = load_proxy_sidecar(sidecar)
-                meta = status.get("meta") if isinstance(status, dict) else None
-                evidence_available = bool(
-                    status.get("state") == "complete"
-                    and isinstance(meta, dict)
-                    and meta.get("evidence_trace_available")
-                )
+                evidence_available = bool(status.get("state") == "complete" and status.get("evidence_trace_available"))
                 if not evidence_available:
                     notes.append("proxy_response_evidence_unavailable")
 

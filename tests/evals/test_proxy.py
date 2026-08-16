@@ -19,6 +19,8 @@ from evals.drivers import (
     ensure_proxy_pythonpath,
     load_proxy_sidecar,
     load_proxy_sidecar_calls,
+    proxy_pid_path,
+    proxy_session_paths,
 )
 from evals.evidence import (
     EVIDENCE_SENTINELS_ENV,
@@ -42,6 +44,16 @@ from evals.runner.live import _record_trace_infra
 from tests.evals.conftest import case_params
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+def _only_proxy_session(configured_path: Path) -> Path:
+    sessions = proxy_session_paths(configured_path)
+    assert len(sessions) == 1, sessions
+    return sessions[0]
+
+
+def _session_file(configured_path: Path, session_id: str) -> Path:
+    return configured_path.with_name(f"{configured_path.name}.{session_id}.jsonl")
 
 
 def _request(request_id: int, method: str, params: dict | None = None) -> dict:
@@ -197,13 +209,14 @@ def _proxy_records_tools_call_and_exit_code(tmp_path):
         timeout=15,
     )
     assert proc.returncode == 7  # child exit propagated
-    assert int(sidecar.with_name(f"{sidecar.name}.pid").read_text(encoding="ascii")) > 0
+    session_path = _only_proxy_session(sidecar)
+    assert int(proxy_pid_path(session_path).read_text(encoding="ascii")) > 0
     # Byte-faithful: unparsed line and JSON responses appear on stdout.
     out = proc.stdout.decode("utf-8", errors="replace")
     assert "NOT_JSON_LINE" in out
     assert "list_work_items" in out or "ok:list_work_items" in out
 
-    rows = [json.loads(ln) for ln in sidecar.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    rows = [json.loads(ln) for ln in session_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     call_rows = [r for r in rows if r.get("row_type") != "proxy_meta"]
     meta = next(r for r in rows if r.get("row_type") == "proxy_meta")
     assert len(call_rows) == 2
@@ -324,8 +337,8 @@ def _proxy_exits_when_child_dies_first(tmp_path):
         # Child's exit code (3) should propagate; tolerate signal map if the
         # runtime reaps oddly, but meta must still be present.
         assert rc in (3, 128 + 3) or rc == 3
-        assert sidecar.is_file()
-        text = sidecar.read_text(encoding="utf-8")
+        assert proxy_session_paths(sidecar)
+        text = _only_proxy_session(sidecar).read_text(encoding="utf-8")
         assert "proxy_meta" in text
         # Prefer exact child code when available
         if rc not in (3, 128 + 3):
@@ -539,7 +552,7 @@ def _proxy_survives_cli_group_kill_and_writes_meta(tmp_path):
         # Wait until proxy has started (sidecar created) and setsid likely done.
         boot = time.monotonic() + 5.0
         while time.monotonic() < boot:
-            if sidecar.is_file():
+            if proxy_session_paths(sidecar):
                 break
             time.sleep(0.05)
         time.sleep(0.5)  # allow setsid + optional tools/call
@@ -558,16 +571,17 @@ def _proxy_survives_cli_group_kill_and_writes_meta(tmp_path):
         deadline = time.monotonic() + SHUTDOWN_DEADLINE_S + 5.0
         meta_seen = False
         while time.monotonic() < deadline:
-            if sidecar.is_file():
-                text = sidecar.read_text(encoding="utf-8")
+            if proxy_session_paths(sidecar):
+                text = _only_proxy_session(sidecar).read_text(encoding="utf-8")
                 if "proxy_meta" in text:
                     meta_seen = True
                     break
             time.sleep(0.1)
         assert meta_seen, (
-            f"proxy_meta missing after group kill; sidecar={sidecar.read_text() if sidecar.is_file() else None!r}"
+            f"proxy_meta missing after group kill; "
+            f"sidecar={_only_proxy_session(sidecar).read_text() if proxy_session_paths(sidecar) else None!r}"
         )
-        rows = [json.loads(ln) for ln in sidecar.read_text().splitlines() if ln.strip()]
+        rows = [json.loads(ln) for ln in _only_proxy_session(sidecar).read_text().splitlines() if ln.strip()]
         assert rows[-1].get("row_type") == "proxy_meta"
     finally:
         if leader.poll() is None:
@@ -651,7 +665,11 @@ def test_proxy_signal_finalization_writes_meta_and_preserves_signal_exit(tmp_pat
         if proc.stdin is not None:
             proc.stdin.close()
 
-    rows = [json.loads(line) for line in sidecar.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows = [
+        json.loads(line)
+        for line in _only_proxy_session(sidecar).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert rows[-1]["row_type"] == "proxy_meta"
     meta = rows[-1]
     assert meta["finalization_reason"] == "signal"
@@ -749,7 +767,7 @@ def test_proxy_records_exact_target_bound_aggregate_evidence_without_payload(tmp
         path,
         evidence_targets={TARGET_ENTITY_EVIDENCE: ["project-1"]},
         evidence_aggregates={
-            TARGET_ENTITY_EVIDENCE: [{"kind": "total_count", "value": 4}],
+            TARGET_ENTITY_EVIDENCE: [{"kind": "total_count"}],
         },
     )
     rec.on_client_message(
@@ -773,10 +791,11 @@ def test_proxy_records_exact_target_bound_aggregate_evidence_without_payload(tmp
     rec.write_meta()
 
     calls = load_proxy_sidecar_calls(path)
-    assert calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert calls[0]["observed_sentinels"] == []
+    assert calls[0]["observed_aggregates"] == [{"label": TARGET_ENTITY_EVIDENCE, "kind": "total_count", "value": 4}]
     persisted = path.read_text(encoding="utf-8")
     assert "result_text" not in persisted
-    assert '"total_count"' not in persisted
+    assert '"content"' not in persisted
 
 
 def _sidecar_result_payload_round_trips_only_when_enabled(tmp_path):
@@ -1069,14 +1088,25 @@ def test_scrub_child_pythonpath_removes_repo():
 
 def test_proxy_loads_reusable_private_evidence_file_before_starting_mcp(tmp_path: Path, monkeypatch):
     sentinel = "hidden-target-fact-7b0a1f9c"
+    total_count = 918273
+    grouped_counts = {"project-1": 564738, "project-2": 102938}
     evidence_file = tmp_path / "evidence.json"
     write_evidence_config(
         evidence_file,
         {TARGET_ENTITY_EVIDENCE: [sentinel]},
-        {TARGET_ENTITY_EVIDENCE: ["target-1"]},
+        {TARGET_ENTITY_EVIDENCE: ["target-1", *grouped_counts]},
+        {
+            TARGET_ENTITY_EVIDENCE: [
+                {"kind": "total_count", "value": total_count},
+                {"kind": "grouped_counts", "values": grouped_counts},
+            ]
+        },
     )
     assert stat.S_IMODE(evidence_file.stat().st_mode) == 0o600
-    assert sentinel not in evidence_file.read_text(encoding="utf-8")
+    evidence_payload = evidence_file.read_text(encoding="utf-8")
+    assert sentinel not in evidence_payload
+    assert str(total_count) not in evidence_payload
+    assert all(str(count) not in evidence_payload for count in grouped_counts.values())
     captured = {}
 
     def fake_run_proxy(command, log_path, **kwargs):
@@ -1099,10 +1129,15 @@ def test_proxy_loads_reusable_private_evidence_file_before_starting_mcp(tmp_path
 
     assert rc == 0
     assert evidence_file.is_file()
-    assert sentinel not in evidence_file.read_text(encoding="utf-8")
+    evidence_payload = evidence_file.read_text(encoding="utf-8")
+    assert sentinel not in evidence_payload
+    assert str(total_count) not in evidence_payload
+    assert all(str(count) not in evidence_payload for count in grouped_counts.values())
     assert set(captured["evidence_fingerprints"]) == {TARGET_ENTITY_EVIDENCE}
-    assert captured["evidence_targets"] == {TARGET_ENTITY_EVIDENCE: ("target-1",)}
-    assert captured["evidence_aggregates"] == {}
+    assert captured["evidence_targets"] == {TARGET_ENTITY_EVIDENCE: ("target-1", "project-1", "project-2")}
+    assert captured["evidence_aggregates"] == {
+        TARGET_ENTITY_EVIDENCE: ({"kind": "total_count"}, {"kind": "grouped_counts"})
+    }
 
 
 def test_probe_then_session_reuses_evidence_config_and_records_provenance(tmp_path: Path):
@@ -1115,7 +1150,6 @@ def test_probe_then_session_reuses_evidence_config_and_records_provenance(tmp_pa
     )
     assert stat.S_IMODE(evidence_file.stat().st_mode) == 0o600
     assert sentinel not in evidence_file.read_text(encoding="utf-8")
-
     server = tmp_path / "evidence_server.py"
     server.write_text(
         textwrap.dedent(
@@ -1184,6 +1218,41 @@ def test_probe_then_session_reuses_evidence_config_and_records_provenance(tmp_pa
     assert session_calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert evidence_file.is_file()
     assert sentinel not in evidence_file.read_text(encoding="utf-8")
+
+
+def test_two_real_proxies_sharing_configured_path_preserve_both_complete_sessions(tmp_path: Path):
+    server = _write_fake_server(tmp_path / "two_session_server.py")
+    configured_sidecar = tmp_path / "shared-sidecar.jsonl"
+
+    for request_id, tool in ((1, "first_session_call"), (2, "second_session_call")):
+        request = _request(request_id, "tools/call", {"name": tool, "arguments": {"session": request_id}})
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "evals.proxy",
+                "--log",
+                str(configured_sidecar),
+                "--",
+                sys.executable,
+                str(server),
+            ],
+            input=(json.dumps(request) + "\n").encode("utf-8"),
+            capture_output=True,
+            cwd=str(REPO),
+            timeout=15,
+        )
+        assert proc.returncode == 7, proc.stderr.decode("utf-8", errors="replace")
+
+    calls, status = load_proxy_sidecar(configured_sidecar)
+
+    assert status["state"] == "complete"
+    assert status["session_file_count"] == 2
+    assert status["session_count"] == 2
+    assert status["all_sessions_finalized"] is True
+    assert all(session["finalized"] is True for session in status["sessions"])
+    assert all(session["state"] == "complete" for session in status["sessions"])
+    assert {call["tool"] for call in calls} == {"first_session_call", "second_session_call"}
 
 
 def test_missing_or_malformed_evidence_config_fails_closed(tmp_path: Path):
@@ -1263,7 +1332,9 @@ def test_rapid_response_pairing(tmp_path: Path):
         timeout=30,
     )
     assert proc.returncode == 0, proc.stderr.decode()
-    rows = [json.loads(ln) for ln in sidecar.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    rows = [
+        json.loads(ln) for ln in _only_proxy_session(sidecar).read_text(encoding="utf-8").splitlines() if ln.strip()
+    ]
     call_rows = [r for r in rows if r.get("row_type") != "proxy_meta"]
     meta = next(r for r in rows if r.get("row_type") == "proxy_meta")
     assert rows[-1].get("row_type") == "proxy_meta"
@@ -1335,8 +1406,10 @@ def test_meta_is_last_row_after_forced_kill(tmp_path: Path):
         timeout=SHUTDOWN_DEADLINE_S + 15,
     )
     elapsed = time_mod.monotonic() - t0
-    assert sidecar.is_file()
-    rows = [json.loads(ln) for ln in sidecar.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert proxy_session_paths(sidecar)
+    rows = [
+        json.loads(ln) for ln in _only_proxy_session(sidecar).read_text(encoding="utf-8").splitlines() if ln.strip()
+    ]
     assert rows, "sidecar empty"
     assert rows[-1].get("row_type") == "proxy_meta"
     meta = rows[-1]
@@ -1399,7 +1472,7 @@ def test_bounded_shutdown_wall_clock(tmp_path: Path):
     elapsed = time_mod.monotonic() - t0
     assert proc.returncode == 0
     assert elapsed < SHUTDOWN_DEADLINE_S + 2.0
-    rows = [json.loads(ln) for ln in sidecar.read_text().splitlines() if ln.strip()]
+    rows = [json.loads(ln) for ln in _only_proxy_session(sidecar).read_text().splitlines() if ln.strip()]
     assert rows[-1].get("row_type") == "proxy_meta"
 
 
@@ -1546,14 +1619,20 @@ def test_sidecar_rejects_invalid_duplicate_and_gapped_sequences(
 def test_zero_call_probe_then_real_session_is_complete(tmp_path: Path):
     path = tmp_path / "probe-then-real.jsonl"
     manifest = "31c209e40544"
+    _session_file(path, "probe").write_text(
+        json.dumps(_complete_proxy_meta(0, manifest)) + "\n",
+        encoding="utf-8",
+    )
     rows = [
-        _complete_proxy_meta(0, manifest),
         _proxy_call("list_projects", 1),
         _proxy_call("search_work_items", 2),
         _proxy_call("create_work_log", 3),
         _complete_proxy_meta(3, manifest),
     ]
-    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    _session_file(path, "real").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
 
     notes: list[str] = []
     result = apply_proxy_sidecar([], [], path, notes)
@@ -1572,18 +1651,71 @@ def test_zero_call_probe_then_real_session_is_complete(tmp_path: Path):
     assert not any("incomplete" in note for note in notes)
 
 
+def test_zero_proxy_session_files_is_recorder_loss(tmp_path: Path):
+    path = tmp_path / "never-created.jsonl"
+
+    notes: list[str] = []
+    result = apply_proxy_sidecar([], [], path, notes, max_wait_s=0)
+
+    assert result.status["state"] == "missing"
+    assert result.status["session_file_count"] == 0
+    assert result.trace_integrity is False
+    assert result.trace_integrity_reason == "recorder_loss"
+
+
+def test_single_session_file_rejects_multiple_final_metadata_rows(tmp_path: Path):
+    path = tmp_path / "duplicate-meta.jsonl"
+    session = _session_file(path, "one")
+    session.write_text(
+        "\n".join(json.dumps(_complete_proxy_meta(0)) for _ in range(2)) + "\n",
+        encoding="utf-8",
+    )
+
+    _, status = load_proxy_sidecar(path)
+
+    assert status["state"] == "incomplete"
+    assert status["session_file_count"] == 1
+    assert status["sessions"][0]["meta_count"] == 2
+    assert status["sessions"][0]["finalized"] is False
+
+
+def test_merged_evidence_requires_every_session_to_report_available(tmp_path: Path):
+    path = tmp_path / "mixed-evidence-availability.jsonl"
+    unavailable = _complete_proxy_meta(0)
+    unavailable["evidence_trace_available"] = False
+    available = _complete_proxy_meta(0)
+    available["evidence_trace_available"] = True
+    _session_file(path, "one").write_text(json.dumps(unavailable) + "\n", encoding="utf-8")
+    _session_file(path, "two").write_text(json.dumps(available) + "\n", encoding="utf-8")
+
+    _, status = load_proxy_sidecar(path)
+
+    assert status["state"] == "complete"
+    assert status["all_sessions_finalized"] is True
+    assert status["evidence_trace_available"] is False
+
+
 def test_two_calling_sessions_validate_sequences_independently(tmp_path: Path):
     path = tmp_path / "two-calling-sessions.jsonl"
-    rows = [
+    first_rows = [
         _proxy_call("session-1-call-2", 2),
         _proxy_call("session-1-call-1", 1),
         _complete_proxy_meta(2),
+    ]
+    second_rows = [
         _proxy_call("session-2-call-3", 3),
         _proxy_call("session-2-call-1", 1),
         _proxy_call("session-2-call-2", 2),
         _complete_proxy_meta(3),
     ]
-    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    _session_file(path, "one").write_text(
+        "\n".join(json.dumps(row) for row in first_rows) + "\n",
+        encoding="utf-8",
+    )
+    _session_file(path, "two").write_text(
+        "\n".join(json.dumps(row) for row in second_rows) + "\n",
+        encoding="utf-8",
+    )
 
     calls, status = load_proxy_sidecar(path)
 
@@ -1620,8 +1752,8 @@ def test_trailing_unfinalized_proxy_session_stays_fatal(tmp_path: Path):
 
 def test_disagreeing_session_manifests_are_reported_and_invalidated(tmp_path: Path):
     path = tmp_path / "manifest-disagreement.jsonl"
-    rows = [_complete_proxy_meta(0, "manifest-a"), _complete_proxy_meta(0, "manifest-b")]
-    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    _session_file(path, "one").write_text(json.dumps(_complete_proxy_meta(0, "manifest-a")) + "\n")
+    _session_file(path, "two").write_text(json.dumps(_complete_proxy_meta(0, "manifest-b")) + "\n")
 
     notes: list[str] = []
     result = apply_proxy_sidecar([], [], path, notes)

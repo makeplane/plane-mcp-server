@@ -26,10 +26,13 @@ from evals.drivers.cli.codex import (
     find_codex_rollout,
     parse_codex_jsonl_events,
     parse_codex_rollout_calls,
+    prepare_codex_home,
+    write_codex_mcp_config,
     write_codex_mcp_override_args,
 )
 from evals.drivers.cli.opencode import (
     OpencodeCliDriver,
+    prepare_opencode_isolated_environment,
     write_opencode_mcp_config,
 )
 from evals.drivers.cli.process import kill_process_group, note_timeout_kill, run_cli_subprocess
@@ -40,6 +43,7 @@ from evals.drivers.cli.sidecar import (
     load_proxy_sidecar,
     load_proxy_sidecar_calls,
     proxy_pid_path,
+    proxy_session_paths,
     proxy_wrap_server_command,
     wait_for_proxy_meta,
 )
@@ -92,12 +96,16 @@ __all__ = [
     "parse_codex_jsonl_events",
     "parse_codex_rollout_calls",
     "prepare_antigravity_fake_home",
+    "prepare_codex_home",
+    "prepare_opencode_isolated_environment",
     "proxy_pid_path",
+    "proxy_session_paths",
     "proxy_wrap_server_command",
     "run_cli_subprocess",
     "wait_for_proxy_meta",
     "write_antigravity_mcp_config",
     "write_claude_mcp_config",
     "write_codex_mcp_override_args",
+    "write_codex_mcp_config",
     "write_opencode_mcp_config",
 ]

@@ -687,9 +687,14 @@ async def run_live(
         and 0 <= row.rep < reps
     ]
     summary = summarize(result_rows, expected_rows=total_runs, run_keys=run_keys)
-    if summary.aggregate_n:
-        rate = summary.aggregate_k / summary.aggregate_n
-        print(f"success: {summary.aggregate_k}/{summary.aggregate_n} ({rate:.1%})", flush=True)
+    if summary.task_mean_success is not None:
+        task_count = sum(task.n > 0 for task in summary.tasks.values())
+        print(
+            f"success: {summary.task_mean_success:.1%} across {task_count} tasks "
+            f"(cluster-bootstrap95 [{summary.task_cluster_lo:.2f},{summary.task_cluster_hi:.2f}]; "
+            f"pooled repetitions {summary.aggregate_k}/{summary.aggregate_n})",
+            flush=True,
+        )
     else:
         print("success: 0/0 (n/a; no evaluated rows)", flush=True)
     print(execution_coverage_statement(summary), flush=True)

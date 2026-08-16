@@ -18,6 +18,7 @@ from evals.report import (
     summarize,
     wilson_interval,
 )
+from evals.results import RESULT_SCHEMA_VERSION
 from tests.evals.conftest import case_params
 
 
@@ -117,9 +118,34 @@ def test_result_pair_mismatch_preserves_outcome_but_excludes_trace_metrics():
     assert summary.tasks["R1"].med_result_tokens is None
 
 
+def test_missing_trace_integrity_is_unknown_and_current_schema_run_is_incomplete():
+    row = {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "task_id": "R1",
+        "success": True,
+        "num_calls": 7,
+        "calls": [{"tool": "unverified", "result_tokens": 99}],
+    }
+
+    summary = summarize([row], expected_rows=1)
+
+    assert summary.complete is False
+    assert summary.trace_invalid_rows == 1
+    assert summary.tasks["R1"].med_calls is None
+    assert summary.tasks["R1"].tool_reps == 0
+    assert summary.tasks["R1"].med_result_tokens is None
+
+
 def _summarize_excludes_infra_errors_from_success():
     rows = [
-        {"task_id": "R1", "success": True, "num_calls": 2, "calls": [], "error": None},
+        {
+            "task_id": "R1",
+            "success": True,
+            "trace_integrity": True,
+            "num_calls": 2,
+            "calls": [],
+            "error": None,
+        },
         {
             "task_id": "R1",
             "success": False,
@@ -152,10 +178,10 @@ def _summarize_excludes_infra_errors_from_success():
 
 def _summarize_aggregate_wilson_and_call_variance():
     rows = [
-        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": []},
-        {"task_id": "R1", "rep": 1, "success": True, "num_calls": 4, "calls": []},
-        {"task_id": "R1", "rep": 2, "success": False, "num_calls": 6, "calls": []},
-        {"task_id": "R2", "rep": 0, "success": True, "num_calls": 1, "calls": []},
+        {"task_id": "R1", "rep": 0, "success": True, "trace_integrity": True, "num_calls": 2, "calls": []},
+        {"task_id": "R1", "rep": 1, "success": True, "trace_integrity": True, "num_calls": 4, "calls": []},
+        {"task_id": "R1", "rep": 2, "success": False, "trace_integrity": True, "num_calls": 6, "calls": []},
+        {"task_id": "R2", "rep": 0, "success": True, "trace_integrity": True, "num_calls": 1, "calls": []},
     ]
     s = summarize(rows)
     assert s.tasks["R1"].n == 3
@@ -181,6 +207,7 @@ def _tool_distribution_uses_successful_repetitions():
             "task_id": "R1",
             "rep": 0,
             "success": True,
+            "trace_integrity": True,
             "num_calls": 3,
             "calls": [{"tool": "a"}, {"tool": "a"}, {"tool": "b"}],
         },
@@ -188,6 +215,7 @@ def _tool_distribution_uses_successful_repetitions():
             "task_id": "R1",
             "rep": 1,
             "success": True,
+            "trace_integrity": True,
             "num_calls": 2,
             "calls": [{"tool": "a"}, {"tool": "c"}],
         },
@@ -195,6 +223,7 @@ def _tool_distribution_uses_successful_repetitions():
             "task_id": "R1",
             "rep": 2,
             "success": False,
+            "trace_integrity": True,
             "num_calls": 1,
             "calls": [{"tool": "failed_only"}],
         },
@@ -202,6 +231,7 @@ def _tool_distribution_uses_successful_repetitions():
             "task_id": "R2",
             "rep": 0,
             "success": True,
+            "trace_integrity": True,
             "num_calls": 1,
             "calls": [{"tool": "one_rep"}],
         },
@@ -209,6 +239,7 @@ def _tool_distribution_uses_successful_repetitions():
             "task_id": "R3",
             "rep": 0,
             "success": False,
+            "trace_integrity": True,
             "num_calls": 1,
             "calls": [{"tool": "failed_only"}],
         },
@@ -340,7 +371,17 @@ def test_multi_rep_synthetic_file_reports_wilson_and_instability_without_noise_c
 
 
 def test_single_rep_summary_renders_tool_distribution_unavailable(capsys):
-    rows = [{"task_id": "R1", "rep": 0, "label": "local", "success": True, "num_calls": 2, "calls": []}]
+    rows = [
+        {
+            "task_id": "R1",
+            "rep": 0,
+            "label": "local",
+            "success": True,
+            "trace_integrity": True,
+            "num_calls": 2,
+            "calls": [],
+        }
+    ]
 
     report_mod.print_table(summarize(rows), "Summary: sample.jsonl")
 

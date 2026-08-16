@@ -14,6 +14,7 @@ from evals.token_counting import (
 from evals.tool_names import split_plane_and_client_calls
 
 RESULT_SCHEMA_VERSION = 6
+TRACE_INTEGRITY_SCHEMA_VERSION = 5
 
 TraceIntegrityReason = Literal["recorder_loss", "protocol_violation", "result_pair_mismatch"]
 
@@ -135,7 +136,7 @@ class AgentRun:
     usage_per_iteration: list[Usage] = field(default_factory=list)
     cum_input_tokens: int | None = None
     result_pair_mismatch: bool = False
-    trace_integrity: bool = True
+    trace_integrity: bool | None = True
     trace_integrity_reason: TraceIntegrityReason | None = None
     tool_manifest_fingerprint: str | None = None
     token_count_failures: int = 0
@@ -201,7 +202,7 @@ class TaskResult:
     provider_stop_reason: str | None = None
     hit_max_iterations: bool = False
     result_pair_mismatch: bool = False
-    trace_integrity: bool = True
+    trace_integrity: bool | None = True
     trace_integrity_reason: TraceIntegrityReason | None = None
     tool_manifest_fingerprint: str | None = None
     token_count_failures: int = 0
@@ -456,7 +457,7 @@ class TaskResult:
             ),
             hit_max_iterations=bool(row.get("hit_max_iterations")),
             result_pair_mismatch=bool(row.get("result_pair_mismatch")),
-            trace_integrity=bool(row.get("trace_integrity", True)),
+            trace_integrity=(bool(row["trace_integrity"]) if row.get("trace_integrity") is not None else None),
             trace_integrity_reason=(
                 str(row["trace_integrity_reason"])
                 if row.get("trace_integrity_reason")
@@ -699,6 +700,7 @@ __all__ = [
     "AGENT_RESULT_COPY_FIELDS",
     "AGENT_RESULT_OPTIONAL_IDENTITY_FIELDS",
     "RESULT_SCHEMA_VERSION",
+    "TRACE_INTEGRITY_SCHEMA_VERSION",
     "TASK_RESULT_HARNESS_FIELDS",
     "AgentRun",
     "CallRecord",

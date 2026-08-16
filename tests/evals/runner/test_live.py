@@ -749,6 +749,37 @@ def test_runner_passes_seeded_evidence_to_driver_and_retains_only_labels(monkeyp
     assert sentinel not in json.dumps(row.to_row())
 
 
+def test_run_live_headline_uses_task_cluster_interval(tmp_path, monkeypatch, capsys):
+    async def passes(_plane, _ctx, _run):
+        return True, "ok"
+
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (object(), "ws"))
+    monkeypatch.setattr(runner_live, "seed", lambda *a, **k: k["ctx"].update({"project_name": "EVAL x"}))
+    monkeypatch.setattr(runner_live, "teardown", lambda *a, **k: None)
+
+    async def fake_drive(**kwargs):
+        del kwargs
+        return TaskResult(final_text="done", num_calls=1, trace_integrity=True)
+
+    monkeypatch.setattr(runner_live, "_drive_agent", fake_drive)
+    monkeypatch.setattr(runner_live, "get_driver", lambda *a, **k: MagicMock())
+
+    rc = asyncio.run(
+        run_live(
+            [_taxonomy_task("R1", passes), _taxonomy_task("R2", passes)],
+            model_alias="standard",
+            reps=1,
+            label="local",
+            out_path=tmp_path / "cluster.jsonl",
+        )
+    )
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "success: 100.0% across 2 tasks (cluster-bootstrap95 [1.00,1.00]; pooled repetitions 2/2)" in output
+    assert "success: 2/2 (100.0%)" not in output
+
+
 def _run_passes_server_cmd_to_non_claude(tmp_path, monkeypatch, _capsys):
     from evals.runner import live as run_mod
 
@@ -1203,7 +1234,7 @@ def test_run_live_cleanup_failure_is_incomplete_without_changing_success(tmp_pat
     assert row["cleanup_error"].startswith("TeardownError: 2 cleanup operation(s) failed:")
     assert delete_calls == [("customer", "customer-1"), ("release_tag", "tag-1")]
     output = capsys.readouterr().out
-    assert "success: 1/1 (100.0%)" in output
+    assert "success: 100.0% across 1 tasks (cluster-bootstrap95 [1.00,1.00]; pooled repetitions 1/1)" in output
     assert "EXECUTION COVERAGE: 1/1 rows evaluated (100.0%)" in output
     assert "RUN INCOMPLETE:" in output
     assert "cleanup errors=1" in output

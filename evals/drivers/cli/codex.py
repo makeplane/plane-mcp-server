@@ -9,6 +9,8 @@ Experimental — live runs are opt-in because the quota is metered.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -222,6 +224,51 @@ def write_codex_mcp_override_args(
     return out
 
 
+def write_codex_mcp_config(
+    path: Path,
+    *,
+    command: str,
+    args: list[str],
+    env: dict[str, str],
+    server_name: str = "plane",
+) -> None:
+    """Write the complete MCP config for an isolated Codex home."""
+    lines = [
+        f"[mcp_servers.{json.dumps(server_name)}]",
+        f"command = {json.dumps(command)}",
+        f"args = {json.dumps(args)}",
+    ]
+    if env:
+        lines.append(f"[mcp_servers.{json.dumps(server_name)}.env]")
+        lines.extend(f"{json.dumps(key)} = {json.dumps(value)}" for key, value in env.items())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def prepare_codex_home(
+    codex_home: Path,
+    *,
+    command: str,
+    args: list[str],
+    env: dict[str, str],
+    real_codex_home: Path | None = None,
+) -> None:
+    """Create an exclusive config root while copying only the CLI login artifact."""
+    write_codex_mcp_config(
+        codex_home / "config.toml",
+        command=command,
+        args=args,
+        env=env,
+    )
+    source_home = real_codex_home or Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    source_auth = source_home / "auth.json"
+    if source_auth.is_file():
+        try:
+            shutil.copy2(source_auth, codex_home / "auth.json")
+        except OSError:
+            pass
+
+
 # Codex CLI driver (experimental — do not spend live quota from CI)
 # ---------------------------------------------------------------------------
 
@@ -277,14 +324,17 @@ class CodexCliDriver(CliDriver):
         server_command: list[str],
         child_env: dict[str, str],
     ) -> CliLaunch:
-        del temp_dir
-        config_args = write_codex_mcp_override_args(
+        codex_home = temp_dir / "codex-home"
+        prepare_codex_home(
+            codex_home,
             command=server_command[0],
             args=server_command[1:],
             env=child_env,
-            server_name="plane",
         )
-        return CliLaunch(cwd=task_cwd, config_args=config_args)
+        run_env = {**os.environ, "CODEX_HOME": str(codex_home)}
+        if "PATH" in child_env:
+            run_env["PATH"] = child_env["PATH"]
+        return CliLaunch(cwd=task_cwd, env=run_env)
 
     def build_command(
         self,
@@ -381,5 +431,7 @@ __all__ = [
     "find_codex_rollout",
     "parse_codex_jsonl_events",
     "parse_codex_rollout_calls",
+    "prepare_codex_home",
+    "write_codex_mcp_config",
     "write_codex_mcp_override_args",
 ]

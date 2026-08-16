@@ -25,11 +25,11 @@ from evals.evidence import (
     EVIDENCE_SENTINELS_ENV,
     consume_evidence_config,
     fingerprint_evidence_sentinels,
-    normalize_evidence_aggregates,
+    normalize_evidence_aggregate_shapes,
     normalize_evidence_fingerprints,
     normalize_evidence_sentinels,
     normalize_evidence_targets,
-    observed_aggregate_labels,
+    observed_aggregates,
     observed_fingerprint_labels,
 )
 from evals.tool_manifest import ToolManifestCapture
@@ -43,6 +43,12 @@ READ_CHUNK = 65536
 # server's process tree with the repo scrubbed off PYTHONPATH, so it cannot
 # import its own package.
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def proxy_session_log_path(configured_path: Path, *, pid: int | None = None) -> Path:
+    """Derive the one sidecar owned by this proxy process from the configured base."""
+    process_id = os.getpid() if pid is None else pid
+    return configured_path.with_name(f"{configured_path.name}.{process_id}.jsonl")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -154,7 +160,7 @@ class SidecarRecorder:
         if not self.evidence_fingerprints and raw_sentinels:
             self.evidence_fingerprints = fingerprint_evidence_sentinels(raw_sentinels)
         self.evidence_targets = normalize_evidence_targets(evidence_targets)
-        self.evidence_aggregates = normalize_evidence_aggregates(evidence_aggregates)
+        self.evidence_aggregates = normalize_evidence_aggregate_shapes(evidence_aggregates)
         self.evidence_active = bool(
             (self.evidence_fingerprints.keys() | self.evidence_aggregates.keys()) & self.evidence_targets.keys()
         )
@@ -181,7 +187,8 @@ class SidecarRecorder:
         # Post-finalize append attempts (not written; for tests / diagnostics).
         self.post_finalize_appends = 0
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        self.log_path.write_text("", encoding="utf-8")
+        descriptor = os.open(self.log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(descriptor)
 
     def _append(self, row: dict[str, Any]) -> None:
         line = json.dumps(row, default=str, ensure_ascii=False) + "\n"
@@ -305,24 +312,21 @@ class SidecarRecorder:
             "seq": pending["seq"],
         }
         if self.evidence_active:
-            # Persist labels only. The matching values and result body stay in memory.
-            row["observed_sentinels"] = sorted(
-                set(
-                    observed_fingerprint_labels(
-                        result_text,
-                        self.evidence_fingerprints,
-                        request_args=pending["args"],
-                        evidence_targets=self.evidence_targets,
-                    )
-                )
-                | set(
-                    observed_aggregate_labels(
-                        result_text,
-                        self.evidence_aggregates,
-                        request_args=pending["args"],
-                        evidence_targets=self.evidence_targets,
-                    )
-                )
+            # Persist only labels matched from non-enumerable sentinels and
+            # target-bound aggregate values the agent already received. The
+            # expected aggregate truth and complete result body never enter
+            # the proxy process.
+            row["observed_sentinels"] = observed_fingerprint_labels(
+                result_text,
+                self.evidence_fingerprints,
+                request_args=pending["args"],
+                evidence_targets=self.evidence_targets,
+            )
+            row["observed_aggregates"] = observed_aggregates(
+                result_text,
+                self.evidence_aggregates,
+                request_args=pending["args"],
+                evidence_targets=self.evidence_targets,
             )
         if self.record_result_payloads:
             row["result_text"] = result_text
@@ -817,7 +821,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         returncode = run_proxy(
             list(args.command),
-            Path(args.log),
+            proxy_session_log_path(Path(args.log)),
             record_result_payloads=bool(args.record_result_payloads),
             evidence_fingerprints=evidence_fingerprints,
             evidence_targets=evidence_targets,

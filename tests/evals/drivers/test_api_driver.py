@@ -514,7 +514,13 @@ def test_api_driver_records_only_exact_target_bound_aggregate_evidence():
             ),
             Turn(
                 text="",
-                tool_calls=[ToolCall("e", "count_work_items", {"group_by": "project_id"})],
+                tool_calls=[
+                    ToolCall(
+                        "e",
+                        "count_work_items",
+                        {"group_by": "project_id", "project_ids": ["project-1", "project-2"]},
+                    )
+                ],
                 usage=None,
                 stop_reason=StopReason.TOOL_USE,
             ),
@@ -528,7 +534,7 @@ def test_api_driver_records_only_exact_target_bound_aggregate_evidence():
             ToolResult(call_id="c", text='{"total_count": 4}'),
             ToolResult(
                 call_id="d",
-                text=('{"grouped_counts": {"project-1": {"count": 2}, "project-2": {"count": 4}}}'),
+                text=('{"grouped_counts": {"project-1": {"count": 2}, "project-2": {"count": 5}}}'),
             ),
             ToolResult(
                 call_id="e",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -11,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+import tomllib
 
 from evals.drivers import (
     AntigravityCliDriver,
@@ -708,7 +710,9 @@ def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
                         if p.is_file():
                             bag.setdefault("cfgs", []).append(json.loads(p.read_text()))
             elif driver_cls is CodexCliDriver:
-                bag["cmd_joined"] = " ".join(cmd)
+                codex_home = Path(kwargs["env"]["CODEX_HOME"])
+                with (codex_home / "config.toml").open("rb") as stream:
+                    bag["cfg"] = tomllib.load(stream)
             out = (
                 json.dumps(
                     {
@@ -758,6 +762,92 @@ def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
         assert "record-result-payloads" in blob or "record-result-payloads" in seen.get("cmd_joined", "")
 
 
+def test_codex_isolated_home_effective_mcp_server_list_is_exactly_plane(tmp_path: Path):
+    codex_bin = shutil.which("codex")
+    assert codex_bin is not None, "Codex CLI is required to observe its effective MCP configuration"
+
+    fake_user_home = tmp_path / "fake-user"
+    global_config = fake_user_home / ".codex" / "config.toml"
+    global_config.parent.mkdir(parents=True)
+    global_config.write_text(
+        '[mcp_servers.forbidden_global]\ncommand = "/usr/bin/false"\n',
+        encoding="utf-8",
+    )
+    project_config = tmp_path / ".codex" / "config.toml"
+    project_config.parent.mkdir()
+    project_config.write_text(
+        '[mcp_servers.forbidden_project]\ncommand = "/usr/bin/false"\n',
+        encoding="utf-8",
+    )
+    driver = CodexCliDriver(codex_bin=codex_bin, runner=lambda *_args, **_kwargs: None, allow_live=True)
+    launch = driver.write_mcp_config(
+        tmp_path / "task-state",
+        task_cwd=tmp_path,
+        server_command=["/usr/bin/true"],
+        child_env={"PATH": os.environ["PATH"]},
+    )
+    assert launch.env is not None
+    effective_env = {**launch.env, "HOME": str(fake_user_home)}
+
+    observed = subprocess.run(
+        [codex_bin, "mcp", "list", "--json"],
+        cwd=tmp_path,
+        env=effective_env,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=15,
+    )
+    server_names = sorted(item["name"] for item in json.loads(observed.stdout))
+
+    assert server_names == ["plane"]
+
+
+def test_opencode_isolated_environment_effective_mcp_server_list_is_exactly_plane(tmp_path: Path):
+    opencode_bin = shutil.which("opencode")
+    assert opencode_bin is not None, "OpenCode CLI is required to observe its effective MCP configuration"
+
+    driver = OpencodeCliDriver(opencode_bin=opencode_bin, runner=lambda *_args, **_kwargs: None)
+    task_state = tmp_path / "task-state"
+    task_state.mkdir()
+    launch = driver.write_mcp_config(
+        task_state,
+        task_cwd=tmp_path,
+        server_command=["/usr/bin/true"],
+        child_env={"PATH": os.environ["PATH"]},
+    )
+    assert launch.env is not None
+    user_config = Path(launch.env["HOME"]) / ".config" / "opencode" / "opencode.json"
+    user_config.parent.mkdir(parents=True)
+    user_config.write_text(
+        json.dumps(
+            {
+                "mcp": {
+                    "forbidden_global": {
+                        "type": "local",
+                        "command": ["/usr/bin/false"],
+                        "enabled": True,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    observed = subprocess.run(
+        [opencode_bin, "debug", "config"],
+        cwd=launch.cwd,
+        env=launch.env,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=15,
+    )
+    effective_config = json.loads(observed.stdout)
+
+    assert sorted((effective_config.get("mcp") or {}).keys()) == ["plane"]
+
+
 @pytest.mark.parametrize(
     ("Driver", "bin_key"),
     [
@@ -767,12 +857,14 @@ def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
         pytest.param(OpencodeCliDriver, "opencode_bin", id="opencode-cwd-config"),
     ],
 )
-def test_cli_agent_surfaces_never_contain_evidence_sentinel(
+def test_cli_agent_surfaces_never_contain_evidence_truth(
     tmp_path: Path,
     Driver: type[CliDriver],
     bin_key: str,
 ):
     sentinel = "hidden-target-fact-7b0a1f9c"
+    total_count = 918273
+    grouped_counts = {"project-1": 564738, "project-2": 102938}
     seen: dict[str, object] = {}
 
     def fake_run(cmd, **kwargs):
@@ -783,10 +875,12 @@ def test_cli_agent_surfaces_never_contain_evidence_sentinel(
             configs.append(json.loads(config_path.read_text()))
             proxy_args = configs[0]["mcpServers"]["plane"]["args"]
         elif Driver is CodexCliDriver:
-            for value in cmd:
-                prefix = "mcp_servers.plane.args="
-                if value.startswith(prefix):
-                    proxy_args = json.loads(value[len(prefix) :])
+            codex_home = Path(kwargs["env"]["CODEX_HOME"])
+            with (codex_home / "config.toml").open("rb") as stream:
+                config = tomllib.load(stream)
+            configs.append(config)
+            server = config["mcp_servers"]["plane"]
+            proxy_args = [server["command"], *server["args"]]
         elif Driver is AntigravityCliDriver:
             fake_home = Path(kwargs["env"]["HOME"])
             for rel in (
@@ -799,6 +893,18 @@ def test_cli_agent_surfaces_never_contain_evidence_sentinel(
             config_path = Path(kwargs["cwd"]) / "opencode.json"
             configs.append(json.loads(config_path.read_text()))
             proxy_args = configs[0]["mcp"]["plane"]["command"]
+
+        if Driver is ClaudeCliDriver:
+            assert "--strict-mcp-config" in cmd
+            assert set(configs[0]["mcpServers"]) == {"plane"}
+        elif Driver is CodexCliDriver:
+            assert set(configs[0]["mcp_servers"]) == {"plane"}
+        elif Driver is AntigravityCliDriver:
+            assert set(configs[0]["mcpServers"]) == {"plane"}
+            assert all(kwargs["env"].get(name) for name in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"))
+        else:
+            assert set(configs[0]["mcp"]) == {"plane"}
+            assert all(kwargs["env"].get(name) for name in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"))
 
         assert proxy_args is not None and "--evidence-file" in proxy_args
         evidence_path = Path(proxy_args[proxy_args.index("--evidence-file") + 1])
@@ -840,11 +946,19 @@ def test_cli_agent_surfaces_never_contain_evidence_sentinel(
         max_turns=1,
         cwd=tmp_path,
         evidence_sentinels={TARGET_ENTITY_EVIDENCE: [sentinel]},
-        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target-1"]},
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target-1", *grouped_counts]},
+        evidence_aggregates={
+            TARGET_ENTITY_EVIDENCE: [
+                {"kind": "total_count", "value": total_count},
+                {"kind": "grouped_counts", "values": grouped_counts},
+            ]
+        },
     )
 
     surface = str(seen["surface"])
     assert sentinel not in surface
+    assert str(total_count) not in surface
+    assert all(str(count) not in surface for count in grouped_counts.values())
     assert EVIDENCE_SENTINELS_ENV not in surface
 
 
@@ -928,6 +1042,68 @@ def _timeout_harvests_sidecar_calls(tmp_path):
     assert run.calls[0]["tool"] == "pre_timeout"
     assert run.calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert run.evidence_trace_available is True
+
+
+def test_cli_verifier_compares_observed_aggregate_values_after_agent_run(tmp_path):
+    rows = [
+        {
+            "tool": "count_work_items",
+            "args": {"project_id": "project-1"},
+            "is_error": False,
+            "result_chars": 17,
+            "duration_ms": 1,
+            "seq": 1,
+            "observed_sentinels": [],
+            "observed_aggregates": [{"label": TARGET_ENTITY_EVIDENCE, "kind": "total_count", "value": 3}],
+        },
+        {
+            "tool": "count_work_items",
+            "args": {"project_id": "project-1"},
+            "is_error": False,
+            "result_chars": 17,
+            "duration_ms": 1,
+            "seq": 2,
+            "observed_sentinels": [],
+            "observed_aggregates": [{"label": TARGET_ENTITY_EVIDENCE, "kind": "total_count", "value": 4}],
+        },
+        {
+            "row_type": "proxy_meta",
+            "relayed_lines": 2,
+            "unparsed_lines": 0,
+            "unmatched_responses": 0,
+            "notifications": 0,
+            "pending_left": 0,
+            "non_tool_pending_left": 0,
+            "last_seq": 2,
+            "tool_request_count": 2,
+            "child_killed": False,
+            "evidence_trace_available": True,
+        },
+    ]
+
+    def fake_run(cmd, **kwargs):
+        del kwargs
+        config_path = Path(cmd[cmd.index("--mcp-config") + 1])
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        proxy_args = config["mcpServers"]["plane"]["args"]
+        sidecar = Path(proxy_args[proxy_args.index("--log") + 1])
+        sidecar.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+
+    driver = ClaudeCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
+    run = driver.run_task(
+        "hi",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model="sonnet",
+        max_turns=1,
+        cwd=tmp_path,
+        evidence_targets={TARGET_ENTITY_EVIDENCE: ["project-1"]},
+        evidence_aggregates={TARGET_ENTITY_EVIDENCE: [{"kind": "total_count", "value": 4}]},
+    )
+
+    assert run.evidence_trace_available is True
+    assert run.calls[0]["observed_sentinels"] == []
+    assert run.calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
 
 
 def _timeout_harvest_waits_for_delayed_meta(tmp_path):

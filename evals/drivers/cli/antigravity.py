@@ -137,7 +137,17 @@ class AntigravityCliDriver(CliDriver):
             args=server_command[1:],
             env=child_env,
         )
-        run_env = {**os.environ, "HOME": str(fake_home)}
+        xdg_roots = {
+            name: temp_dir / name.lower().replace("_home", "")
+            for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
+        }
+        for directory in xdg_roots.values():
+            directory.mkdir(parents=True, exist_ok=True)
+        run_env = {
+            **os.environ,
+            "HOME": str(fake_home),
+            **{name: str(directory) for name, directory in xdg_roots.items()},
+        }
         if "PATH" in child_env:
             run_env["PATH"] = child_env["PATH"]
         return CliLaunch(cwd=task_cwd, env=run_env)

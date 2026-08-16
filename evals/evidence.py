@@ -85,6 +85,35 @@ def normalize_evidence_aggregates(value: Any) -> dict[str, tuple[dict[str, Any],
     return normalized
 
 
+def evidence_aggregate_shapes(value: Any) -> dict[str, tuple[dict[str, str], ...]]:
+    """Reduce aggregate truth to the response shapes safe for an agent-visible proxy."""
+    return {
+        label: tuple({"kind": str(spec["kind"])} for spec in specs)
+        for label, specs in normalize_evidence_aggregates(value).items()
+    }
+
+
+def normalize_evidence_aggregate_shapes(value: Any) -> dict[str, tuple[dict[str, str], ...]]:
+    """Validate aggregate extraction instructions that contain no expected values."""
+    if not isinstance(value, Mapping):
+        return {}
+    normalized: dict[str, tuple[dict[str, str], ...]] = {}
+    for raw_label, raw_specs in value.items():
+        label = str(raw_label or "").strip()
+        if not label or not isinstance(raw_specs, Sequence) or isinstance(raw_specs, (str, bytes, bytearray)):
+            continue
+        specs: list[dict[str, str]] = []
+        for raw_spec in raw_specs:
+            if not isinstance(raw_spec, Mapping) or raw_spec.get("kind") not in {"total_count", "grouped_counts"}:
+                continue
+            spec = {"kind": str(raw_spec["kind"])}
+            if spec not in specs:
+                specs.append(spec)
+        if specs:
+            normalized[label] = tuple(specs)
+    return normalized
+
+
 def configured_evidence_labels(sentinels: Any, targets: Any, aggregates: Any = None) -> tuple[str, ...]:
     """Return labels that have both response values and target entity IDs."""
     values_by_label = normalize_evidence_sentinels(sentinels)
@@ -154,7 +183,7 @@ def decode_evidence_sentinels(value: str | None) -> dict[str, tuple[str, ...]]:
 
 
 def encode_evidence_config(sentinels: Any, targets: Any, aggregates: Any = None) -> str:
-    """Serialize targets plus one-way value fingerprints, never raw sentinels."""
+    """Serialize targets and extraction shapes, never raw sentinels or aggregate truth."""
     fingerprints = fingerprint_evidence_sentinels(sentinels)
     return json.dumps(
         {
@@ -163,7 +192,7 @@ def encode_evidence_config(sentinels: Any, targets: Any, aggregates: Any = None)
                 for label, specs in fingerprints.items()
             },
             "targets": normalize_evidence_targets(targets),
-            "aggregates": normalize_evidence_aggregates(aggregates),
+            "aggregates": evidence_aggregate_shapes(aggregates),
         },
         ensure_ascii=True,
         separators=(",", ":"),
@@ -189,7 +218,7 @@ def decode_evidence_config(
     return (
         normalize_evidence_fingerprints(raw.get("fingerprints")),
         normalize_evidence_targets(raw.get("targets")),
-        normalize_evidence_aggregates(raw.get("aggregates")),
+        normalize_evidence_aggregate_shapes(raw.get("aggregates")),
     )
 
 
@@ -329,42 +358,67 @@ def _decoded_documents(response_text: str) -> list[Any]:
     return documents
 
 
-def observed_aggregate_labels(
+def observed_aggregates(
     response_text: str,
     aggregates: Any,
     *,
     request_args: Any,
     evidence_targets: Any,
-) -> list[str]:
-    """Match exact aggregate result fields while retaining seeded target binding."""
-    specs_by_label = normalize_evidence_aggregates(aggregates)
+) -> list[dict[str, Any]]:
+    """Extract target-bound aggregate values without receiving expected truth."""
+    specs_by_label = normalize_evidence_aggregate_shapes(aggregates)
     targets_by_label = normalize_evidence_targets(evidence_targets)
     documents = _decoded_documents(response_text)
-    matched: list[str] = []
+    observations: list[dict[str, Any]] = []
     for label, specs in specs_by_label.items():
         targets = targets_by_label.get(label, ())
+        if not targets or not _request_targets(request_args, targets):
+            continue
         for spec in specs:
             if spec["kind"] == "total_count":
-                if not _request_targets(request_args, targets):
-                    continue
-                if any(isinstance(value, Mapping) and value.get("total_count") == spec["value"] for value in documents):
-                    matched.append(label)
-                    break
+                for value in documents:
+                    if not isinstance(value, Mapping):
+                        continue
+                    count = value.get("total_count")
+                    if isinstance(count, int) and not isinstance(count, bool):
+                        observations.append({"label": label, "kind": "total_count", "value": count})
+                        break
             elif spec["kind"] == "grouped_counts":
-                expected = spec["values"]
                 for value in documents:
                     if not isinstance(value, Mapping) or not isinstance(value.get("grouped_counts"), Mapping):
                         continue
                     grouped = value["grouped_counts"]
-                    if all(
-                        isinstance(grouped.get(target), Mapping) and grouped[target].get("count") == expected_count
-                        for target, expected_count in expected.items()
-                    ):
-                        matched.append(label)
+                    observed: dict[str, int] = {}
+                    for target in targets:
+                        entry = grouped.get(target)
+                        count = entry.get("count") if isinstance(entry, Mapping) else None
+                        if not isinstance(count, int) or isinstance(count, bool):
+                            break
+                        observed[target] = count
+                    if len(observed) == len(targets):
+                        observations.append({"label": label, "kind": "grouped_counts", "values": observed})
                         break
-                if label in matched:
-                    break
-    return sorted(set(matched))
+    return observations
+
+
+def observed_aggregate_labels(observations: Any, aggregates: Any) -> list[str]:
+    """Compare proxy observations with seed truth inside the post-agent harness."""
+    if not isinstance(observations, Sequence) or isinstance(observations, (str, bytes, bytearray)):
+        return []
+    expected_by_label = normalize_evidence_aggregates(aggregates)
+    matched: set[str] = set()
+    for observation in observations:
+        if not isinstance(observation, Mapping):
+            continue
+        label = str(observation.get("label") or "")
+        for expected in expected_by_label.get(label, ()):
+            if expected["kind"] != observation.get("kind"):
+                continue
+            if expected["kind"] == "total_count" and observation.get("value") == expected["value"]:
+                matched.add(label)
+            elif expected["kind"] == "grouped_counts" and observation.get("values") == expected["values"]:
+                matched.add(label)
+    return sorted(matched)
 
 
 def set_target_evidence(context: dict[str, Any], values: Sequence[Any], *, target_ids: Sequence[Any]) -> None:
@@ -419,14 +473,17 @@ __all__ = [
     "decode_evidence_sentinels",
     "encode_evidence_config",
     "encode_evidence_sentinels",
+    "evidence_aggregate_shapes",
     "fingerprint_evidence_sentinels",
     "normalize_evidence_fingerprints",
+    "normalize_evidence_aggregate_shapes",
     "normalize_evidence_aggregates",
     "normalize_evidence_sentinels",
     "normalize_evidence_targets",
     "observed_sentinel_labels",
     "observed_fingerprint_labels",
     "observed_aggregate_labels",
+    "observed_aggregates",
     "set_target_count_evidence",
     "set_target_evidence",
     "set_target_grouped_count_evidence",

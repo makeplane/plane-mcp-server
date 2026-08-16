@@ -41,14 +41,14 @@ def test_paired_bootstrap_small_sample_is_task_paired_and_wide():
 
 def test_ab_compare_behaviours(capsys):
     rows_a = [
-        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 5, "calls": []},
-        {"task_id": "R2", "rep": 0, "success": True, "num_calls": 3, "calls": []},
-        {"task_id": "R3", "rep": 0, "success": False, "num_calls": 9, "calls": []},
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 5, "calls": [], "trace_integrity": True},
+        {"task_id": "R2", "rep": 0, "success": True, "num_calls": 3, "calls": [], "trace_integrity": True},
+        {"task_id": "R3", "rep": 0, "success": False, "num_calls": 9, "calls": [], "trace_integrity": True},
     ]
     rows_b = [
-        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": []},
-        {"task_id": "R2", "rep": 0, "success": True, "num_calls": 4, "calls": []},
-        {"task_id": "R3", "rep": 0, "success": True, "num_calls": 1, "calls": []},
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": [], "trace_integrity": True},
+        {"task_id": "R2", "rep": 0, "success": True, "num_calls": 4, "calls": [], "trace_integrity": True},
+        {"task_id": "R3", "rep": 0, "success": True, "num_calls": 1, "calls": [], "trace_integrity": True},
     ]
 
     comparison = ab_compare(rows_a, rows_b)
@@ -76,14 +76,14 @@ def test_ab_compare_behaviours(capsys):
 
 def test_ab_compare_multi_rep_uses_median_successful_call_counts():
     rows_a = [
-        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 1, "calls": []},
-        {"task_id": "R1", "rep": 1, "success": False, "num_calls": 9, "calls": []},
-        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 5, "calls": []},
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 1, "calls": [], "trace_integrity": True},
+        {"task_id": "R1", "rep": 1, "success": False, "num_calls": 9, "calls": [], "trace_integrity": True},
+        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 5, "calls": [], "trace_integrity": True},
     ]
     rows_b = [
-        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": []},
-        {"task_id": "R1", "rep": 1, "success": True, "num_calls": 4, "calls": []},
-        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 6, "calls": []},
+        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": [], "trace_integrity": True},
+        {"task_id": "R1", "rep": 1, "success": True, "num_calls": 4, "calls": [], "trace_integrity": True},
+        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 6, "calls": [], "trace_integrity": True},
     ]
 
     comparison = ab_compare(rows_a, rows_b)
@@ -103,7 +103,7 @@ def test_ab_compare_excludes_trace_invalid_call_counts():
             "calls": [],
         }
     ]
-    rows_b = [{"task_id": "R1", "success": True, "num_calls": 1, "calls": []}]
+    rows_b = [{"task_id": "R1", "success": True, "trace_integrity": True, "num_calls": 1, "calls": []}]
 
     comparison = ab_compare(rows_a, rows_b)
 

@@ -75,21 +75,16 @@ def ensure_proxy_pythonpath(env: dict[str, str]) -> dict[str, str]:
     return out
 
 
-def load_proxy_sidecar(
-    path: Path,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Load and validate the sidecar as independently finalized proxy sessions.
+def proxy_session_paths(path: Path) -> list[Path]:
+    """Discover the legacy base file and every per-process session derived from it."""
+    discovered = list(path.parent.glob(f"{path.name}.*.jsonl"))
+    if path.is_file():
+        discovered.append(path)
+    return sorted(set(discovered), key=lambda item: item.name)
 
-    Status keys:
-      - missing / empty / complete / incomplete
-      - torn_line: final line failed to parse
-      - skipped_rows: non-final rows that could not produce a call or metadata row
-      - meta / metas / sessions: final metadata plus per-session validation
-      - pending_left / non_tool_pending_left: sums across sessions
-      - sequence errors: sums of per-session invalid/duplicate/missing/unexpected values
-      - proxy_meta_not_final: a trailing session lacks its terminating metadata
-      - tool_manifest_disagreement: finalized sessions advertised different surfaces
-    """
+
+def load_proxy_sidecar(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Load, validate, and merge exactly one proxy session from each sidecar file."""
     status: dict[str, Any] = {
         "state": "missing",
         "torn_line": False,
@@ -98,6 +93,9 @@ def load_proxy_sidecar(
         "metas": [],
         "sessions": [],
         "session_count": 0,
+        "session_file_count": 0,
+        "session_files": [],
+        "all_sessions_finalized": False,
         "unfinalized_sessions": 0,
         "pending_left": None,
         "non_tool_pending_left": None,
@@ -112,71 +110,77 @@ def load_proxy_sidecar(
         "tool_manifest_fingerprints": [],
         "tool_manifest_missing_sessions": 0,
     }
-    if not path.is_file():
+    session_paths = proxy_session_paths(path)
+    if not session_paths:
         return [], status
-    try:
-        raw = path.read_bytes()
-    except OSError:
-        return [], status
-    if not raw:
-        status["state"] = "empty"
-        return [], status
+    status["session_file_count"] = len(session_paths)
+    status["session_files"] = [str(session_path) for session_path in session_paths]
 
-    # Each proxy process restarts seq at 1 and terminates its segment with
-    # proxy_meta. Validate and order calls within those boundaries, never over
-    # the whole file where healthy sessions can have colliding seq values.
-    lines = raw.decode("utf-8", errors="replace").splitlines()
-    raw_segments: list[dict[str, Any]] = []
-    current: dict[str, Any] = {"calls": [], "meta": None, "torn_line": False, "skipped_rows": 0}
-    current_has_rows = False
-    for i, line in enumerate(lines):
-        s = line.strip()
-        if not s:
-            continue
-        current_has_rows = True
-        try:
-            row = json.loads(s)
-        except json.JSONDecodeError:
-            # Tolerate a torn final line (crash mid-write); stop there.
-            if i == len(lines) - 1:
-                current["torn_line"] = True
-                break
-            current["skipped_rows"] += 1
-            continue
-        if not isinstance(row, dict):
-            current["skipped_rows"] += 1
-            continue
-        if row.get("row_type") == "proxy_meta":
-            current["meta"] = row
-            raw_segments.append(current)
-            current = {"calls": [], "meta": None, "torn_line": False, "skipped_rows": 0}
-            current_has_rows = False
-            continue
-        tool = row.get("tool")
-        if not tool:
-            current["skipped_rows"] += 1
-            continue
-        call = {
-            "tool": str(tool),
-            "args": row.get("args") if isinstance(row.get("args"), dict) else (row.get("args") or {}),
-            "origin": "plane",
-            "is_error": bool(row.get("is_error")),
-            "result_chars": int(row.get("result_chars") or 0),
-            "duration_ms": row.get("duration_ms"),
-            "seq": row.get("seq"),
+    raw_sessions: list[dict[str, Any]] = []
+    for session_path in session_paths:
+        raw_session: dict[str, Any] = {
+            "path": session_path,
+            "calls": [],
+            "metas": [],
+            "torn_line": False,
+            "skipped_rows": 0,
+            "proxy_meta_not_final": False,
         }
-        # Optional in new sidecars; old payload-free rows remain valid.
-        if isinstance(row.get("result_text"), str):
-            call["result_text"] = row["result_text"]
-        if isinstance(row.get("observed_sentinels"), list):
-            call["observed_sentinels"] = [str(value) for value in row["observed_sentinels"]]
-        current["calls"].append(call)
-
-    if current_has_rows:
-        raw_segments.append(current)
-    if not raw_segments:
-        status["state"] = "empty"
-        return [], status
+        try:
+            raw = session_path.read_bytes()
+        except OSError:
+            raw_sessions.append(raw_session)
+            continue
+        lines = raw.decode("utf-8", errors="replace").splitlines()
+        last_row_kind: str | None = None
+        for index, line in enumerate(lines):
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                row = json.loads(text)
+            except json.JSONDecodeError:
+                if index == len(lines) - 1:
+                    raw_session["torn_line"] = True
+                    raw_session["proxy_meta_not_final"] = bool(raw_session["metas"])
+                    break
+                raw_session["skipped_rows"] += 1
+                last_row_kind = "invalid"
+                continue
+            if not isinstance(row, dict):
+                raw_session["skipped_rows"] += 1
+                last_row_kind = "invalid"
+                continue
+            if row.get("row_type") == "proxy_meta":
+                raw_session["metas"].append(row)
+                last_row_kind = "meta"
+                continue
+            tool = row.get("tool")
+            if not tool:
+                raw_session["skipped_rows"] += 1
+                last_row_kind = "invalid"
+                continue
+            call = {
+                "tool": str(tool),
+                "args": row.get("args") if isinstance(row.get("args"), dict) else (row.get("args") or {}),
+                "origin": "plane",
+                "is_error": bool(row.get("is_error")),
+                "result_chars": int(row.get("result_chars") or 0),
+                "duration_ms": row.get("duration_ms"),
+                "seq": row.get("seq"),
+            }
+            if isinstance(row.get("result_text"), str):
+                call["result_text"] = row["result_text"]
+            if isinstance(row.get("observed_sentinels"), list):
+                call["observed_sentinels"] = [str(value) for value in row["observed_sentinels"]]
+            if isinstance(row.get("observed_aggregates"), list):
+                call["observed_aggregates"] = [value for value in row["observed_aggregates"] if isinstance(value, dict)]
+            raw_session["calls"].append(call)
+            last_row_kind = "call"
+        raw_session["proxy_meta_not_final"] = raw_session["proxy_meta_not_final"] or bool(
+            raw_session["metas"] and last_row_kind != "meta"
+        )
+        raw_sessions.append(raw_session)
 
     counter_keys = (
         "pending_left",
@@ -202,19 +206,24 @@ def load_proxy_sidecar(
     calls: list[dict[str, Any]] = []
     session_statuses: list[dict[str, Any]] = []
     manifests: list[str] = []
-    for index, raw_segment in enumerate(raw_segments):
-        segment_calls = raw_segment["calls"]
-        meta = raw_segment["meta"]
-        valid_sequences = [call["seq"] for call in segment_calls if _nonnegative_int(call.get("seq")) not in (None, 0)]
+    for index, raw_session in enumerate(raw_sessions):
+        session_calls = raw_session["calls"]
+        meta_rows = raw_session["metas"]
+        meta = meta_rows[-1] if meta_rows else None
+        valid_sequences = [call["seq"] for call in session_calls if _nonnegative_int(call.get("seq")) not in (None, 0)]
         last_seq = _nonnegative_int(meta.get("last_seq")) if meta is not None else None
         tool_request_count = _nonnegative_int(meta.get("tool_request_count")) if meta is not None else None
         segment: dict[str, Any] = {
             "index": index,
+            "path": str(raw_session["path"]),
             "meta": meta,
-            "call_count": len(segment_calls),
-            "torn_line": bool(raw_segment["torn_line"]),
-            "skipped_rows": int(raw_segment["skipped_rows"]),
-            "invalid_seq": len(segment_calls) - len(valid_sequences),
+            "meta_count": len(meta_rows),
+            "call_count": len(session_calls),
+            "torn_line": bool(raw_session["torn_line"]),
+            "skipped_rows": int(raw_session["skipped_rows"]),
+            "proxy_meta_not_final": bool(raw_session["proxy_meta_not_final"]),
+            "finalized": len(meta_rows) == 1 and not raw_session["proxy_meta_not_final"],
+            "invalid_seq": len(session_calls) - len(valid_sequences),
             "duplicate_seq": len(valid_sequences) - len(set(valid_sequences)),
             "missing_seq": 0,
             "unexpected_seq": 0,
@@ -224,7 +233,9 @@ def load_proxy_sidecar(
             "tool_request_count": tool_request_count,
         }
         if meta is not None:
-            segment["invalid_meta_fields"] = int(last_seq is None) + int(tool_request_count is None)
+            segment["invalid_meta_fields"] = (
+                abs(len(meta_rows) - 1) + int(last_seq is None) + int(tool_request_count is None)
+            )
             if last_seq is not None and tool_request_count is not None and tool_request_count != last_seq:
                 segment["invalid_meta_fields"] += 1
             expected_sequences = set(range(1, last_seq + 1)) if last_seq is not None else set()
@@ -246,32 +257,32 @@ def load_proxy_sidecar(
         segment["state"] = (
             "incomplete"
             if meta is None
+            or not segment["finalized"]
             or segment["torn_line"]
             or segment["skipped_rows"] > 0
             or any((segment.get(key) or 0) > 0 for key in fatal_counts)
             or segment["pumps_alive"]
             else "complete"
         )
-        # Preserve request order inside a session, then concatenate sessions in
-        # file order. Never globally sort colliding per-process seq values.
-        segment_calls.sort(
+        session_calls.sort(
             key=lambda call: (
                 _nonnegative_int(call.get("seq")) in (None, 0),
                 _nonnegative_int(call.get("seq")) or 0,
             )
         )
-        calls.extend(segment_calls)
+        calls.extend(session_calls)
         session_statuses.append(segment)
 
     metas = [segment["meta"] for segment in session_statuses if segment["meta"] is not None]
-    unfinalized_sessions = sum(segment["meta"] is None for segment in session_statuses)
+    unfinalized_sessions = sum(not segment["finalized"] for segment in session_statuses)
     status["sessions"] = session_statuses
     status["session_count"] = len(session_statuses)
     status["metas"] = metas
     status["meta"] = metas[-1] if metas else None
-    status["proxy_meta_count"] = len(metas)
+    status["proxy_meta_count"] = sum(segment["meta_count"] for segment in session_statuses)
     status["unfinalized_sessions"] = unfinalized_sessions
-    status["proxy_meta_not_final"] = unfinalized_sessions > 0
+    status["all_sessions_finalized"] = bool(session_statuses) and unfinalized_sessions == 0
+    status["proxy_meta_not_final"] = any(segment["proxy_meta_not_final"] for segment in session_statuses)
     status["torn_line"] = any(segment["torn_line"] for segment in session_statuses)
     status["pumps_alive"] = any(segment["pumps_alive"] for segment in session_statuses)
     aggregate_keys = (
@@ -294,12 +305,22 @@ def load_proxy_sidecar(
     status["tool_manifest_fingerprint"] = (
         unique_manifests[0] if len(unique_manifests) == 1 and missing_manifests == 0 else None
     )
+    status["evidence_trace_available"] = (
+        bool(metas)
+        and len(metas) == len(session_statuses)
+        and all(bool(meta.get("evidence_trace_available")) for meta in metas)
+    )
     if status["meta"] is not None:
         status["finalization_reason"] = status["meta"].get("finalization_reason")
         status["finalization_signal"] = status["meta"].get("finalization_signal")
-    status["state"] = (
-        "incomplete" if any(segment["state"] == "incomplete" for segment in session_statuses) else "complete"
-    )
+    if all(segment["call_count"] == 0 and segment["meta_count"] == 0 for segment in session_statuses) and not (
+        status["torn_line"] or status["skipped_rows"]
+    ):
+        status["state"] = "empty"
+    else:
+        status["state"] = (
+            "incomplete" if any(segment["state"] == "incomplete" for segment in session_statuses) else "complete"
+        )
     return calls, status
 
 
@@ -360,12 +381,23 @@ def proxy_pid_path(sidecar_path: Path) -> Path:
 
 
 def _read_proxy_pid(sidecar_path: Path) -> int | None:
-    try:
-        raw = proxy_pid_path(sidecar_path).read_text(encoding="ascii").strip()
-        pid = int(raw)
-    except (OSError, UnicodeError, ValueError):
-        return None
-    return pid if pid > 0 else None
+    pids = _read_proxy_pids(sidecar_path)
+    return pids[-1] if pids else None
+
+
+def _read_proxy_pids(sidecar_path: Path) -> list[int]:
+    lifecycle_paths = [proxy_pid_path(path) for path in proxy_session_paths(sidecar_path)]
+    lifecycle_paths.extend(sidecar_path.parent.glob(f"{sidecar_path.name}.*.jsonl.pid"))
+    lifecycle_paths.append(proxy_pid_path(sidecar_path))
+    pids: set[int] = set()
+    for lifecycle_path in set(lifecycle_paths):
+        try:
+            pid = int(lifecycle_path.read_text(encoding="ascii").strip())
+        except (OSError, UnicodeError, ValueError):
+            continue
+        if pid > 0:
+            pids.add(pid)
+    return sorted(pids)
 
 
 def _process_is_alive(pid: int) -> bool:
@@ -396,17 +428,17 @@ def _wait_for_proxy_meta_outcome(
     # A completed CLI cannot launch a proxy after the fact. No trace and no
     # lifecycle file therefore means the proxy was never observed, rather than
     # a finalizer that could benefit from waiting for the whole deadline.
-    pid = _read_proxy_pid(sidecar_path)
-    if not sidecar_path.exists() and pid is None:
+    pids = _read_proxy_pids(sidecar_path)
+    if not proxy_session_paths(sidecar_path) and not pids:
         return "proxy_not_observed"
 
     deadline = time.monotonic() + max(0.0, max_wait_s)
     while True:
         _, status = load_proxy_sidecar(sidecar_path)
-        if status.get("meta") is not None:
+        if status.get("all_sessions_finalized"):
             return "meta_present"
-        pid = _read_proxy_pid(sidecar_path)
-        if pid is not None and not _process_is_alive(pid):
+        pids = _read_proxy_pids(sidecar_path)
+        if pids and not any(_process_is_alive(pid) for pid in pids):
             return "proxy_exited"
         rem = deadline - time.monotonic()
         if rem <= 0:
@@ -416,10 +448,10 @@ def _wait_for_proxy_meta_outcome(
     # Close the boundary races in both directions: metadata may have landed on
     # the final sleep, or the proxy may have exited without writing it.
     _, status = load_proxy_sidecar(sidecar_path)
-    if status.get("meta") is not None:
+    if status.get("all_sessions_finalized"):
         return "meta_present"
-    pid = _read_proxy_pid(sidecar_path)
-    if pid is not None and not _process_is_alive(pid):
+    pids = _read_proxy_pids(sidecar_path)
+    if pids and not any(_process_is_alive(pid) for pid in pids):
         return "proxy_exited"
     return "timeout"
 
@@ -551,6 +583,7 @@ __all__ = [
     "load_proxy_sidecar",
     "load_proxy_sidecar_calls",
     "proxy_pid_path",
+    "proxy_session_paths",
     "proxy_wrap_server_command",
     "ProxySidecarResult",
     "trace_integrity_from_status",

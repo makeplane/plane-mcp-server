@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Literal
 
-from evals.results import TaskResult
+from evals.results import TRACE_INTEGRITY_SCHEMA_VERSION, TaskResult
 from evals.skip_taxonomy import is_expected_environment_capability_skip, skip_reason_family
 
 from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
@@ -227,7 +227,9 @@ def summarize(
         declared_expected_rows = max(declared_expected_rows, row.expected_rows)
         task_id = row.task_id
         repetitions_by_task[task_id].add(row.rep)
-        if not row.trace_integrity:
+        if row.trace_integrity is False or (
+            row.trace_integrity is None and row.schema_version >= TRACE_INTEGRITY_SCHEMA_VERSION
+        ):
             trace_invalid_rows += 1
         if row.cleanup_error:
             cleanup_errors += 1
