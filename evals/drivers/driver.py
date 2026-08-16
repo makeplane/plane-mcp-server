@@ -235,7 +235,9 @@ class ApiDriver:
         evidence_sentinels: dict[str, Any] | None = None,
         evidence_targets: dict[str, Any] | None = None,
         evidence_aggregates: dict[str, Any] | None = None,
+        artifact_dir: Path | None = None,
     ) -> AgentRun:
+        del artifact_dir
         if not model:
             raise ValueError("the API driver requires a model ID")
         if max_turns < 1:
@@ -459,6 +461,7 @@ class CliLaunch:
     cwd: Path
     config_args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
+    artifact_dir: Path | None = None
 
 
 @dataclass
@@ -567,6 +570,7 @@ class CliDriver(ABC):
         self,
         proc: subprocess.CompletedProcess[str],
         *,
+        launch: CliLaunch,
         task_cwd: Path,
         max_turns: int,
         notes: list[str],
@@ -600,6 +604,7 @@ class CliDriver(ABC):
         evidence_sentinels: dict[str, Any] | None = None,
         evidence_targets: dict[str, Any] | None = None,
         evidence_aggregates: dict[str, Any] | None = None,
+        artifact_dir: Path | None = None,
     ) -> AgentRun:
         """Run one CLI task using the shared configuration/proxy/timeout flow."""
         task_cwd = (cwd or REPO_ROOT).resolve()
@@ -653,6 +658,11 @@ class CliDriver(ABC):
                 server_command=server_command,
                 child_env=child_env,
             )
+            launch.artifact_dir = (
+                artifact_dir
+                if artifact_dir is not None
+                else task_cwd / "evals" / "output" / "driver-artifacts" / self.name
+            ).resolve()
             command = self.build_command(
                 prompt,
                 model=model,
@@ -719,6 +729,7 @@ class CliDriver(ABC):
             try:
                 output = self.parse_output(
                     proc,
+                    launch=launch,
                     task_cwd=task_cwd,
                     max_turns=max_turns,
                     notes=notes,

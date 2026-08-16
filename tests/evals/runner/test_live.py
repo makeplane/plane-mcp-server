@@ -1090,6 +1090,7 @@ def test_persisted_seed_artifacts_never_contain_run_random_truth_or_entity_ids(t
         def run_task(self, *_args, **kwargs):
             assert _data_rows(out) == []
             assert kwargs["evidence_sentinels"] == {TARGET_ENTITY_EVIDENCE: [seeded_values["sentinel"]]}
+            assert kwargs["artifact_dir"] == tmp_path / "forensics.artifacts" / "api"
             return AgentRun(calls=[], final_text="done", usage=None, stopped_reason="end_turn")
 
     async def verify_ok(_plane, _ctx, _run):

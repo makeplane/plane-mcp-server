@@ -94,7 +94,10 @@ class AntigravityCliDriver(CliDriver):
     Probed 2026-08-12: -p headless, --output-format text|json|stream-json, --model,
     --dangerously-skip-permissions. MCP only via ~/.gemini/config/mcp_config.json with no
     CLI flag, hence HOME isolation; no turn-cap flag, so hit_max_turns=False plus a note.
-    Tool calls come from the proxy sidecar, not from parsing agy stdout.
+    Tool calls come from the proxy sidecar, not from parsing agy stdout. Antigravity CLI
+    1.1.13 has no MCP or effective-config introspection command, so its server exclusivity
+    cannot be proven by real-binary readback: it is explicitly unverifiable and supported
+    only by isolated HOME/XDG roots plus inspection of the generated files.
     """
 
     name = "antigravity-cli"
@@ -194,11 +197,12 @@ class AntigravityCliDriver(CliDriver):
         self,
         proc: subprocess.CompletedProcess[str],
         *,
+        launch: CliLaunch,
         task_cwd: Path,
         max_turns: int,
         notes: list[str],
     ) -> CliOutput:
-        del task_cwd, max_turns
+        del launch, task_cwd, max_turns
         final_text = (proc.stdout or "").strip()
         try:
             if final_text.lstrip().startswith("{"):

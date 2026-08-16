@@ -42,6 +42,7 @@ def _synth_row(
         "error": error,
         "error_class": error_class,
         "calls": list(calls or []),
+        "tool_manifest_fingerprint": "manifest-a",
     }
 
 
@@ -199,7 +200,8 @@ def _report_main_table_refuses_when_battery_fingerprints_differ(tmp_path, capsys
 
 def _report_main_markdown_flag(tmp_path, capsys):
     f1 = tmp_path / "a.jsonl"
-    f1.write_text(json.dumps(_synth_row("R1", label="candidate", num_calls=1)) + "\n", encoding="utf-8")
+    row = {**_synth_row("R1", label="candidate", num_calls=1), "tool_manifest_fingerprint": None}
+    f1.write_text(json.dumps(row) + "\n", encoding="utf-8")
     rc = report_mod.main(["--table", "--markdown", str(f1)])
     assert rc == 0
     out = capsys.readouterr().out
@@ -340,5 +342,30 @@ def test_single_rep_multi_surface_renders_tool_distribution_unavailable():
         "local        success task-cluster 100.0% [1.00,1.00]; pooled 1/1  total calls 2  "
         "tool variability —  infra 0\n"
         "local        EXECUTION COVERAGE: 1/1 rows evaluated (100.0%)\n"
+        "local        off-surface indicators: 0\n"
+        "local          zero-call success: 0\n"
+        "local          write without a write call: 0\n"
+        "local          answer without provenance: 0\n"
+        "local          implausibly few calls: 0; rule: among at least 5 successful trace-usable repetitions for "
+        "the same task, calls < Q1 - 3×IQR and calls ≤ half the task median\n"
+        "local          limitation: detects off-surface work only when it leaves a trace signature; it cannot detect "
+        "an agent that performs the work off-surface and also makes convincing surface calls\n"
         "local        RUN COMPLETE: 1/1 rows completed\n"
     )
+
+
+def test_multi_surface_table_reports_off_surface_indicators_per_column_in_plain_and_markdown():
+    clean = [_synth_row("R1", label="clean", num_calls=1, calls=[{"tool": "list_work_items"}])]
+    bypass = [_synth_row("W1", label="bypass", num_calls=0, calls=[])]
+    table = build_multi_surface_table([("clean", clean), ("bypass", bypass)])
+
+    plain = render_multi_surface_table(table)
+    assert "clean        off-surface indicators: 0" in plain
+    assert "bypass       off-surface indicators: 1 flagged rows (2 indicator hits)" in plain
+    assert "bypass         zero-call success: 1 [W1[rep=0]]" in plain
+    assert "bypass         write without a write call: 1 [W1[rep=0]]" in plain
+
+    markdown = render_multi_surface_table(table, markdown=True)
+    assert "| **off-surface indicators** | |" in markdown
+    assert "off-surface indicators: 0<br>" in markdown
+    assert "off-surface indicators: 1 flagged rows (2 indicator hits)<br>" in markdown

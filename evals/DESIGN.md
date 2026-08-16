@@ -198,6 +198,20 @@ CLI agents already own their model conversation and tool loop, so they implement
 subprocess, configuration, transcript, and usage differences stay within their driver
 modules.
 
+CLI MCP configuration is isolated from ambient user state, but the strength of the
+effective-config evidence differs by vendor:
+
+| Driver | Effective-config exclusivity evidence |
+|---|---|
+| Claude | **Readback-supported, not behaviorally proven for the evaluated invocation.** Real `claude mcp list` reads the same isolated `.claude.json` and observes only `plane`. The evaluated `claude -p` receives that file plus `--strict-mcp-config`; exclusion of project/ambient MCP servers rests on the CLI's documented strict-config contract, not a forbidden-server probe of that invocation. HOME, `CLAUDE_CONFIG_DIR`, and all XDG roots are isolated. |
+| Codex | Proven by real `codex mcp list --json` readback under the isolated Codex home. |
+| OpenCode | Proven by real `opencode debug config` readback under isolated HOME/XDG roots and the generated project config. |
+| Antigravity | **Unverifiable.** Antigravity CLI 1.1.13 has no MCP/effective-config introspection command. The harness isolates HOME/XDG roots and inspects generated files, but neither the harness nor this design treats that as observed effective-config exclusivity. |
+
+The Antigravity "unverifiable" regression test is documentation coverage: it guards this
+claim, not runtime behavior. Separate behavioral tests cover HOME/XDG isolation and generated
+file placement, but those still cannot observe Antigravity's effective server set.
+
 Several loop rules are deliberately centralized in `ApiDriver`:
 
 - Tool results are paired to model calls by call ID, never by list position. Missing,

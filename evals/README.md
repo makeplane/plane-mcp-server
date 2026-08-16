@@ -65,8 +65,8 @@ errors, and observed tool distributions use the same rules as local-server rows.
 |---|---|---|
 | `api` | Owned API + MCP loop | Provider-neutral; tiers resolve for `--provider anthropic` (default) or `openai` |
 | `codex-cli` | OpenAI Codex CLI | `standard` and `fast` resolve to verified GPT-5.6 IDs |
-| `claude-cli` | Claude Code CLI | `standard` resolves to `sonnet`; `fast` resolves to `haiku` |
-| `antigravity-cli` | Antigravity CLI (`agy`) | Verified against `agy models`; runs under a synthetic HOME so its MCP config is ours, not yours |
+| `claude-cli` | Claude Code CLI | `standard` resolves to `sonnet`; `fast` resolves to `haiku`; isolated HOME/config/XDG roots and strict MCP config |
+| `antigravity-cli` | Antigravity CLI (`agy`) | Verified against `agy models`; isolated HOME/XDG and generated config, but 1.1.13 has no effective-config readback, so exclusivity is unverifiable |
 | `opencode-cli` | OpenCode | Tiers are intentionally unmapped; pass an explicit ID listed by `opencode models` |
 
 ### Model tiers
@@ -96,6 +96,11 @@ the row even after its mapping changes.
 Every CLI driver records the actual JSON-RPC traffic through a recording proxy, so tool
 calls are normally counted from the wire rather than from whatever the agent claims it did.
 If a sidecar is incomplete, the driver can fall back to its CLI event stream or transcript.
+Claude transcripts used for fallback are copied out of disposable per-task config into
+`<result-stem>.artifacts/claude-cli/` before the row is written, so `driver_raw_ref` remains
+resolvable. A file-credential copy failure aborts the task before Claude starts. Refreshed
+file credentials are intentionally not copied back into user auth because that would mutate
+user state and create cross-task/concurrent refresh races; Claude rows record this limitation.
 
 The API driver executes MCP calls itself, records exact result character counts, and sizes
 result tokens without making a provider request per result. A backend may supply a token
@@ -296,8 +301,9 @@ Keep such scripts outside version control — `localdev/` is ignored for exactly
   compares raw `(task_id, rep)` occurrences with that declaration before latest-wins
   deduplication, naming missing and unexpected keys (including duplicate excess).
 - Report headlines use a task-cluster bootstrap interval; the pooled repetition rate and
-  Wilson interval remain visible but are explicitly labeled as pooled. A/B and surface-table
-  reports warn when any input lacks a tool-manifest fingerprint.
+  Wilson interval remain visible but are explicitly labeled as pooled. A/B and multi-file
+  surface-table reports refuse a comparison when any input lacks a tool-manifest
+  fingerprint; missing is an explicit unidentified value, not a wildcard.
 - A feature switched **off for a project** is not a plan gate — it is configuration the
   harness sets itself, and W11 exists to measure what an agent does when it meets one.
 - **Gated endpoints returning 402 on a workspace that should work.** Feature flags are

@@ -523,7 +523,7 @@ def test_max_turns_detection_from_num_turns():
     assert run.usage_total["total_input_tokens_including_cache"] == 10 + 250433 + 33838
 
 
-def _claude_driver_falls_back_to_transcript(tmp_path, monkeypatch):
+def _claude_driver_falls_back_to_transcript(tmp_path, _monkeypatch):
     session_id = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
     payload = {
         **CLAUDE_JSON_RESULT,
@@ -533,15 +533,15 @@ def _claude_driver_falls_back_to_transcript(tmp_path, monkeypatch):
     }
 
     def fake_run(cmd, **kwargs):
+        config_dir = Path(kwargs["env"]["CLAUDE_CONFIG_DIR"])
+        munged = str(tmp_path.resolve()).replace("/", "-")
+        project_dir = config_dir / "projects" / munged
+        project_dir.mkdir(parents=True, exist_ok=True)
+        (project_dir / f"{session_id}.jsonl").write_text(
+            _transcript_lines(include_tool_search=True),
+            encoding="utf-8",
+        )
         return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
-
-    # Keep transcript discovery isolated from the developer's real home.
-    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    munged = str(tmp_path.resolve()).replace("/", "-")
-    proj = Path.home() / ".claude" / "projects" / munged
-    proj.mkdir(parents=True, exist_ok=True)
-    transcript = proj / f"{session_id}.jsonl"
-    transcript.write_text(_transcript_lines(include_tool_search=True), encoding="utf-8")
 
     driver = ClaudeCliDriver(runner=fake_run)
     run = driver.run_task(
@@ -555,8 +555,95 @@ def _claude_driver_falls_back_to_transcript(tmp_path, monkeypatch):
     assert [c["tool"] for c in run.calls] == ["list_work_items", "get_work_item"]
     assert [c["tool"] for c in run.client_tool_calls] == ["ToolSearch"]
     assert run.final_text == "from-json"
-    # cleanup planted file
-    transcript.unlink(missing_ok=True)
+
+
+def test_claude_transcript_raw_ref_survives_run_task(tmp_path):
+    session_id = "cccccccc-dddd-eeee-ffff-000000000001"
+    payload = {
+        **CLAUDE_JSON_RESULT,
+        "session_id": session_id,
+        "tool_calls": [],
+        "result": "from-json",
+    }
+
+    def fake_run(cmd, **kwargs):
+        config_dir = Path(kwargs["env"]["CLAUDE_CONFIG_DIR"])
+        munged = str(tmp_path.resolve()).replace("/", "-")
+        project_dir = config_dir / "projects" / munged
+        project_dir.mkdir(parents=True, exist_ok=True)
+        (project_dir / f"{session_id}.jsonl").write_text(
+            _transcript_lines(include_tool_search=True),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+
+    run = ClaudeCliDriver(runner=fake_run, use_proxy=False).run_task(
+        "prompt",
+        mcp_env={"PLANE_API_KEY": "k", "PLANE_WORKSPACE_SLUG": "ws"},
+        model=None,
+        max_turns=10,
+        cwd=tmp_path,
+    )
+
+    assert run.raw_ref is not None
+    transcript = Path(run.raw_ref)
+    assert transcript.is_file()
+    assert [call["tool"] for call in parse_claude_transcript_calls(transcript)] == [
+        "ToolSearch",
+        "list_work_items",
+        "get_work_item",
+    ]
+
+
+def test_claude_transcript_lookup_is_launch_local_and_reentrant(tmp_path):
+    session_id = "same-session-id"
+    task_cwd = tmp_path / "task-cwd"
+    task_cwd.mkdir()
+    driver = ClaudeCliDriver(runner=lambda *_args, **_kwargs: None, use_proxy=False)
+
+    def launch_with_transcript(name: str):
+        launch = driver.write_mcp_config(
+            tmp_path / f"state-{name}",
+            task_cwd=task_cwd,
+            server_command=["/usr/bin/true"],
+            child_env={},
+        )
+        launch.artifact_dir = tmp_path / f"artifacts-{name}"
+        config_dir = Path((launch.env or {})["CLAUDE_CONFIG_DIR"])
+        munged = str(task_cwd.resolve()).replace("/", "-")
+        transcript_dir = config_dir / "projects" / munged
+        transcript_dir.mkdir(parents=True)
+        transcript_dir.joinpath(f"{session_id}.jsonl").write_text(
+            json.dumps(
+                {
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": f"mcp__plane__tool_{name}",
+                                "input": {"surface": name},
+                            }
+                        ]
+                    }
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return launch
+
+    launch_a = launch_with_transcript("a")
+    launch_b = launch_with_transcript("b")
+    payload = json.dumps({**CLAUDE_JSON_RESULT, "session_id": session_id, "tool_calls": []})
+    proc = subprocess.CompletedProcess([], 0, stdout=payload, stderr="")
+
+    output_a = driver.parse_output(proc, launch=launch_a, task_cwd=task_cwd, max_turns=10, notes=[])
+    output_b = driver.parse_output(proc, launch=launch_b, task_cwd=task_cwd, max_turns=10, notes=[])
+
+    assert [call["tool"] for call in output_a.calls] == ["tool_a"]
+    assert [call["tool"] for call in output_b.calls] == ["tool_b"]
+    assert output_a.raw_ref is not None and Path(output_a.raw_ref).is_relative_to(launch_a.artifact_dir)
+    assert output_b.raw_ref is not None and Path(output_b.raw_ref).is_relative_to(launch_b.artifact_dir)
 
 
 def _claude_driver_writes_mcp_config_and_cmd_flags(tmp_path, _monkeypatch):
@@ -565,6 +652,7 @@ def _claude_driver_writes_mcp_config_and_cmd_flags(tmp_path, _monkeypatch):
     def fake_run(cmd, **kwargs):
         seen["cmd"] = cmd
         seen["cwd"] = kwargs.get("cwd")
+        seen["env"] = kwargs.get("env")
         # Return minimal valid JSON
         return subprocess.CompletedProcess(
             cmd,
@@ -597,6 +685,9 @@ def _claude_driver_writes_mcp_config_and_cmd_flags(tmp_path, _monkeypatch):
     assert "--model" in cmd and "sonnet" in cmd
     assert "--permission-mode" in cmd and "bypassPermissions" in cmd
     assert "--strict-mcp-config" in cmd
+    assert seen["env"]["HOME"] != str(Path.home())
+    assert seen["env"]["CLAUDE_CONFIG_DIR"]
+    assert all(seen["env"][name] for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"))
     # mcp-config path is a temp file cleaned after run — re-check via write helper
     cfg = tmp_path / "mcp.json"
     write_claude_mcp_config(

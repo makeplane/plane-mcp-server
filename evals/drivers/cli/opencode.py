@@ -148,11 +148,12 @@ class OpencodeCliDriver(CliDriver):
         self,
         proc: subprocess.CompletedProcess[str],
         *,
+        launch: CliLaunch,
         task_cwd: Path,
         max_turns: int,
         notes: list[str],
     ) -> CliOutput:
-        del task_cwd, max_turns
+        del launch, task_cwd, max_turns
         final_text = (proc.stdout or "").strip()
         # JSONL events: concatenate text-ish fields best-effort.
         if final_text and "\n" in final_text:

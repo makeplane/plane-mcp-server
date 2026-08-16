@@ -1,16 +1,24 @@
 """Claude Code CLI driver and transcript/JSON parsers.
 
-Probed (claude v2.1.228): -p headless; --mcp-config (repeatable) + --strict-mcp-config;
+Probed (claude v2.1.232): -p headless; --mcp-config (repeatable) + --strict-mcp-config;
 --output-format json|text|stream-json; --max-turns (present but hidden from --help);
 --model; --permission-mode; transcript at
-~/.claude/projects/<cwd-with-/-as-->/<session_id>.jsonl, assistant rows carrying
-tool_use blocks; MCP tools appear as mcp__<server>__<tool>.
+<CLAUDE_CONFIG_DIR>/projects/<cwd-with-/-as-->/<session_id>.jsonl, assistant rows
+carrying tool_use blocks; MCP tools appear as mcp__<server>__<tool>. The CLI's own help
+defines --strict-mcp-config as ignoring every MCP source except --mcp-config. The harness
+passes the same isolated .claude.json to that option and to real-binary ``claude mcp list``
+readback, which observes only ``plane``. That readback supports the configuration claim;
+exclusion during the evaluated ``claude -p`` invocation rests on the documented strict flag,
+not behavioral observation of that invocation.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -87,10 +95,11 @@ def normalize_claude_usage(data: dict[str, Any]) -> tuple[dict[str, Any] | None,
     return raw, usage_total
 
 
-def _claude_project_dir(cwd: Path) -> Path:
-    """Map a cwd to ``~/.claude/projects/<munged>`` (``/`` → ``-``)."""
+def _claude_project_dir(cwd: Path, *, config_dir: Path | None = None) -> Path:
+    """Map a cwd to Claude's ``projects/<munged>`` transcript directory."""
     munged = str(cwd.resolve()).replace("/", "-")
-    return Path.home() / ".claude" / "projects" / munged
+    root = config_dir or Path.home() / ".claude"
+    return root / "projects" / munged
 
 
 def parse_claude_json_result(payload: dict[str, Any] | str) -> dict[str, Any]:
@@ -208,15 +217,20 @@ def parse_claude_transcript_calls(transcript_path: Path) -> list[dict[str, Any]]
     return calls
 
 
-def find_claude_transcript(session_id: str | None, cwd: Path) -> Path | None:
-    """Locate ``~/.claude/projects/<munged-cwd>/<session_id>.jsonl``."""
+def find_claude_transcript(
+    session_id: str | None,
+    cwd: Path,
+    *,
+    config_dir: Path | None = None,
+) -> Path | None:
+    """Locate ``<config-dir>/projects/<munged-cwd>/<session_id>.jsonl``."""
     if not session_id:
         return None
-    candidate = _claude_project_dir(cwd) / f"{session_id}.jsonl"
+    candidate = _claude_project_dir(cwd, config_dir=config_dir) / f"{session_id}.jsonl"
     if candidate.is_file():
         return candidate
     # Fallback: scan project dir for a file containing the session id
-    proj = _claude_project_dir(cwd)
+    proj = _claude_project_dir(cwd, config_dir=config_dir)
     if not proj.is_dir():
         return None
     direct = proj / f"{session_id}.jsonl"
@@ -249,15 +263,78 @@ def write_claude_mcp_config(
     path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
+def persist_claude_transcript(
+    transcript: Path,
+    *,
+    artifact_dir: Path,
+    session_id: str,
+) -> Path:
+    """Copy a per-task transcript out of disposable Claude state for row forensics."""
+    artifact_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    safe_session = "".join(character for character in session_id if character.isalnum() or character in "-_")
+    destination = artifact_dir / f"{safe_session or 'session'}-{uuid.uuid4().hex}.jsonl"
+    shutil.copy2(transcript, destination)
+    destination.chmod(0o600)
+    return destination
+
+
+def prepare_claude_isolated_environment(
+    temp_dir: Path,
+    *,
+    real_config_dir: Path | None = None,
+) -> dict[str, str]:
+    """Return isolated HOME/config/XDG roots with only Claude's login artifact copied."""
+    fake_home = temp_dir / "home"
+    claude_config = temp_dir / "claude-config"
+    xdg_roots = {
+        name: temp_dir / name.lower().replace("_home", "")
+        for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
+    }
+    for directory in (fake_home, claude_config, *xdg_roots.values()):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    source_config = real_config_dir or Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    source_credentials = source_config / ".credentials.json"
+    if source_credentials.is_file():
+        try:
+            shutil.copy2(source_credentials, claude_config / ".credentials.json")
+        except OSError as exc:
+            raise RuntimeError(
+                f"failed to copy Claude credentials into isolated config from {source_credentials}: {exc}"
+            ) from exc
+
+    return {
+        **os.environ,
+        "HOME": str(fake_home),
+        "CLAUDE_CONFIG_DIR": str(claude_config),
+        **{name: str(directory) for name, directory in xdg_roots.items()},
+    }
+
+
 # ---------------------------------------------------------------------------
 # Claude CLI driver
 # ---------------------------------------------------------------------------
 
 
 class ClaudeCliDriver(CliDriver):
-    """Run tasks via ``claude -p`` on the user's Claude Code subscription."""
+    """Run Claude Code with isolated state and readback-supported strict MCP config.
+
+    ``--strict-mcp-config`` makes the launch-scoped file exclusive by the Claude CLI's
+    documented contract, not a behavioral probe of the evaluated ``claude -p`` invocation.
+    HOME, CLAUDE_CONFIG_DIR, and every XDG root are isolated so ambient user-home state is
+    not inherited. A real ``claude mcp list`` reads the same temporary .claude.json and
+    observes exactly the ``plane`` server.
+
+    Known limitation: a refreshed file-based credential is discarded with the per-task
+    config. It is not copied into user state because doing so would mutate the user's auth
+    and introduce cross-task/concurrent refresh races; later tasks re-copy the durable source.
+    """
 
     name = "claude-cli"
+    run_notes = (
+        "known_limitation:claude_file_credentials_refresh_discarded:per-task config is deleted; "
+        "refresh is not copied to user auth to avoid mutation and cross-task races",
+    )
     temp_dir_prefix = "plane-eval-claude-"
 
     def __init__(
@@ -293,7 +370,13 @@ class ClaudeCliDriver(CliDriver):
         server_command: list[str],
         child_env: dict[str, str],
     ) -> CliLaunch:
-        mcp_cfg = temp_dir / "mcp.json"
+        run_env = prepare_claude_isolated_environment(temp_dir)
+        if "PATH" in child_env:
+            run_env["PATH"] = child_env["PATH"]
+        transcript_config_dir = Path(run_env["CLAUDE_CONFIG_DIR"])
+        # Claude's management readback consumes this location, while the session receives
+        # the exact same physical file through --mcp-config.
+        mcp_cfg = transcript_config_dir / ".claude.json"
         write_claude_mcp_config(
             mcp_cfg,
             command=server_command[0],
@@ -301,7 +384,11 @@ class ClaudeCliDriver(CliDriver):
             env=child_env,
             server_name="plane",
         )
-        return CliLaunch(cwd=task_cwd, config_args=["--mcp-config", str(mcp_cfg)])
+        return CliLaunch(
+            cwd=task_cwd,
+            config_args=["--mcp-config", str(mcp_cfg)],
+            env=run_env,
+        )
 
     def build_command(
         self,
@@ -337,6 +424,7 @@ class ClaudeCliDriver(CliDriver):
         self,
         proc: subprocess.CompletedProcess[str],
         *,
+        launch: CliLaunch,
         task_cwd: Path,
         max_turns: int,
         notes: list[str],
@@ -373,8 +461,24 @@ class ClaudeCliDriver(CliDriver):
         client_calls = list(parsed.get("client_tool_calls") or [])
         call_source = "json"
         session_id = parsed.get("session_id")
-        transcript = find_claude_transcript(session_id, task_cwd)
+        config_value = (launch.env or {}).get("CLAUDE_CONFIG_DIR")
+        config_dir = Path(config_value) if config_value else None
+        transcript = find_claude_transcript(
+            session_id,
+            task_cwd,
+            config_dir=config_dir,
+        )
         if transcript is not None:
+            if launch.artifact_dir is None:
+                raise CliOutputError("Claude transcript found without a durable artifact directory")
+            try:
+                transcript = persist_claude_transcript(
+                    transcript,
+                    artifact_dir=launch.artifact_dir,
+                    session_id=str(session_id or transcript.stem),
+                )
+            except OSError as exc:
+                raise CliOutputError(f"failed to persist Claude transcript: {exc}") from exc
             tagged = parse_claude_transcript_calls(transcript)
             transcript_plane, transcript_client = split_plane_and_client_calls(tagged)
             if transcript_plane or transcript_client:
@@ -410,5 +514,7 @@ __all__ = [
     "normalize_claude_usage",
     "parse_claude_json_result",
     "parse_claude_transcript_calls",
+    "persist_claude_transcript",
+    "prepare_claude_isolated_environment",
     "write_claude_mcp_config",
 ]

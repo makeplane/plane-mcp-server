@@ -101,6 +101,7 @@ async def run_agent_task_via_driver(
     ctx: dict[str, Any],
     workspace_slug: str,
     server_env: dict[str, str] | None = None,
+    artifact_dir: Path | None = None,
 ) -> TaskResult:
     """Run one task through the selected driver."""
     project_name = ctx["project_name"]
@@ -120,6 +121,7 @@ async def run_agent_task_via_driver(
         evidence_sentinels=ctx.get("evidence_sentinels"),
         evidence_targets=ctx.get("evidence_targets"),
         evidence_aggregates=ctx.get("evidence_aggregates"),
+        artifact_dir=artifact_dir,
     )
     return agent_run_to_task_result(agent_run)
 
@@ -227,6 +229,7 @@ async def _drive_agent(
     row: TaskResult,
     repetition: int,
     is_api_driver: bool,
+    artifact_dir: Path,
 ) -> TaskResult | None:
     """Run the agent and classify launch or prompt failures."""
     # Agent wrap: API failures and CLI failures are infrastructure.
@@ -239,6 +242,7 @@ async def _drive_agent(
             ctx=context,
             workspace_slug=workspace_slug,
             server_env=server_env,
+            artifact_dir=artifact_dir,
         )
     except PromptBindError as exc:
         # Empty/missing seed IDs in the prompt — not an agent failure.
@@ -450,6 +454,7 @@ async def _run_task_repetition(
     is_api_driver: bool,
     external: bool,
     server_env: dict[str, str] | None,
+    artifact_dir: Path,
 ) -> TaskResult:
     """Seed, drive, verify, assemble, and remove one task repetition."""
     context: dict[str, Any] = {}
@@ -480,6 +485,7 @@ async def _run_task_repetition(
                 row=row,
                 repetition=repetition,
                 is_api_driver=is_api_driver,
+                artifact_dir=artifact_dir,
             )
             if agent is not None:
                 _apply_agent_run(
@@ -554,6 +560,7 @@ async def run_live(
     battery = battery_fingerprint(tasks)
     total_runs = len(tasks) * reps
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_dir = out_path.parent / f"{out_path.stem}.artifacts" / driver_name
 
     resume_skip: set[tuple[str, int, str]] = set()
     if resume:
@@ -652,6 +659,7 @@ async def run_live(
                     is_api_driver=is_api_driver,
                     external=external,
                     server_env=server_env,
+                    artifact_dir=artifact_dir,
                 )
                 file.write(json.dumps(row.to_row(), default=str) + "\n")
                 file.flush()

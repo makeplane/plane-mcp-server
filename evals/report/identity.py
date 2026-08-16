@@ -152,6 +152,15 @@ def validate_persisted_identity(
                 continue
             detail = "; ".join(f"{path}={value}" for path, value in by_path.items())
             issues.append(f"{field} differs across files: {detail}")
+        manifest_values = {identity.values[TOOL_MANIFEST_FIELD] for identity in identities}
+        if MISSING in manifest_values:
+            unidentified = [
+                str(identity.path) for identity in identities if identity.values[TOOL_MANIFEST_FIELD] == MISSING
+            ]
+            issues.append(
+                f"{TOOL_MANIFEST_FIELD} is missing for comparison input(s): {', '.join(unidentified)}; "
+                "every compared surface must be identified"
+            )
 
     if issues:
         raise ComparabilityError(issues)

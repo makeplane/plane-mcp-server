@@ -313,11 +313,12 @@ def _cli_driver_template_inherits_proxy_first_and_timeout_harvest(tmp_path, monk
             self,
             proc: subprocess.CompletedProcess[str],
             *,
+            launch: CliLaunch,
             task_cwd: Path,
             max_turns: int,
             notes: list[str],
         ) -> CliOutput:
-            del proc, task_cwd, max_turns, notes
+            del proc, launch, task_cwd, max_turns, notes
             return CliOutput(
                 final_text="done",
                 calls=[
@@ -431,8 +432,8 @@ def test_cli_parse_failure_retains_lossy_sidecar_integrity(tmp_path: Path):
             del prompt, model, max_turns, system, launch
             return ["broken-output"]
 
-        def parse_output(self, proc, *, task_cwd, max_turns, notes):
-            del proc, task_cwd, max_turns, notes
+        def parse_output(self, proc, *, launch, task_cwd, max_turns, notes):
+            del proc, launch, task_cwd, max_turns, notes
             raise CliOutputError("cannot parse output")
 
     driver: BrokenOutputDriver
@@ -803,6 +804,156 @@ def test_codex_isolated_home_effective_mcp_server_list_is_exactly_plane(tmp_path
     assert server_names == ["plane"]
 
 
+def test_claude_cli_runs_with_isolated_environment(tmp_path: Path, monkeypatch):
+    ambient_config = tmp_path / "ambient-claude"
+    ambient_config.mkdir()
+    credentials = ambient_config / ".credentials.json"
+    credentials.write_text('{"sessionKey":"copied-login-only"}\n', encoding="utf-8")
+    (ambient_config / "settings.json").write_text('{"ambient":true}\n', encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(ambient_config))
+
+    driver = ClaudeCliDriver(runner=lambda *_args, **_kwargs: None)
+    launch = driver.write_mcp_config(
+        tmp_path / "task-state",
+        task_cwd=tmp_path,
+        server_command=["/usr/bin/true"],
+        child_env={"PATH": os.environ["PATH"]},
+    )
+
+    assert launch.env is not None
+    isolated_roots = [
+        Path(launch.env[name])
+        for name in (
+            "HOME",
+            "CLAUDE_CONFIG_DIR",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_STATE_HOME",
+        )
+    ]
+    assert all(root.is_dir() and root.is_relative_to(tmp_path / "task-state") for root in isolated_roots)
+    isolated_config = Path(launch.env["CLAUDE_CONFIG_DIR"])
+    assert (isolated_config / ".credentials.json").read_text(encoding="utf-8") == credentials.read_text(
+        encoding="utf-8"
+    )
+    assert not (isolated_config / "settings.json").exists()
+    assert Path(launch.config_args[1]) == isolated_config / ".claude.json"
+    command = driver.build_command("prompt", model=None, max_turns=1, system=None, launch=launch)
+    assert "--strict-mcp-config" in command
+
+
+def test_claude_credentials_copy_failure_aborts_before_cli(tmp_path: Path, monkeypatch):
+    ambient_config = tmp_path / "ambient-claude"
+    ambient_config.mkdir()
+    (ambient_config / ".credentials.json").write_text('{"sessionKey":"source"}\n', encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(ambient_config))
+    invoked = False
+
+    def fake_run(*_args, **_kwargs):
+        nonlocal invoked
+        invoked = True
+        return subprocess.CompletedProcess([], 0, stdout='{"result":"unexpected"}', stderr="")
+
+    def fail_copy(*_args, **_kwargs):
+        raise OSError("injected credential copy failure")
+
+    monkeypatch.setattr("evals.drivers.cli.claude.shutil.copy2", fail_copy)
+    driver = ClaudeCliDriver(runner=fake_run, use_proxy=False)
+
+    with pytest.raises(RuntimeError, match="failed to copy Claude credentials into isolated config"):
+        driver.run_task("prompt", {}, None, 1, cwd=tmp_path)
+    assert invoked is False
+
+
+def test_claude_credentials_refresh_limitation_reaches_run_notes(tmp_path: Path):
+    def fake_run(cmd, **_kwargs):
+        output = {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": "ok",
+            "session_id": "refresh-limit-session",
+            "num_turns": 1,
+        }
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(output), stderr="")
+
+    run = ClaudeCliDriver(runner=fake_run, use_proxy=False).run_task("prompt", {}, None, 1, cwd=tmp_path)
+
+    assert any(note.startswith("known_limitation:claude_file_credentials_refresh_discarded:") for note in run.notes)
+
+
+def test_claude_isolated_environment_management_readback_lists_exactly_plane(tmp_path: Path):
+    claude_bin = shutil.which("claude")
+    assert claude_bin is not None, "Claude CLI is required to observe its effective MCP configuration"
+
+    stub = tmp_path / "mcp_stub.py"
+    stub.write_text(
+        textwrap.dedent(
+            """
+            import json
+            import sys
+
+            def send(message):
+                sys.stdout.write(json.dumps(message) + "\\n")
+                sys.stdout.flush()
+
+            for line in sys.stdin:
+                message = json.loads(line)
+                if "id" not in message:
+                    continue
+                if message.get("method") == "initialize":
+                    result = {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "serverInfo": {"name": "readback-stub", "version": "1"},
+                    }
+                elif message.get("method") == "tools/list":
+                    result = {"tools": []}
+                else:
+                    result = {}
+                send({"jsonrpc": "2.0", "id": message["id"], "result": result})
+            """
+        ),
+        encoding="utf-8",
+    )
+    driver = ClaudeCliDriver(claude_bin=claude_bin, runner=lambda *_args, **_kwargs: None)
+    launch = driver.write_mcp_config(
+        tmp_path / "task-state",
+        task_cwd=tmp_path,
+        server_command=[sys.executable, str(stub)],
+        child_env={"PATH": os.environ["PATH"]},
+    )
+    assert launch.env is not None
+    assert Path(launch.config_args[1]) == Path(launch.env["CLAUDE_CONFIG_DIR"]) / ".claude.json"
+
+    observed = subprocess.run(
+        [claude_bin, "mcp", "list"],
+        cwd=tmp_path,
+        env=launch.env,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=15,
+    )
+    server_names = sorted(
+        line.split(":", 1)[0].strip()
+        for line in observed.stdout.splitlines()
+        if ": " in line and not line.startswith("Checking MCP server health")
+    )
+    help_text = subprocess.run(
+        [claude_bin, "--help"],
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=15,
+    ).stdout
+
+    assert server_names == ["plane"]
+    assert "Only use MCP servers from --mcp-config" in help_text
+    assert "ignoring all other MCP configurations" in help_text
+
+
 def test_opencode_isolated_environment_effective_mcp_server_list_is_exactly_plane(tmp_path: Path):
     opencode_bin = shutil.which("opencode")
     assert opencode_bin is not None, "OpenCode CLI is required to observe its effective MCP configuration"
@@ -897,6 +1048,9 @@ def test_cli_agent_surfaces_never_contain_evidence_truth(
         if Driver is ClaudeCliDriver:
             assert "--strict-mcp-config" in cmd
             assert set(configs[0]["mcpServers"]) == {"plane"}
+            assert all(
+                kwargs["env"].get(name) for name in ("HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME")
+            )
         elif Driver is CodexCliDriver:
             assert set(configs[0]["mcp_servers"]) == {"plane"}
         elif Driver is AntigravityCliDriver:
@@ -960,6 +1114,26 @@ def test_cli_agent_surfaces_never_contain_evidence_truth(
     assert str(total_count) not in surface
     assert all(str(count) not in surface for count in grouped_counts.values())
     assert EVIDENCE_SENTINELS_ENV not in surface
+
+
+def test_antigravity_effective_config_exclusivity_is_documented_as_unverifiable():
+    driver_doc = AntigravityCliDriver.__doc__ or ""
+    design = (REPO / "evals" / "DESIGN.md").read_text(encoding="utf-8")
+
+    assert "1.1.13 has no MCP or effective-config introspection command" in driver_doc
+    assert "explicitly unverifiable" in driver_doc
+    assert "| Antigravity | **Unverifiable.**" in design
+    assert "neither the harness nor this design treats that as observed effective-config exclusivity" in design
+    assert 'The Antigravity "unverifiable" regression test is documentation coverage' in design
+
+
+def test_claude_effective_config_claim_scopes_observation_and_vendor_contract():
+    driver_doc = ClaudeCliDriver.__doc__ or ""
+    design = (REPO / "evals" / "DESIGN.md").read_text(encoding="utf-8")
+
+    assert "not a behavioral probe of the evaluated ``claude -p`` invocation" in driver_doc
+    assert "Readback-supported, not behaviorally proven for the evaluated invocation" in design
+    assert "rests on the CLI's documented strict-config contract" in design
 
 
 def test_use_proxy_false_call_source_not_proxy(tmp_path: Path):

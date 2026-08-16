@@ -293,6 +293,7 @@ def build_multi_surface_table(
             "complete": column_summary.complete,
             "completeness": completeness_statement(column_summary),
             "coverage": execution_coverage_statement(column_summary),
+            "off_surface": off_surface_statement(column_summary.off_surface),
         }
     return {
         "columns": columns,
@@ -350,6 +351,11 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
             "| **execution coverage** | | " + " | ".join(footer[column]["coverage"] for column in columns) + " |"
         )
         lines.append(
+            "| **off-surface indicators** | | "
+            + " | ".join(footer[column]["off_surface"].replace("\n", "<br>") for column in columns)
+            + " |"
+        )
+        lines.append(
             "| **completeness** | | " + " | ".join(footer[column]["completeness"] for column in columns) + " |"
         )
         return "\n".join(lines) + "\n"
@@ -391,6 +397,9 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
         )
     for column in columns:
         lines.append(f"{column:12} {footer[column]['coverage']}")
+    for column in columns:
+        for line in footer[column]["off_surface"].splitlines():
+            lines.append(f"{column:12} {line}")
     for column in columns:
         lines.append(f"{column:12} {footer[column]['completeness']}")
     return "\n".join(lines) + "\n"

@@ -22,6 +22,7 @@ def _row(task_id: str = "R1", **overrides: Any) -> dict[str, Any]:
         "model": "realized-model",
         "requested_model": "standard",
         "requested_tier": "standard",
+        "tool_manifest_fingerprint": "manifest-a",
         "success": True,
         "num_calls": 1,
         "calls": [],
@@ -322,21 +323,30 @@ def test_missing_manifest_observation_is_not_fatal(tmp_path, capsys):
     assert "TOOL MANIFEST ABSENT" not in output
 
 
-def test_ab_and_table_warn_prominently_when_any_tool_manifest_is_absent(tmp_path, capsys):
+def test_ab_and_table_refuse_when_any_tool_manifest_is_absent(tmp_path, capsys):
     path_a = tmp_path / "surface-a.jsonl"
     path_b = tmp_path / "surface-b.jsonl"
     _write(path_a, _row(tool_manifest_fingerprint="manifest-a"))
     _write(path_b, _row(tool_manifest_fingerprint=None))
 
-    assert report_mod.main([str(path_a), str(path_b)]) == 0
-    ab_output = capsys.readouterr().out
-    assert "WARNING: TOOL MANIFEST ABSENT — tool surface is unidentified" in ab_output
-    assert str(path_b) in ab_output
+    _assert_refused(
+        report_mod.main([str(path_a), str(path_b)]),
+        capsys,
+        "tool_manifest_fingerprint is missing for comparison input(s)",
+    )
 
-    assert report_mod.main(["--table", str(path_a), str(path_b)]) == 0
-    table_output = capsys.readouterr().out
-    assert "WARNING: TOOL MANIFEST ABSENT — tool surface is unidentified" in table_output
-    assert str(path_b) in table_output
+    _assert_refused(
+        report_mod.main(["--table", str(path_a), str(path_b)]),
+        capsys,
+        "every compared surface must be identified",
+    )
+
+    _write(path_a, _row(tool_manifest_fingerprint=None))
+    _assert_refused(
+        report_mod.main([str(path_a), str(path_b)]),
+        capsys,
+        "every compared surface must be identified",
+    )
 
 
 def test_exact_run_keys_name_missing_and_duplicate_rows_before_latest_wins(tmp_path, capsys):

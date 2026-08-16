@@ -19,6 +19,7 @@ from evals.drivers.cli.claude import (
     normalize_claude_usage,
     parse_claude_json_result,
     parse_claude_transcript_calls,
+    prepare_claude_isolated_environment,
     write_claude_mcp_config,
 )
 from evals.drivers.cli.codex import (
@@ -96,6 +97,7 @@ __all__ = [
     "parse_codex_jsonl_events",
     "parse_codex_rollout_calls",
     "prepare_antigravity_fake_home",
+    "prepare_claude_isolated_environment",
     "prepare_codex_home",
     "prepare_opencode_isolated_environment",
     "proxy_pid_path",

@@ -363,10 +363,12 @@ class CodexCliDriver(CliDriver):
         self,
         proc: subprocess.CompletedProcess[str],
         *,
+        launch: CliLaunch,
         task_cwd: Path,
         max_turns: int,
         notes: list[str],
     ) -> CliOutput:
+        del launch
         del task_cwd, max_turns
         parsed = parse_codex_jsonl_events(proc.stdout or "")
         calls = list(parsed.get("calls") or [])
