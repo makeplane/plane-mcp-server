@@ -26,7 +26,9 @@ SAMPLES: dict[str, object] = {
     "group": "started",
     "relation_type": "blocked_by",
     "property_type": "TEXT",
-    "access": 1,
+    # page and project take the numeric level; collection names it.
+    "access": {"page": 1, "project": 1, "collection": "private"},
+    "member_access": "edit",
     "network": 2,
     "timezone": "UTC",
     "workitem_identifier": "ENG-42",

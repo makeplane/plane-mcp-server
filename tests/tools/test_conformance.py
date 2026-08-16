@@ -34,6 +34,7 @@ def _module_ids(mods):
 # conversation. Editing this list is the deliberate act that makes that happen;
 # appending to it is not.
 CATALOGUE = [
+    "collection",
     "customer",
     "customer_property",
     "customer_request",

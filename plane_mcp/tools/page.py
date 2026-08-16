@@ -1,4 +1,4 @@
-"""Pages, at workspace or project scope, and their links to work items.
+"""Pages, at workspace or project scope, their hierarchy, and their links to work items.
 
 Every page action is scoped by whether project_id is supplied: with it the page
 is a project page, without it a workspace page. The SDK has a separate endpoint
@@ -10,8 +10,9 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastmcp import FastMCP
+from plane.models.collections import AddCollectionPages, Collection, UpdateCollectionPage
 from plane.models.pages import CreatePage, Page, UpdatePage
-from plane.models.query_params import PaginatedQueryParams
+from plane.models.query_params import CollectionPageQueryParams, PaginatedQueryParams
 from plane.models.work_item_pages import CreateWorkItemPage, WorkItemPage
 
 from plane_mcp.client import get_plane_client_context
@@ -28,7 +29,18 @@ ACTIONS = (
     Action(
         "create",
         ("name", "description_html"),
-        ("project_id", "access", "color", "is_locked", "external_source", "external_id"),
+        (
+            "project_id",
+            "parent_id",
+            "collection_id",
+            "access",
+            "color",
+            "is_locked",
+            "external_source",
+            "external_id",
+        ),
+        note="parent_id nests the new page under an existing one; collection_id files it. "
+        "Pass one or the other, never both",
     ),
     Action(
         "update",
@@ -50,6 +62,12 @@ ACTIONS = (
         note="requires the page to be archived first",
         destructive=True,
     ),
+    Action(
+        "set_collection",
+        ("page_id", "collection_id"),
+        note="files a page into a collection, or moves it out of the one it is in; workspace pages only, "
+        "and collection_id comes from the collection tool",
+    ),
     Action("list_workitem_pages", ("project_id", "workitem_id"), read=True),
     Action("attach_to_workitem", ("project_id", "workitem_id", "page_id")),
     Action(
@@ -63,7 +81,11 @@ ACTIONS = (
 FOOTER = (
     "description_html is the page body as HTML. access is the page access level. "
     "update changes only the fields you pass. A page must be archived before it can be deleted. "
-    "Omit project_id to work with workspace-level pages."
+    "Omit project_id to work with workspace-level pages. "
+    "A page's parent is fixed at creation -- pass parent_id to create to build a hierarchy, since "
+    "nothing can reparent it afterwards. list reports each page's parent_id and collection_id. "
+    "Collections themselves live in the collection tool; here, create files a new page into one and "
+    "set_collection files or moves an existing page."
 )
 
 LEGACY = {
@@ -90,12 +112,15 @@ def register(mcp: FastMCP) -> None:
             "update",
             "archive",
             "delete",
+            "set_collection",
             "list_workitem_pages",
             "attach_to_workitem",
             "detach_from_workitem",
         ],
         project_id: str = "",
         page_id: str = "",
+        parent_id: str = "",
+        collection_id: str = "",
         workitem_id: str = "",
         workitem_page_id: str = "",
         name: str = "",
@@ -109,7 +134,7 @@ def register(mcp: FastMCP) -> None:
         external_id: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> Page | WorkItemPage | list[WorkItemPage] | dict[str, Any] | str | None:
+    ) -> Page | WorkItemPage | list[WorkItemPage] | list[Collection] | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if action == "list":
@@ -164,18 +189,69 @@ def register(mcp: FastMCP) -> None:
         if action == "create":
             if error := needs(action, name=name, description_html=description_html):
                 return error
+            if parent_id and collection_id:
+                return "Error: pass parent_id or collection_id, not both. A nested page takes its parent's collection."
+            if collection_id and project_id:
+                return "Error: collections hold workspace pages only. Omit project_id, or omit collection_id."
             data = CreatePage(
                 name=name,
                 description_html=description_html,
                 access=access,
                 color=opt(color),
                 is_locked=is_locked,
+                parent_id=opt(parent_id),
+                collection_id=opt(collection_id),
                 external_id=opt(external_id),
                 external_source=opt(external_source),
             )
             if project_id:
                 return client.pages.create_project_page(workspace_slug=workspace_slug, project_id=project_id, data=data)
             return client.pages.create_workspace_page(workspace_slug=workspace_slug, data=data)
+
+        if action == "set_collection":
+            if error := needs(action, page_id=page_id, collection_id=collection_id):
+                return error
+
+            row = None
+            for collection in client.collections.list(workspace_slug=workspace_slug):
+                filed_cursor = ""
+                while True:
+                    rows = client.collections.pages.list(
+                        workspace_slug=workspace_slug,
+                        collection_id=str(collection.id),
+                        params=as_params(CollectionPageQueryParams, cursor=filed_cursor),
+                    )
+                    row = next((r for r in rows.results if str((r.page or {}).get("id")) == page_id), None)
+                    if row is not None or not rows.next_page_results:
+                        break
+                    filed_cursor = rows.next_cursor
+                if row is not None:
+                    break
+
+            if row is None:
+                added = client.collections.pages.add(
+                    workspace_slug=workspace_slug,
+                    collection_id=collection_id,
+                    data=AddCollectionPages(page_ids=[page_id]),
+                )
+                if not added:
+                    return None
+                membership_id = added[0].id
+            elif str(row.collection_id) == collection_id:
+                membership_id = row.page_collection_id
+            else:
+                membership_id = client.collections.pages.update(
+                    workspace_slug=workspace_slug,
+                    collection_id=str(row.collection_id),
+                    page_collection_id=str(row.page_collection_id),
+                    data=UpdateCollectionPage(collection=collection_id),
+                ).id
+
+            return {
+                "page_id": page_id,
+                "collection_id": collection_id,
+                "page_collection_id": str(membership_id),
+            }
 
         if error := needs(action, project_id=project_id, workitem_id=workitem_id):
             return error
