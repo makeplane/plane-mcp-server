@@ -861,6 +861,10 @@ def _run_reports_progress_per_repetition(tmp_path, monkeypatch, capsys):
     assert "1/2 done · 1 pass · 0 fail · 0 skip" in printed
     assert "finished 2/2 in " in printed
     assert "2 pass, 0 fail, 0 skip" in printed
+    assert "schema friction (same successful, trace-intact rows as call deltas)" in printed
+    assert "task-mean median errored calls=0.0 across 2 tasks" in printed
+    assert "errored-call tasks: 0/2 []" in printed
+    assert "is_error is the MCP-level error flag" in printed
 
 
 _RUN_CASES = case_params(

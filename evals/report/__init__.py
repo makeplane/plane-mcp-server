@@ -41,6 +41,14 @@ from .off_surface import (
     off_surface_statement,
     task_requires_mutation,
 )
+from .schema_friction import (
+    SCHEMA_FRICTION_LIMITATION,
+    SchemaFrictionMeasurement,
+    TaskSchemaFriction,
+    measure_schema_friction,
+    schema_friction_statement,
+    successful_trace_rows,
+)
 from .statistics import iqr, median, paired_bootstrap_mean_ci, paired_permutation_pvalue, percentile, wilson_interval
 from .summary import (
     ResultTokensMode,
@@ -79,7 +87,9 @@ __all__ = [
     "ResultRow",
     "ResultTokensMode",
     "Summary",
+    "SchemaFrictionMeasurement",
     "TaskSummary",
+    "TaskSchemaFriction",
     "ANSWER_WITHOUT_PROVENANCE",
     "IMPLAUSIBLY_FEW_CALLS",
     "INDICATOR_LABELS",
@@ -88,6 +98,7 @@ __all__ = [
     "OFF_SURFACE_LIMITATION",
     "WRITE_WITHOUT_WRITE_CALL",
     "ZERO_CALL_SUCCESS",
+    "SCHEMA_FRICTION_LIMITATION",
     "ab_compare",
     "build_multi_surface_table",
     "call_plausibly_writes",
@@ -111,6 +122,7 @@ __all__ = [
     "main",
     "median",
     "measure_off_surface",
+    "measure_schema_friction",
     "off_surface_statement",
     "paired_bootstrap_mean_ci",
     "paired_permutation_pvalue",
@@ -124,8 +136,10 @@ __all__ = [
     "render_multi_surface_table",
     "result_tokens_marker",
     "result_tokens_mode",
+    "schema_friction_statement",
     "summarize",
     "surface_label_for_file",
+    "successful_trace_rows",
     "task_requires_mutation",
     "task_sort_key",
     "validate_persisted_identity",

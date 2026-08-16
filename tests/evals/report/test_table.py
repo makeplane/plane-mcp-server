@@ -350,6 +350,11 @@ def test_single_rep_multi_surface_renders_tool_distribution_unavailable():
         "the same task, calls < Q1 - 3×IQR and calls ≤ half the task median\n"
         "local          limitation: detects off-surface work only when it leaves a trace signature; it cannot detect "
         "an agent that performs the work off-surface and also makes convincing surface calls\n"
+        "local        schema friction (same successful, trace-intact rows as call deltas): task-mean median errored "
+        "calls=0.0 across 1 tasks; task-mean errored-call rate=0.0% across 1 tasks with calls\n"
+        "local          errored-call tasks: 0/1 []\n"
+        "local          limitation: is_error is the MCP-level error flag, so this counts tool-reported failures; an "
+        "error that is the correct task outcome still contributes, while calling the wrong tool successfully does not\n"
         "local        RUN COMPLETE: 1/1 rows completed\n"
     )
 
@@ -369,3 +374,27 @@ def test_multi_surface_table_reports_off_surface_indicators_per_column_in_plain_
     assert "| **off-surface indicators** | |" in markdown
     assert "off-surface indicators: 0<br>" in markdown
     assert "off-surface indicators: 1 flagged rows (2 indicator hits)<br>" in markdown
+
+
+def test_multi_surface_table_reports_schema_friction_per_column_in_plain_and_markdown():
+    clean = [_synth_row("R1", label="clean", num_calls=4, calls=[{"tool": "get_work_item"}])]
+    friction = [
+        _synth_row(
+            "R1",
+            label="friction",
+            num_calls=4,
+            calls=[{"tool": "get_work_item", "is_error": True}],
+        )
+    ]
+    table = build_multi_surface_table([("clean", clean), ("friction", friction)])
+
+    plain = render_multi_surface_table(table)
+    assert "clean        schema friction" in plain
+    assert "clean          errored-call tasks: 0/1 []" in plain
+    assert "friction       errored-call tasks: 1/1 [R1=1/4 (25.0%)]" in plain
+    assert "friction       limitation: is_error is the MCP-level error flag" in plain
+
+    markdown = render_multi_surface_table(table, markdown=True)
+    assert "| **schema friction** | |" in markdown
+    assert "errored-call tasks: 0/1 []" in markdown
+    assert "errored-call tasks: 1/1 [R1=1/4 (25.0%)]" in markdown

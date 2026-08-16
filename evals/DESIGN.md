@@ -72,6 +72,15 @@ instances under the two labels, independent tasks, and exchangeable A/B labels u
 permutation null; they do not account for shared environment drift or dependence between
 tasks. The report prints the paired task count so small samples remain visible.
 
+Errored calls use that same successful, trace-intact row population. Within each task, the
+absolute measure is the median errored-call count per repetition (parallel to the call-count
+median), while the rate is the task's errored calls divided by its total calls. Cross-task
+headlines average task values and paired intervals resample whole task deltas; they do not pool
+calls across tasks. Reports retain task IDs for non-zero errors and print measured zeros. A
+zero-attempt task has an undefined rate rather than an invented zero rate. `is_error` is the
+MCP-level error flag: it counts all tool-reported failures, including an error that is the
+correct outcome, and cannot detect an agent that successfully calls the wrong tool.
+
 Single-run success headlines use the same sampling unit: each evaluated task contributes
 its repetition success rate, and a deterministic cluster bootstrap resamples whole tasks.
 The pooled repetition rate and its Wilson interval remain visible as a descriptive figure,

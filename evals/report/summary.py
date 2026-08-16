@@ -11,6 +11,7 @@ from evals.skip_taxonomy import is_expected_environment_capability_skip, skip_re
 
 from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
 from .off_surface import OffSurfaceMeasurement, measure_off_surface
+from .schema_friction import SchemaFrictionMeasurement, measure_schema_friction
 from .statistics import cluster_bootstrap_mean_ci, iqr, median, percentile, wilson_interval
 
 ResultTokensMode = Literal["measured", "estimated", "mixed", "unlabeled", "unavailable"]
@@ -86,6 +87,7 @@ class Summary:
     multi_rep: bool
     result_tokens_mode: ResultTokensMode
     off_surface: OffSurfaceMeasurement
+    schema_friction: SchemaFrictionMeasurement
 
     @property
     def complete(self) -> bool:
@@ -371,4 +373,5 @@ def summarize(
         multi_rep=any(len(repetitions) > 1 for repetitions in repetitions_by_task.values()),
         result_tokens_mode=result_tokens_mode([row for task_results in by_task.values() for row in task_results]),
         off_surface=measure_off_surface(rows),
+        schema_friction=measure_schema_friction(rows),
     )

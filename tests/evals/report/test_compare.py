@@ -74,22 +74,173 @@ def test_ab_compare_behaviours(capsys):
     assert "noise floor" not in output
 
 
-def test_ab_compare_multi_rep_uses_median_successful_call_counts():
+def test_ab_report_distinguishes_identical_success_and_calls_by_errored_calls(capsys):
     rows_a = [
-        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 1, "calls": [], "trace_integrity": True},
-        {"task_id": "R1", "rep": 1, "success": False, "num_calls": 9, "calls": [], "trace_integrity": True},
-        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 5, "calls": [], "trace_integrity": True},
+        {
+            "task_id": "R1",
+            "rep": 0,
+            "success": True,
+            "num_calls": 4,
+            "errored_calls": 0,
+            "calls": [],
+            "trace_integrity": True,
+        }
     ]
     rows_b = [
-        {"task_id": "R1", "rep": 0, "success": True, "num_calls": 2, "calls": [], "trace_integrity": True},
-        {"task_id": "R1", "rep": 1, "success": True, "num_calls": 4, "calls": [], "trace_integrity": True},
-        {"task_id": "R1", "rep": 2, "success": True, "num_calls": 6, "calls": [], "trace_integrity": True},
+        {
+            "task_id": "R1",
+            "rep": 0,
+            "success": True,
+            "num_calls": 4,
+            "errored_calls": 2,
+            "calls": [],
+            "trace_integrity": True,
+        }
+    ]
+
+    comparison = ab_compare(rows_a, rows_b)
+
+    assert comparison["success_a"]["k"] == comparison["success_b"]["k"] == 1
+    assert comparison["mean_delta"] == 0.0
+    assert comparison["mean_errored_call_delta"] == 2.0
+    assert comparison["mean_errored_call_rate_delta"] == pytest.approx(0.5)
+    assert comparison["paired_schema_friction"] == [
+        {
+            "task_id": "R1",
+            "errored_calls_a": 0.0,
+            "errored_calls_b": 2.0,
+            "errored_call_delta": 2.0,
+            "errored_call_rate_a": 0.0,
+            "errored_call_rate_b": 0.5,
+            "errored_call_rate_delta": 0.5,
+            "raw_errored_calls_a": 0,
+            "raw_total_calls_a": 4,
+            "raw_errored_calls_b": 2,
+            "raw_total_calls_b": 4,
+        }
+    ]
+
+    print_ab_report(comparison, Path("a.jsonl"), Path("b.jsonl"))
+    output = capsys.readouterr().out
+    assert "mean errored-call delta (B−A): +2.0" in output
+    assert "mean errored-call-rate delta (B−A): +50.0 percentage points" in output
+    assert "R1: A=0/4 (0.0%), median=0.0; B=2/4 (50.0%), median=2.0" in output
+    assert "is_error is the MCP-level error flag" in output
+
+
+def test_ab_errored_call_rate_delta_averages_paired_tasks_instead_of_pooling_calls():
+    rows_a = [
+        {
+            "task_id": "R1",
+            "success": True,
+            "num_calls": 1,
+            "errored_calls": 0,
+            "calls": [],
+            "trace_integrity": True,
+        },
+        {
+            "task_id": "R2",
+            "success": True,
+            "num_calls": 9,
+            "errored_calls": 0,
+            "calls": [],
+            "trace_integrity": True,
+        },
+    ]
+    rows_b = [
+        {
+            "task_id": "R1",
+            "success": True,
+            "num_calls": 1,
+            "errored_calls": 1,
+            "calls": [],
+            "trace_integrity": True,
+        },
+        {
+            "task_id": "R2",
+            "success": True,
+            "num_calls": 9,
+            "errored_calls": 0,
+            "calls": [],
+            "trace_integrity": True,
+        },
+    ]
+
+    comparison = ab_compare(rows_a, rows_b)
+
+    assert comparison["mean_errored_call_delta"] == 0.5
+    assert comparison["mean_errored_call_rate_delta"] == 0.5
+    assert comparison["mean_errored_call_rate_delta"] != pytest.approx(1 / 10)
+    assert comparison["n_paired_errored_call_rates"] == 2
+    assert comparison["errored_call_rate_delta_ci"] == pytest.approx((0.0375, 0.9625))
+
+
+def test_ab_compare_multi_rep_uses_median_successful_call_counts():
+    rows_a = [
+        {
+            "task_id": "R1",
+            "rep": 0,
+            "success": True,
+            "num_calls": 1,
+            "errored_calls": 0,
+            "calls": [],
+            "trace_integrity": True,
+        },
+        {
+            "task_id": "R1",
+            "rep": 1,
+            "success": False,
+            "num_calls": 9,
+            "errored_calls": 99,
+            "calls": [],
+            "trace_integrity": True,
+        },
+        {
+            "task_id": "R1",
+            "rep": 2,
+            "success": True,
+            "num_calls": 5,
+            "errored_calls": 2,
+            "calls": [],
+            "trace_integrity": True,
+        },
+    ]
+    rows_b = [
+        {
+            "task_id": "R1",
+            "rep": 0,
+            "success": True,
+            "num_calls": 2,
+            "errored_calls": 0,
+            "calls": [],
+            "trace_integrity": True,
+        },
+        {
+            "task_id": "R1",
+            "rep": 1,
+            "success": True,
+            "num_calls": 4,
+            "errored_calls": 2,
+            "calls": [],
+            "trace_integrity": True,
+        },
+        {
+            "task_id": "R1",
+            "rep": 2,
+            "success": True,
+            "num_calls": 6,
+            "errored_calls": 4,
+            "calls": [],
+            "trace_integrity": True,
+        },
     ]
 
     comparison = ab_compare(rows_a, rows_b)
 
     assert comparison["multi_rep"] is True
     assert comparison["paired_tasks"] == [{"task_id": "R1", "calls_a": 3.0, "calls_b": 4.0, "delta": 1.0}]
+    assert comparison["mean_errored_call_delta"] == 1.0
+    assert comparison["mean_errored_call_rate_delta"] == pytest.approx(1 / 6)
 
 
 def test_ab_compare_excludes_trace_invalid_call_counts():

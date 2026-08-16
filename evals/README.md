@@ -158,6 +158,12 @@ deltas. Zero call-delta ties remain in that paired sample. The inference treats 
 independent sampling units and assumes comparable task instances under both labels, so the
 printed paired task count—and the resulting wide interval for small samples—matters.
 
+Every path that reports call cost also reports errored-call friction on the same successful,
+trace-intact rows: an absolute per-task median and an errored/total call rate, with paired task
+deltas in A/B output and task IDs for investigation. This is a proxy, not a pure schema-error
+counter: MCP `is_error` also marks correct expected failures, while a successful call to the
+wrong tool is invisible to it.
+
 Every result row carries a `battery` fingerprint derived from the selected catalog's task IDs,
 prompts, and catalog revision, plus a `task_fingerprint` over that row's task ID, prompt, and
 fixture names. The battery contains exactly what the agent is asked and no expectation about

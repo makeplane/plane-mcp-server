@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
+from .load import ResultRow, RunKeyValidation
 from .off_surface import off_surface_statement
+from .schema_friction import measure_schema_friction, schema_friction_statement, successful_trace_rows
 from .statistics import median, paired_bootstrap_mean_ci, paired_permutation_pvalue
 from .summary import completeness_statement, execution_coverage_statement, summarize
 from .table import format_number
@@ -36,15 +36,10 @@ def ab_compare(
     summary_b = summarize(rows_b, expected_rows=expected_rows_b, run_keys=run_keys_b)
 
     def successful_calls_by_task(rows: list[ResultRow]) -> dict[str, list[float]]:
-        output: dict[str, list[float]] = defaultdict(list)
-        for raw_row in rows:
-            row = read_result(raw_row)
-            if is_meta_row(row) or is_infra_error_row(row) or row.error or row.skipped or not row.trace_integrity:
-                continue
-            if not row.success:
-                continue
-            output[row.task_id].append(float(row.num_calls))
-        return dict(output)
+        output: dict[str, list[float]] = {}
+        for row in successful_trace_rows(rows):
+            output.setdefault(row.task_id, []).append(float(row.num_calls))
+        return output
 
     calls_a = successful_calls_by_task(rows_a)
     calls_b = successful_calls_by_task(rows_b)
@@ -78,6 +73,37 @@ def ab_compare(
     paired_success_delta = sum(success_deltas) / len(success_deltas) if success_deltas else None
     paired_success_ci = paired_bootstrap_mean_ci(success_deltas)
 
+    friction_a = measure_schema_friction(rows_a)
+    friction_b = measure_schema_friction(rows_b)
+    paired_schema_friction: list[dict[str, Any]] = []
+    errored_call_deltas: list[float] = []
+    errored_call_rate_deltas: list[float] = []
+    for task_id in shared:
+        task_a = friction_a.tasks[task_id]
+        task_b = friction_b.tasks[task_id]
+        errored_call_delta = task_b.median_errored_calls - task_a.median_errored_calls
+        rate_a = task_a.errored_call_rate
+        rate_b = task_b.errored_call_rate
+        rate_delta = rate_b - rate_a if rate_a is not None and rate_b is not None else None
+        errored_call_deltas.append(errored_call_delta)
+        if rate_delta is not None:
+            errored_call_rate_deltas.append(rate_delta)
+        paired_schema_friction.append(
+            {
+                "task_id": task_id,
+                "errored_calls_a": task_a.median_errored_calls,
+                "errored_calls_b": task_b.median_errored_calls,
+                "errored_call_delta": errored_call_delta,
+                "errored_call_rate_a": rate_a,
+                "errored_call_rate_b": rate_b,
+                "errored_call_rate_delta": rate_delta,
+                "raw_errored_calls_a": task_a.errored_calls,
+                "raw_total_calls_a": task_a.total_calls,
+                "raw_errored_calls_b": task_b.errored_calls,
+                "raw_total_calls_b": task_b.total_calls,
+            }
+        )
+
     return {
         "summary_a": summary_a,
         "summary_b": summary_b,
@@ -91,6 +117,16 @@ def ab_compare(
         "n_paired_success": len(success_deltas),
         "paired_success_delta": paired_success_delta,
         "paired_success_ci": paired_success_ci,
+        "paired_schema_friction": paired_schema_friction,
+        "mean_errored_call_delta": (
+            sum(errored_call_deltas) / len(errored_call_deltas) if errored_call_deltas else None
+        ),
+        "errored_call_delta_ci": paired_bootstrap_mean_ci(errored_call_deltas),
+        "mean_errored_call_rate_delta": (
+            sum(errored_call_rate_deltas) / len(errored_call_rate_deltas) if errored_call_rate_deltas else None
+        ),
+        "errored_call_rate_delta_ci": paired_bootstrap_mean_ci(errored_call_rate_deltas),
+        "n_paired_errored_call_rates": len(errored_call_rate_deltas),
         "multi_rep": summary_a.multi_rep or summary_b.multi_rep,
         "success_a": {
             "k": summary_a.aggregate_k,
@@ -141,6 +177,8 @@ def print_ab_report(comparison: dict[str, Any], path_a: Path, path_b: Path) -> N
     for label, summary in (("A", comparison["summary_a"]), ("B", comparison["summary_b"])):
         for line in off_surface_statement(summary.off_surface).splitlines():
             print(f"  {label} {line}")
+        for line in schema_friction_statement(summary.schema_friction).splitlines():
+            print(f"  {label} {line}")
     print(f"  A {completeness_statement(comparison['summary_a'])}")
     print(f"  B {completeness_statement(comparison['summary_b'])}")
     print(f"  success rate delta (B−A): {rate_b - rate_a:+.1%}")
@@ -164,6 +202,26 @@ def print_ab_report(comparison: dict[str, Any], path_a: Path, path_b: Path) -> N
         f"{probability if probability is not None else 'n/a'} "
         f"({tie_count} zero-delta ties retained)"
     )
+    errored_delta = comparison["mean_errored_call_delta"]
+    errored_lo, errored_hi = comparison["errored_call_delta_ci"]
+    if errored_delta is None or errored_lo is None or errored_hi is None:
+        print("  mean errored-call delta (B−A): n/a (no paired successful tasks)")
+    else:
+        print(
+            f"  mean errored-call delta (B−A): {errored_delta:+.1f} "
+            f"paired-bootstrap95 [{errored_lo:+.1f},{errored_hi:+.1f}] "
+            f"(n={comparison['n_paired']} tasks)"
+        )
+    rate_delta = comparison["mean_errored_call_rate_delta"]
+    rate_lo, rate_hi = comparison["errored_call_rate_delta_ci"]
+    if rate_delta is None or rate_lo is None or rate_hi is None:
+        print("  mean errored-call-rate delta (B−A): n/a (no paired tasks with calls on both surfaces)")
+    else:
+        print(
+            f"  mean errored-call-rate delta (B−A): {rate_delta * 100:+.1f} percentage points "
+            f"paired-bootstrap95 [{rate_lo * 100:+.1f},{rate_hi * 100:+.1f}] "
+            f"(n={comparison['n_paired_errored_call_rates']} tasks)"
+        )
     multiple_repetitions = bool(comparison.get("multi_rep"))
     if comparison["paired_tasks"]:
         print()
@@ -177,3 +235,18 @@ def print_ab_report(comparison: dict[str, Any], path_a: Path, path_b: Path) -> N
                 )
             else:
                 print(f"{row['task_id']:<6} {row['calls_a']:>8.0f} {row['calls_b']:>8.0f} {row['delta']:>+8.0f}")
+    if comparison["paired_schema_friction"]:
+        print()
+        print("schema friction by paired task (raw errors/calls; median errors per successful repetition):")
+        for row in comparison["paired_schema_friction"]:
+            rate_a = row["errored_call_rate_a"]
+            rate_b = row["errored_call_rate_b"]
+            rate_a_text = f"{rate_a:.1%}" if rate_a is not None else "n/a"
+            rate_b_text = f"{rate_b:.1%}" if rate_b is not None else "n/a"
+            print(
+                f"  {row['task_id']}: "
+                f"A={row['raw_errored_calls_a']}/{row['raw_total_calls_a']} ({rate_a_text}), "
+                f"median={row['errored_calls_a']:.1f}; "
+                f"B={row['raw_errored_calls_b']}/{row['raw_total_calls_b']} ({rate_b_text}), "
+                f"median={row['errored_calls_b']:.1f}"
+            )
