@@ -8,6 +8,7 @@ validation is the thing under test rather than an assumption.
 from __future__ import annotations
 
 import pytest
+from plane.models.projects import ProjectMember
 
 from plane_mcp.coercion import accepted_types, coerce_arguments
 
@@ -152,10 +153,15 @@ WORK_ITEM_MODULE = "plane_mcp.tools.workitem"
 
 
 class _Recorder:
-    """Stands in for the Plane client; records the first SDK call and stops."""
+    """Stands in for the Plane client; records the first SDK call and stops.
+
+    A write carrying assignees reads the project's members first, so that lookup
+    has to answer -- and answer with the assignee -- rather than be the recorded call.
+    """
 
     def __init__(self):
         self.kwargs: dict = {}
+        self.get_members = lambda **_: [ProjectMember(id=ASSIGNEE)]
 
     def __getattr__(self, _name):
         return self

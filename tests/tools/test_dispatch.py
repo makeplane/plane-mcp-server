@@ -15,8 +15,11 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from plane.errors.errors import HttpError
+from plane.models.projects import ProjectMember
 
 from plane_mcp.toolkit.spec import action_names
+from plane_mcp.tools.workitem import _MEMBER_ROLE
 
 # Values that satisfy a parameter well enough to reach the SDK call. Enum-valued
 # parameters need a member of their own vocabulary; the rest take a plausible id.
@@ -226,6 +229,99 @@ def test_a_valid_priority_still_reaches_the_sdk(registered, spy):
     registered["workitem"].fn(action="create", project_id="p", name="x", priority="urgent")
 
     assert spy.recorder.only().kwargs["data"].priority == "urgent"
+
+
+# The same defect one layer out: Plane filters an assignee it will not accept out of
+# the payload, and the update deletes the existing assignees before writing what is
+# left. So naming one both fails to assign and clears the field, under a 200.
+
+ALICE = ("alice", 20, True)
+
+
+def _project_members(*rows):
+    return [
+        ProjectMember(id=id_, email=f"{id_}@example.com", role=role, is_active=active) for id_, role, active in rows
+    ]
+
+
+@pytest.mark.parametrize(
+    ("members", "why"),
+    [
+        ([ALICE], "not a member of this project"),
+        ([ALICE, ("bob", 5, True)], "a guest, below the assignable role"),
+        ([ALICE, ("bob", 20, False)], "an inactive membership"),
+    ],
+    ids=["non-member", "guest", "inactive"],
+)
+def test_an_unassignable_assignee_is_refused_before_the_write(members, why, registered, spy):
+    spy.returns["projects.get_members"] = _project_members(*members)
+
+    result = registered["workitem"].fn(action="update", project_id="p", workitem_id="w", assignees=["bob"])
+
+    assert isinstance(result, str) and result.startswith("Error:"), f"{why}: {result}"
+    assert "bob" in result, f"{why}: refused without naming who was rejected"
+    assert "work_items.update" not in spy.recorder.methods, f"{why}: wrote anyway, clearing the assignees"
+
+
+@pytest.mark.parametrize("role", [20, _MEMBER_ROLE], ids=["above the floor", "exactly the floor"])
+def test_an_assignable_member_reaches_the_sdk(role, registered, spy):
+    spy.returns["projects.get_members"] = _project_members(("bob", role, True))
+
+    registered["workitem"].fn(action="create", project_id="p", name="x", assignees=["bob"])
+
+    create = next(c for c in spy.recorder.calls if c.method == "work_items.create")
+    assert create.kwargs["data"].assignees == ["bob"]
+
+
+def test_membership_alone_decides_when_the_edition_omits_role(registered, spy):
+    """Community Edition answers with identity fields only; an absent role cannot disqualify."""
+    spy.returns["projects.get_members"] = [ProjectMember(id="bob")]
+
+    registered["workitem"].fn(action="create", project_id="p", name="x", assignees=["bob"])
+
+    assert "work_items.create" in spy.recorder.methods
+
+
+@pytest.mark.parametrize(
+    "members",
+    [HttpError("nope", 404), []],
+    ids=["lookup fails", "nothing to judge against"],
+)
+def test_an_unusable_member_list_does_not_block_the_write(members, registered, spy):
+    """The check guards a write that works today; it must not become a new way to fail."""
+    spy.returns["projects.get_members"] = members
+
+    registered["workitem"].fn(action="create", project_id="p", name="x", assignees=["bob"])
+
+    assert "work_items.create" in spy.recorder.methods
+
+
+def test_a_write_carrying_no_assignees_costs_no_extra_request(registered, spy):
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", name="renamed")
+
+    assert spy.recorder.methods == ["work_items.update"]
+
+
+def test_adding_an_unassignable_assignee_is_refused(registered, spy):
+    spy.returns["projects.get_members"] = _project_members(ALICE)
+
+    result = registered["workitem"].fn(action="manage_assignee", project_id="p", workitem_id="w", add_user_id="bob")
+
+    assert isinstance(result, str) and result.startswith("Error:"), result
+    assert "work_items.update" not in spy.recorder.methods
+
+
+def test_removing_an_assignee_is_never_blocked(registered, spy):
+    """Whoever is on the item may no longer be assignable; that must not trap them there."""
+    from types import SimpleNamespace
+
+    spy.returns["projects.get_members"] = _project_members(ALICE)
+    spy.returns["work_items.retrieve"] = SimpleNamespace(assignees=["bob"], labels=[])
+
+    registered["workitem"].fn(action="manage_assignee", project_id="p", workitem_id="w", remove_user_id="bob")
+
+    update = next(c for c in spy.recorder.calls if c.method == "work_items.update")
+    assert update.kwargs["data"].assignees == []
 
 
 @pytest.mark.parametrize(
