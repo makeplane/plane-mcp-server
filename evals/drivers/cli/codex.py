@@ -232,8 +232,17 @@ def write_codex_mcp_config(
     env: dict[str, str],
     server_name: str = "plane",
 ) -> None:
-    """Write the complete MCP config for an isolated Codex home."""
+    """Write the complete MCP config for an isolated Codex home.
+
+    ``approvals_reviewer`` is required, not cosmetic. ``codex exec`` is non-interactive, so an
+    MCP call that raises an approval request has nobody to answer it and Codex cancels its own
+    call with ``user cancelled MCP tool call``. The agent then answers from nothing: a live run
+    recorded zero calls on every task while still emitting confident answers. Routing approvals
+    through automatic review is what the developer config already does; an isolated home has to
+    say so itself, because isolation is exactly what stops it being inherited.
+    """
     lines = [
+        'approvals_reviewer = "auto_review"',
         f"[mcp_servers.{json.dumps(server_name)}]",
         f"command = {json.dumps(command)}",
         f"args = {json.dumps(args)}",

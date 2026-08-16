@@ -24,6 +24,7 @@ from evals.drivers import (
     harvest_proxy_after_cli_timeout,
     load_proxy_sidecar,
     load_proxy_sidecar_calls,
+    prepare_codex_home,
     proxy_pid_path,
     proxy_wrap_server_command,
     run_cli_subprocess,
@@ -1559,3 +1560,23 @@ def test_harvest_proxy_after_cli_timeout_incomplete_note(tmp_path: Path):
     assert len(calls) == 1
     assert src == "proxy"
     assert any("incomplete" in n for n in notes)
+
+
+def test_codex_isolated_home_routes_approvals_through_automatic_review(tmp_path: Path):
+    """An isolated home must permit unattended MCP calls, or the battery measures nothing.
+
+    ``codex exec`` is non-interactive: an MCP call that raises an approval request is cancelled
+    by Codex itself with ``user cancelled MCP tool call``, and the agent then answers without
+    touching the surface. A live run recorded zero calls on all four tasks while still emitting
+    confident answers, and 562 passing tests said nothing about it.
+    """
+    codex_home = tmp_path / "codex-home"
+    prepare_codex_home(
+        codex_home,
+        command="/usr/bin/true",
+        args=["-m", "plane_mcp", "stdio"],
+        env={"PLANE_API_KEY": "k"},
+        real_codex_home=tmp_path / "absent",
+    )
+    config = (codex_home / "config.toml").read_text(encoding="utf-8")
+    assert 'approvals_reviewer = "auto_review"' in config
