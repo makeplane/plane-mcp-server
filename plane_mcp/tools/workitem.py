@@ -51,6 +51,9 @@ TITLE = "Work items"
 
 PRIORITIES = get_args(PriorityEnum)
 
+# Plane's floor for an assignable project member; guest sits below it.
+_MEMBER_ROLE = 15
+
 WRITE_FIELDS = (
     "name",
     "assignees",
@@ -175,6 +178,37 @@ def _scoped_pql(pql: str, project_id: str) -> str:
         return pql
     scope = f'project = "{project_id}"'
     return f"({pql}) AND {scope}" if pql else scope
+
+
+def _unassignable(client: Any, workspace_slug: str, project_id: str, wanted: list[str]) -> str | None:
+    """Name the assignee ids Plane would drop, because dropping them is invisible.
+
+    Validation filters an assignee it will not accept out of the payload, and an
+    update deletes the work item's existing assignees before writing what is left.
+    So one unassignable id both fails to apply and clears the field, under a 200.
+    """
+    try:
+        members = client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id)
+    except HttpError as exc:
+        logger.warning("could not read members of project %s (%s); skipping the assignee check", project_id, exc)
+        return None
+    # Community Edition omits role and is_active, so an absent one cannot disqualify.
+    assignable = {
+        member.id
+        for member in members
+        if member.id and member.is_active is not False and (member.role is None or member.role >= _MEMBER_ROLE)
+    }
+    if not assignable:  # nothing readable to judge against; never block a write that works today
+        return None
+    rejected = [user_id for user_id in wanted if user_id not in assignable]
+    if not rejected:
+        return None
+    return (
+        f"Error: not assignable in this project: {', '.join(rejected)}. Plane drops an assignee it "
+        "will not accept without reporting it, and clears the work item's existing assignees in the "
+        "process. Only active project members at member role or above can be assigned -- "
+        "`member list_project` lists them."
+    )
 
 
 def _description_html(description_html: str, description_stripped: str) -> str | None:
@@ -352,6 +386,10 @@ def register(mcp: FastMCP) -> None:
         if not project_id:
             return missing(action, "project_id")
 
+        if action in ("create", "update") and (wanted := coerce_list(assignees)):
+            if error := _unassignable(client, workspace_slug, project_id, wanted):
+                return error
+
         if action == "create":
             if not name:
                 return missing(action, "name")
@@ -399,6 +437,9 @@ def register(mcp: FastMCP) -> None:
             return missing(action, f"add_{field[:-1]}_id or remove_{field[:-1]}_id")
         # Either side takes one id or several, so adding three assignees is one call.
         adding, removing = coerce_list(add) or [], coerce_list(remove) or []
+        if field == "assignees" and adding:
+            if error := _unassignable(client, workspace_slug, project_id, adding):
+                return error
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
         )
