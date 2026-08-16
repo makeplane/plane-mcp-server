@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
+from .off_surface import off_surface_statement
 from .statistics import median, paired_bootstrap_mean_ci, paired_permutation_pvalue
 from .summary import completeness_statement, execution_coverage_statement, summarize
 from .table import format_number
@@ -137,6 +138,9 @@ def print_ab_report(comparison: dict[str, Any], path_a: Path, path_b: Path) -> N
         )
     print(f"  A {execution_coverage_statement(comparison['summary_a'])}")
     print(f"  B {execution_coverage_statement(comparison['summary_b'])}")
+    for label, summary in (("A", comparison["summary_a"]), ("B", comparison["summary_b"])):
+        for line in off_surface_statement(summary.off_surface).splitlines():
+            print(f"  {label} {line}")
     print(f"  A {completeness_statement(comparison['summary_a'])}")
     print(f"  B {completeness_statement(comparison['summary_b'])}")
     print(f"  success rate delta (B−A): {rate_b - rate_a:+.1%}")

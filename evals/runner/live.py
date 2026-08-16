@@ -16,6 +16,7 @@ from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api import MODEL_TIERS
 from evals.evidence import configured_evidence_labels
 from evals.report.load import RunExpectation, dedupe_rows_latest, load_rows, validate_run_keys
+from evals.report.off_surface import off_surface_statement
 from evals.report.summary import completeness_statement, execution_coverage_statement, summarize
 from evals.results import TaskResult, agent_run_to_task_result
 from evals.seed import make_plane_client, seed, teardown
@@ -698,5 +699,6 @@ async def run_live(
     else:
         print("success: 0/0 (n/a; no evaluated rows)", flush=True)
     print(execution_coverage_statement(summary), flush=True)
+    print(off_surface_statement(summary.off_surface), flush=True)
     print(completeness_statement(summary), flush=True)
     return 0 if summary.complete else 1

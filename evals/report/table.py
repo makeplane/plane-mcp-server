@@ -10,6 +10,7 @@ from evals.results import TaskResult
 from evals.tasks import TASKS_BY_ID
 
 from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
+from .off_surface import off_surface_statement
 from .statistics import wilson_interval
 from .summary import (
     Summary,
@@ -95,6 +96,7 @@ def print_table(summary: Summary, title: str) -> None:
         print("task-cluster success: n/a (no evaluated tasks)")
         print("pooled repetition success: 0/0 (n/a; no evaluated rows)")
     print(execution_coverage_statement(summary))
+    print(off_surface_statement(summary.off_surface))
     print(completeness_statement(summary))
     if summary.infra_errors:
         print(f"infra errors: {summary.infra_errors}")
