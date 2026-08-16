@@ -49,13 +49,7 @@ from plane_mcp.tools import (
     workspace,
 )
 
-# Order is load-bearing: tool definitions sit at the front of a client's prompt
-# cache, so reordering them invalidates the whole conversation. Append new
-# resources; do not re-sort. `test_resource_order_is_pinned` holds this to a
-# literal list, so any change shows up as a diff rather than as a silent
-# cache-buster.
 RESOURCES: tuple[ModuleType, ...] = (
-    collection,
     customer,
     customer_property,
     customer_request,
@@ -74,7 +68,6 @@ RESOURCES: tuple[ModuleType, ...] = (
     release_label,
     release_tag,
     state,
-    template,
     work_log,
     workitem,
     workitem_activity,
@@ -85,6 +78,8 @@ RESOURCES: tuple[ModuleType, ...] = (
     workitem_relation,
     workitem_type,
     workspace,
+    template,
+    collection,
 )
 
 
