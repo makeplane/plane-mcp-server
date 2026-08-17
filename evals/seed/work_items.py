@@ -389,7 +389,10 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
             project_id=project_id,
             work_item_id=attachment_target_id,
         )
-        confirmed_rows = list(attachments.results or [])
+        # attachments.list returns a bare list[WorkItemAttachment], not the paged envelope the
+        # other list endpoints return. Assuming `.results` raised AttributeError on every L5
+        # repetition, which surfaced as infra_seed and cost the task its whole row budget.
+        confirmed_rows = list(attachments if isinstance(attachments, list) else (attachments.results or []))
         for attachment in confirmed_rows:
             record_seeded_entity(context, "attachment", getattr(attachment, "id", None))
         confirmed_attachment_count = len(confirmed_rows)
@@ -416,6 +419,7 @@ def require_activities(plane: PlaneClient, workspace_slug: str, context: dict[st
     if not project_id or not work_item_id:
         missing = [name for name, value in (("project_id", project_id), ("work_item_id", work_item_id)) if not value]
         raise RuntimeError(f"seed L2 fixture error: missing {', '.join(missing)}")
+
     page = plane.work_items.activities.list(
         workspace_slug=workspace_slug,
         project_id=project_id,
@@ -423,6 +427,7 @@ def require_activities(plane: PlaneClient, workspace_slug: str, context: dict[st
     )
     rows = page.results if hasattr(page, "results") else page
     activity_rows = list(rows or [])
+    candidates = [str(value) for value in context.get("l2_comment_phrases") or []]
     activity_count = len(activity_rows)
     if activity_count < 1:
         raise TaskSkipped("env:no-activity-worker")
@@ -430,7 +435,6 @@ def require_activities(plane: PlaneClient, workspace_slug: str, context: dict[st
     if str(context.get("task_id") or "") == "L2":
         randomised = context.setdefault("randomized_truth", {}).setdefault("L2.activity_count", {})
         randomised["confirmed"] = activity_count
-        candidates = [str(value) for value in context.get("l2_comment_phrases") or []]
         response_blob = _serialized_rows(activity_rows)
         visible = [value for value in candidates if value in response_blob]
         if not visible:
