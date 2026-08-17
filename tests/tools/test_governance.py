@@ -252,6 +252,7 @@ def test_the_feature_toggles_the_sdk_offers_are_all_reachable():
     missing_flags = set(ProjectFeature.model_fields) - declared
     assert not missing_flags, f"ProjectFeature flags with no way to set them: {sorted(missing_flags)}"
 
+
 PROPERTY_REFUSAL = HttpError(
     "Bad Request", status_code=400, response={"error": "This resource is managed at the workspace level"}
 )
