@@ -80,9 +80,13 @@ def task_author(task: dict[str, Any]) -> str:
     return str(task.get("author") or "claude")
 
 
-CATALOG_REVISION = 8
+CATALOG_REVISION = 9
 """Bumped when a deliberate change to a fixture or verifier redefines what a task asks.
 
+Revision 9 also binds R1/I2 provenance to the seeded state, not the work item alone. A work
+item's `state` is an id, so resolving its name takes a second call, and the old rule needed the
+target id and the answer in one response — unsatisfiable against a surface that does not expand
+state. Both tasks failed every repetition while answering correctly.
 Revision 8 binds L2's provenance to the activity count its verifier already checks, instead of
 requiring the seeded comment phrase to appear in the activity readback. Plane's activity API
 never emits comment text — it returns the creation row only — so the old requirement was

@@ -295,7 +295,17 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
         oracle_key = "r1_state_name" if task_id == "R1" else "i2_state_name"
         context[oracle_key] = confirmed_name
         context["randomized_truth"][f"{task_id}.state"]["confirmed"] = confirmed_name
-        set_target_evidence(context, [confirmed_name], target_ids=[target_id])
+        # The state entity carries the answer, so it is a target too. A work item's `state` is a
+        # bare id, so reading the name takes a second call — one naming the work item and
+        # returning no name, one returning the name and naming only the state. Binding evidence
+        # to the work item alone demanded both halves in a single response, which no surface that
+        # returns state as an id can produce: R1 and I2 failed every repetition while answering
+        # correctly. Both ids are seeded, so the agent must still name the thing it was asked about.
+        target_ids = [target_id]
+        state_id = _as_id(detail.state)
+        if state_id:
+            target_ids.append(state_id)
+        set_target_evidence(context, [confirmed_name], target_ids=target_ids)
 
     if task_id == "R2":
         confirmed_titles = _confirm_open_urgent_items(plane, workspace_slug, project_id)
