@@ -397,18 +397,26 @@ def test_a_catalogue_state_needs_a_group(registered, spy):
     assert not spy.recorder.calls, "asked Plane for something it would refuse"
 
 
-def test_triage_is_not_a_catalogue_group(registered, spy):
-    """Triage is system-managed at workspace scope, so the catalogue never accepts it."""
-    result = registered["state"].fn(action="create", name="Triage", color="#EF4444", group="triage")
+@pytest.mark.parametrize("scope", [{}, {"project_id": PROJECT}], ids=["catalogue", "project"])
+def test_triage_is_not_a_settable_group_at_either_scope(registered, spy, scope):
+    """Plane creates the triage state itself and both serializers refuse `group=triage`."""
+    result = registered["state"].fn(action="create", name="Blocked", color="#EF4444", group="triage", **scope)
 
     assert isinstance(result, str) and "backlog" in result
-    assert not spy.recorder.calls
+    assert "triage" not in result.removeprefix("Error: group must be one of: "), "offered triage back"
+    assert not spy.recorder.calls, "asked Plane for something it would refuse"
 
 
-@pytest.mark.parametrize("field", ["sequence", "is_triage", "default"])
+def test_the_triage_flag_is_not_settable(registered):
+    """`is_triage=True` used to be accepted, and Plane created a state that no endpoint
+    could reach again: both the list and the delete queryset filter `is_triage=False`."""
+    assert "is_triage" not in registered["state"].parameters["properties"]
+
+
+@pytest.mark.parametrize("field", ["sequence", "default"])
 def test_project_only_fields_are_refused_at_workspace_scope(registered, spy, field):
-    """A catalogue state has no ordering, triage flag or default -- those live on a
-    workflow, and sending them would be dropped without a word."""
+    """A catalogue state has no ordering or default -- those live on a workflow, and
+    sending them would be dropped without a word."""
     value = 1.0 if field == "sequence" else True
     result = registered["state"].fn(action="create", name="Blocked", color="#EF4444", group="started", **{field: value})
 

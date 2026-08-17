@@ -33,8 +33,9 @@ from plane_mcp.toolkit import (
 NAME = "state"
 TITLE = "Workflow states"
 
-GROUPS = get_args(GroupEnum)
-CATALOGUE_GROUPS = get_args(CatalogGroupEnum)
+TRIAGE = "triage"
+SETTABLE_GROUPS = tuple(group for group in get_args(GroupEnum) if group != TRIAGE)
+assert SETTABLE_GROUPS == get_args(CatalogGroupEnum)
 
 ACTIONS = (
     Action(
@@ -44,23 +45,24 @@ ACTIONS = (
     Action(
         "create",
         ("name", "color"),
-        ("project_id", "description", "sequence", "group", "is_triage", "default", "external_source", "external_id"),
+        ("project_id", "description", "sequence", "group", "default", "external_source", "external_id"),
         note="group is required at workspace scope",
     ),
     Action(
         "update",
         ("state_id",),
-        ("project_id", "name", "color", "description", "sequence", "group", "is_triage", "default"),
+        ("project_id", "name", "color", "description", "sequence", "group", "default"),
         note="only the fields you pass are changed",
     ),
     Action("delete", ("state_id",), ("project_id",), destructive=True),
 )
 
 FOOTER = (
-    f"group is one of: {', '.join(GROUPS)} for a project's states, and "
-    f"{', '.join(CATALOGUE_GROUPS)} for the workspace catalogue. color is a hex code such as #EF4444. "
+    f"group is one of: {', '.join(SETTABLE_GROUPS)}. color is a hex code such as #EF4444. "
+    "A project also has a triage state, but Plane owns it: it cannot be created here and is "
+    "not listed, and Triage is a reserved name. "
     "Omit project_id to work with the workspace catalogue, which is where states live once the "
-    "workspace owns them; sequence, is_triage and default apply to a project's states only."
+    "workspace owns them; sequence and default apply to a project's states only."
 )
 
 LEGACY = {
@@ -80,7 +82,6 @@ class _Scope:
     kwargs: dict[str, Any]
     create: type
     update: type
-    groups: tuple[str, ...]
 
 
 def _scope_of(client: Any, project_id: str) -> _Scope:
@@ -91,14 +92,12 @@ def _scope_of(client: Any, project_id: str) -> _Scope:
             kwargs={"project_id": project_id},
             create=CreateState,
             update=UpdateState,
-            groups=GROUPS,
         )
     return _Scope(
         namespace=client.workspace_states,
         kwargs={},
         create=CreateWorkspaceState,
         update=UpdateWorkspaceState,
-        groups=CATALOGUE_GROUPS,
     )
 
 
@@ -120,7 +119,6 @@ def register(mcp: FastMCP) -> None:
         sequence: float | None = None,
         group: str = "",
         # Tri-state: False is a meaningful value distinct from "not supplied".
-        is_triage: bool | None = None,
         default: bool | None = None,
         external_source: str = "",
         external_id: str = "",
@@ -131,14 +129,10 @@ def register(mcp: FastMCP) -> None:
         scope = _scope_of(client, project_id)
 
         if not project_id:
-            elsewhere = [
-                field
-                for field, value in (("sequence", sequence), ("is_triage", is_triage), ("default", default))
-                if value is not None
-            ]
+            elsewhere = [field for field, value in (("sequence", sequence), ("default", default)) if value is not None]
             if elsewhere:
                 return f"Error: {', '.join(elsewhere)} apply to a project's states only, not the workspace catalogue."
-        if error := one_of("group", group, scope.groups):
+        if error := one_of("group", group, SETTABLE_GROUPS):
             return error
 
         def payload(model: type) -> Any:
@@ -149,7 +143,6 @@ def register(mcp: FastMCP) -> None:
                 "group": opt(group),
                 "description": opt(description),
                 "sequence": sequence,
-                "is_triage": is_triage,
                 "default": default,
                 "external_source": opt(external_source),
                 "external_id": opt(external_id),
