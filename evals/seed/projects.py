@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
 import secrets
-from collections.abc import Iterator
 from typing import Any
 
 from plane import PlaneClient
@@ -13,9 +11,9 @@ from plane.models.projects import CreateProject, ProjectFeature, UpdateProject
 from plane.models.work_items import CreateWorkItem
 from plane.models.workspaces import WorkspaceFeature
 
-from evals.errors import TaskSkipped
 from evals.evidence import set_target_count_evidence, set_target_evidence, set_target_grouped_count_evidence
 
+from .gates import is_plan_gate
 from .identities import record_seeded_entity
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
 
@@ -34,49 +32,6 @@ SECOND_PROJECT_BUG_TITLES = (
     "Second bug three",
     "Second bug four",
 )
-
-
-# Wording a refusal uses when the workspace's plan is what stands in the way. A feature
-# switched off for a project says "not enabled for this project" instead, which is a
-# configuration state the harness can change and so is not a gate.
-PLAN_GATE_PROSE = ("upgrade your plan", "payment required", "subscription", "not available on your")
-
-
-def is_plan_gate(exc: BaseException) -> bool:
-    """True only for genuine plan gates — not generic API failures.
-
-    402 is unambiguous. 403 and 400 are not: Plane uses 403 for ordinary permission denial
-    and for the initiative/teamspace plan gates in the same shape, so a bare 403 counted as
-    a gate turned real permission bugs into environment skips. Those two now need the
-    refusal to name a plan limit.
-    """
-    if not isinstance(exc, HttpError):
-        return False
-    if exc.status_code == 402:
-        return True
-    if exc.status_code not in (400, 403):
-        return False
-    blob = f"{exc} {exc.response!s}".lower()
-    return any(phrase in blob for phrase in PLAN_GATE_PROSE)
-
-
-@contextlib.contextmanager
-def plan_gate_skips(feature: str) -> Iterator[None]:
-    """Turn a plan refusal raised inside the block into a task skip.
-
-    An uncaught seed exception becomes infra_seed and kills the task-rep; a capability the
-    plan excludes is an environment fact, recorded like L2's missing activity worker.
-    ``TaskSkipped`` lives in a neutral module, so seed and task packages can import in
-    either order without a cycle.
-    """
-    try:
-        yield
-    except Exception as exc:
-        if is_plan_gate(exc):
-            status = getattr(exc, "status_code", None)
-            detail = f"HTTP {status}: {exc}" if status else str(exc)
-            raise TaskSkipped(f"env:plan-gated:{feature}", detail=detail[:300]) from exc
-        raise
 
 
 def is_identifier_collision(exc: BaseException) -> bool:

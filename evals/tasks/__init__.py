@@ -1,5 +1,6 @@
 """Public task catalog and verifier API."""
 
+from evals.errors import TaskSkipped
 from evals.tasks.answers import (
     contract_values,
     get_final_text,
@@ -57,7 +58,6 @@ from evals.tasks.lookups import (
 from evals.tasks.prompts import PromptBindError, format_task_prompt
 from evals.tasks.read import verify_r1, verify_r2, verify_r3, verify_r4, verify_r5, verify_r6, verify_r7
 from evals.tasks.schema import verify_s1, verify_s2, verify_s3, verify_s4, verify_s5
-from evals.tasks.skip import TaskSkipped
 from evals.tasks.write import (
     verify_w1,
     verify_w2,

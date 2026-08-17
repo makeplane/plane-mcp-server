@@ -6,9 +6,9 @@ import sys
 import uuid
 from typing import Any
 
+from evals.errors import TaskSkipped
 from evals.seed import make_plane_client, seed, teardown
 from evals.tasks.catalog import battery_fingerprint
-from evals.tasks.skip import TaskSkipped
 
 CANARY_CANNED_OUTPUTS: dict[str, tuple[str, ...]] = {
     "R1": ("state: In Progress",),

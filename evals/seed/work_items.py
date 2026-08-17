@@ -29,8 +29,8 @@ from evals.fixtures import (
 )
 from evals.state_oracle import worklog_summary_item_ids
 
+from .gates import plan_gate_skips
 from .identities import record_seeded_entity
-from .projects import plan_gate_skips
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
 
 __all__ = [

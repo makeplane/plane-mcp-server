@@ -7,9 +7,9 @@ from typing import Any
 from plane.errors.errors import HttpError
 from plane.models.enums import PropertyType
 
+from evals.errors import TaskSkipped
 from evals.fixtures import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE, W8_TITLE
 from evals.tasks.lookups import as_id, find_item_by_name
-from evals.tasks.skip import TaskSkipped
 from evals.tasks.verification import is_verifier_not_found, raise_verifier_read_error
 
 

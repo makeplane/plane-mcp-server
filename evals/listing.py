@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
-from evals.runner.live import stdio_server_env
+from evals.server_env import stdio_server_env
 
 
 @dataclass

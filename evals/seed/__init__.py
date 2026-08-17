@@ -13,6 +13,7 @@ from .customers import (
     EVALUATION_CUSTOMER_PROPERTY_NAME as DEBIAS_CUSTOMER_PROP_DISPLAY,
 )
 from .cycles import CYCLE_CURRENT, CYCLE_PAST, seed_cycles
+from .gates import is_plan_gate, plan_gate_skips
 from .intake import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE, seed_intake
 from .item_types import (
     BUG_TYPE_NAME,
@@ -31,7 +32,6 @@ from .projects import (
     enable_project_features,
     enable_workspace_features,
     is_identifier_collision,
-    is_plan_gate,
     secrets,
     seed_second_project,
 )
@@ -165,6 +165,7 @@ __all__ = [
     "is_identifier_collision",
     "is_evaluation_customer_name",
     "is_plan_gate",
+    "plan_gate_skips",
     "list_states",
     "make_plane_client",
     "require_activities",

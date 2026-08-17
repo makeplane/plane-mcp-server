@@ -14,8 +14,8 @@ from evals.fixtures import (
     is_evaluation_customer_name,
 )
 
+from .gates import plan_gate_skips
 from .identities import record_seeded_entity
-from .projects import plan_gate_skips
 
 __all__ = [
     "CUSTOMER_NAME",

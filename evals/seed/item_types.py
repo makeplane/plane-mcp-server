@@ -7,8 +7,8 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.work_item_types import CreateWorkItemType
 
+from .gates import is_plan_gate
 from .identities import record_seeded_entity
-from .projects import is_plan_gate
 
 BUG_TYPE_NAME = "Bug"
 INCIDENT_TYPE_NAME = "Incident"

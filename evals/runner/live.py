@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 import time
 import uuid
@@ -14,6 +13,7 @@ from typing import Any
 
 from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api import MODEL_TIERS
+from evals.errors import TaskSkipped
 from evals.evidence import configured_evidence_labels
 from evals.report.load import RunExpectation, dedupe_rows_latest, load_rows, validate_run_keys
 from evals.report.off_surface import off_surface_statement
@@ -22,9 +22,9 @@ from evals.report.summary import completeness_statement, execution_coverage_stat
 from evals.results import TaskResult, agent_run_to_task_result
 from evals.seed import make_plane_client, seed, teardown
 from evals.seed.identities import capture_seed_artifacts
+from evals.server_env import stdio_server_env
 from evals.tasks.catalog import battery_fingerprint, task_author, task_fingerprint
 from evals.tasks.prompts import PromptBindError, format_task_prompt
-from evals.tasks.skip import TaskSkipped
 
 from .meta import make_run_meta_row, maybe_write_run_meta, read_git_revision
 from .resume import load_resume_skip_keys
@@ -40,21 +40,6 @@ def _system_preamble(workspace_slug: str, project_name: str) -> str:
         f"Workspace slug: {workspace_slug}. Project name: {project_name}. "
         f"Complete the task using the available tools, then stop."
     )
-
-
-def stdio_server_env(*, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """Build MCP stdio env from scratch — never inherit os.environ (F6)."""
-    environment: dict[str, str] = {}
-    if path := os.environ.get("PATH"):
-        environment["PATH"] = path
-    if home := os.environ.get("HOME"):
-        environment["HOME"] = home
-    environment["PLANE_API_KEY"] = os.environ["EVAL_PLANE_API_KEY"]
-    environment["PLANE_WORKSPACE_SLUG"] = os.environ["EVAL_PLANE_WORKSPACE_SLUG"]
-    environment["PLANE_BASE_URL"] = os.environ.get("EVAL_PLANE_BASE_URL", "https://api.plane.so")
-    if extra:
-        environment.update(extra)
-    return environment
 
 
 def is_infra_cli_stop_reason(stop_reason: str | None) -> bool:
