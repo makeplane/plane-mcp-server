@@ -16,8 +16,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput
 from evals.drivers.cli.process import run_cli_subprocess
-from evals.drivers.driver import CliDriver, CliLaunch, CliOutput
 from evals.tool_names import normalize_tool_call, split_plane_and_client_calls
 
 

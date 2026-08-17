@@ -8,7 +8,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from evals.drivers.driver import CliDriver, CliLaunch, CliOutput
+from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput
 
 # Antigravity CLI (agy) — proxy-first
 # ---------------------------------------------------------------------------

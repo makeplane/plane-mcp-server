@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from evals.drivers.api.driver import ApiDriver
 from evals.drivers.cli.antigravity import (
     AntigravityCliDriver,
     prepare_antigravity_fake_home,
     write_antigravity_mcp_config,
 )
+from evals.drivers.cli.base import CliDriver, CliRunError
 from evals.drivers.cli.claude import (
     ClaudeCliDriver,
     find_claude_transcript,
@@ -48,7 +50,6 @@ from evals.drivers.cli.sidecar import (
     proxy_wrap_server_command,
     wait_for_proxy_meta,
 )
-from evals.drivers.driver import ApiDriver, CliDriver, CliRunError
 
 # Registry
 # ---------------------------------------------------------------------------

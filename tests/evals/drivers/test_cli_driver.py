@@ -30,7 +30,7 @@ from evals.drivers import (
     run_cli_subprocess,
     wait_for_proxy_meta,
 )
-from evals.drivers.driver import CliDriver, CliLaunch, CliOutput, CliOutputError
+from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput, CliOutputError
 from evals.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE
 from tests.evals.conftest import case_params
 
@@ -277,7 +277,7 @@ def _cli_driver_timeout_notes_process_group_kill(tmp_path, _monkeypatch):
 
 def _cli_driver_template_inherits_proxy_first_and_timeout_harvest(tmp_path, monkeypatch):
     clock = {"now": 0.0}
-    monkeypatch.setattr("evals.drivers.driver.time.perf_counter", lambda: clock["now"])
+    monkeypatch.setattr("evals.drivers.cli.base.time.perf_counter", lambda: clock["now"])
 
     class MinimalCliDriver(CliDriver):
         name = "minimal-cli"

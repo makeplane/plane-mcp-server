@@ -3,7 +3,7 @@
 # Import built-in adapters for their registrations. Each adapter owns its SDK
 # translation and keeps its optional SDK import lazy until construction.
 from evals.drivers.api.anthropic import AnthropicBackend
-from evals.drivers.api.backend import (
+from evals.drivers.api.base import (
     BACKEND_REGISTRY,
     KNOWN_API_PROVIDERS,
     MODEL_TIERS,

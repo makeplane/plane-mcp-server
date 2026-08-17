@@ -23,7 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from evals.drivers.driver import CliDriver, CliLaunch, CliOutput, CliOutputError
+from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput, CliOutputError
 from evals.tool_names import normalize_tool_call, split_plane_and_client_calls
 
 

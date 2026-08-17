@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from evals.drivers.api.backend import (
+from evals.drivers.api.base import (
     StopReason,
     ToolCall,
     ToolResult,

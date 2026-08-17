@@ -329,12 +329,13 @@ evals/
     debias.py            I1-I5 and L1-L5 tasks and verifiers
   drivers/
     __init__.py          public exports and driver registry
-    driver.py            AgentDriver seam, the API loop, and the CLI template
     api/
-      backend.py         neutral backend protocol and turn/tool dataclasses
+      base.py            neutral backend protocol and turn/tool dataclasses
+      driver.py          the owned model/tool loop
       anthropic.py       Anthropic Messages translation
       openai.py          OpenAI Chat Completions translation
     cli/
+      base.py            the subprocess template vendors fill in
       process.py         subprocess lifecycle
       sidecar.py         recording-proxy command and sidecar handling
       claude.py          Claude Code CLI driver

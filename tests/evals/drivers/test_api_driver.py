@@ -374,8 +374,8 @@ def test_api_driver_invalidates_manifest_after_tools_list_changed(monkeypatch):
             await self.message_handler(SimpleNamespace(root=SimpleNamespace(method="notifications/tools/list_changed")))
             return None
 
-    monkeypatch.setattr("evals.drivers.driver.stdio_client", fake_stdio_client)
-    monkeypatch.setattr("evals.drivers.driver.ClientSession", FakeClientSessionContext)
+    monkeypatch.setattr("evals.drivers.api.driver.stdio_client", fake_stdio_client)
+    monkeypatch.setattr("evals.drivers.api.driver.ClientSession", FakeClientSessionContext)
     driver = ApiDriver(
         provider="anthropic",
         backend_factory=lambda _model, _max_tokens: backend,
@@ -835,7 +835,7 @@ def test_openai_backend_behaviours(case):
 
 
 def _tool_spec_from_mcp_reads_dict_and_object_entries():
-    from evals.drivers.driver import tool_spec_from_mcp
+    from evals.drivers.api.driver import tool_spec_from_mcp
 
     as_dict = tool_spec_from_mcp(
         {"name": "list_work_items", "description": "List them", "inputSchema": {"type": "object", "x": 1}}
@@ -851,7 +851,7 @@ def _tool_spec_from_mcp_reads_dict_and_object_entries():
 
 
 def _tool_result_from_mcp_text_only_joins_blocks():
-    from evals.drivers.driver import tool_result_from_mcp
+    from evals.drivers.api.driver import tool_result_from_mcp
 
     result = tool_result_from_mcp(
         "call_1",
@@ -866,7 +866,7 @@ def _tool_result_from_mcp_text_only_joins_blocks():
 
 
 def _tool_result_from_mcp_serializes_non_text_blocks():
-    from evals.drivers.driver import tool_result_from_mcp
+    from evals.drivers.api.driver import tool_result_from_mcp
 
     mixed = tool_result_from_mcp(
         "call_2",
@@ -881,7 +881,7 @@ def _tool_result_from_mcp_serializes_non_text_blocks():
 
 
 def _tool_result_from_mcp_propagates_error_flag_in_both_spellings():
-    from evals.drivers.driver import tool_result_from_mcp
+    from evals.drivers.api.driver import tool_result_from_mcp
 
     assert tool_result_from_mcp("c", {"content": "boom", "isError": True}).is_error is True
     assert tool_result_from_mcp("c", SimpleNamespace(content="boom", is_error=True)).is_error is True
