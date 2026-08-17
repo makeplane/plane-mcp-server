@@ -58,6 +58,8 @@ def seed_plan(needs: set[str]) -> list[str]:
             "feature_exclusions (S5): project cycles+worklogs OFF; workspace customers OFF "
             "(agent enables; teardown re-enables customers=True for later C1)"
         )
+    elif "leave_worklogs_off" in needs:
+        lines.append("feature_exclusions (W11): project worklogs OFF (agent enables); workspace customers=True")
     else:
         lines.append(
             "workspace_features: customers=True "

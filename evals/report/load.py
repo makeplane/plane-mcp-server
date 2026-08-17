@@ -177,6 +177,17 @@ def is_infra_error_row(row: ResultRow) -> bool:
     return isinstance(error_class, str) and error_class.startswith("infra_")
 
 
+def is_unlaunched_row(row: ResultRow) -> bool:
+    """True when no agent ran for this row, so it observed no tool manifest.
+
+    A seed failure and a seed-time skip both end before the agent starts. Neither can
+    carry a manifest fingerprint, so neither can be held to one — demanding it refused
+    perfectly sound comparisons: one plan-gated task made every report command exit.
+    """
+    result = read_result(row)
+    return is_infra_error_row(row) or bool(result.skipped)
+
+
 def dedupe_rows_latest(rows: list[ResultRow]) -> list[TaskResult]:
     """Keep only the last row per (task_id, rep, label); preserve key insertion order."""
     latest: dict[tuple[str, int, str], TaskResult] = {}

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evals.report.load import is_infra_error_row
+from evals.report.load import is_unlaunched_row
 
 MISSING = "<missing>"
 IDENTITY_FIELDS = ("battery", "resolved_model", "provider", "driver", "server")
@@ -122,11 +122,11 @@ def _validate_file(path: Path) -> tuple[FileIdentity, list[str]]:
         source = row_values or header_values or {MISSING: []}
         values[field] = next(iter(source))
 
-    # A row that failed in seeding never launched an agent, so no tools/list was ever
+    # A row that ended during seeding never launched an agent, so no tools/list was ever
     # observed and there is no manifest to record. Demanding one from those rows refuses
     # comparisons that are perfectly sound: the first live A/B was blocked by six
     # infra_seed rows that every statistic already excludes.
-    surface_rows = [(line, record) for line, record in rows if not is_infra_error_row(record)]
+    surface_rows = [(line, record) for line, record in rows if not is_unlaunched_row(record)]
     manifest_values = _record_values(surface_rows, TOOL_MANIFEST_FIELD)
     if len(manifest_values) > 1:
         issues.append(f"{path}: rows disagree on {TOOL_MANIFEST_FIELD}: {_format_values(manifest_values)}")

@@ -631,8 +631,6 @@ def agent_run_to_task_result(
         cum_input = 0
         cum_reason = None
         usage_per_iteration = []
-        if run.usage and run.usage_scope == "iteration":
-            pass
 
     estimated_states = [bool(c.result_tokens_estimated) for c in calls]
     if estimated_states:

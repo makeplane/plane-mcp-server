@@ -465,3 +465,27 @@ def test_infra_error_rows_without_a_manifest_do_not_refuse_the_comparison(tmp_pa
     )
     report = identity.validate_persisted_identity([path])
     assert report.files[0].values[identity.TOOL_MANIFEST_FIELD] == "fp-a"
+
+
+def test_expected_skip_rows_without_a_manifest_do_not_refuse_the_comparison(tmp_path: Path):
+    """A plan-gated skip ends before the agent starts, so it carries no manifest either.
+
+    Every report command exited 2 on any file mixing one such skip with evaluated rows, even
+    though summary semantics count an expected skip as a complete row.
+    """
+    path = tmp_path / "rows.jsonl"
+    common = {
+        "rep": 0,
+        "label": "local",
+        "battery": "b1",
+        "server": "local",
+        "driver": "codex-cli",
+        "provider": "openai",
+        "resolved_model": "m",
+    }
+    surface = {**common, "task_id": "R1", "tool_manifest_fingerprint": "fp-a", "success": True}
+    plan_gated = {**common, "task_id": "L4", "skipped": "env:plan-gated:customers"}
+    path.write_text(json.dumps(surface) + "\n" + json.dumps(plan_gated) + "\n", encoding="utf-8")
+
+    report = identity.validate_persisted_identity([path])
+    assert report.files[0].values[identity.TOOL_MANIFEST_FIELD] == "fp-a"

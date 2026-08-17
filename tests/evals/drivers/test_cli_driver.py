@@ -1580,3 +1580,36 @@ def test_codex_isolated_home_routes_approvals_through_automatic_review(tmp_path:
     )
     config = (codex_home / "config.toml").read_text(encoding="utf-8")
     assert 'approvals_reviewer = "auto_review"' in config
+
+
+def test_codex_nonzero_exit_is_not_scored_as_a_finished_attempt(tmp_path: Path):
+    """A failed codex process is infrastructure, not a model failure.
+
+    Codex defaulted to ``end_turn`` whatever its exit code, so an authentication or network
+    failure that still emitted a partial ``agent_message`` was verified and counted in the
+    success rate. opencode and antigravity already map a nonzero exit to ``error``, so this
+    also skewed every driver comparison against them.
+    """
+    driver = CodexCliDriver(codex_bin="/usr/bin/true", runner=lambda *_a, **_k: None, allow_live=True)
+    stdout = json.dumps({"type": "agent_message", "message": "partial"}) + "\n"
+    notes: list[str] = []
+    launch = None
+
+    completed = driver.parse_output(
+        subprocess.CompletedProcess(["codex"], 1, stdout=stdout, stderr="auth failed"),
+        launch=launch,
+        task_cwd=tmp_path,
+        max_turns=10,
+        notes=notes,
+    )
+    assert completed.stopped_reason == "error"
+    assert any(note == "codex_exit=1" for note in notes)
+
+    clean = driver.parse_output(
+        subprocess.CompletedProcess(["codex"], 0, stdout=stdout, stderr=""),
+        launch=launch,
+        task_cwd=tmp_path,
+        max_turns=10,
+        notes=[],
+    )
+    assert clean.stopped_reason == "end_turn"

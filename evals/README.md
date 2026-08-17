@@ -234,7 +234,8 @@ A task is a dict:
 
 `needs` tokens: `items`, `labels`, `bug_type`, `cycles`, `cycles_open_past`, `module`,
 `intake`, `customer`, `release`, `activity_feed`, `second_project`,
-`leave_cycles_worklogs_off`. Each task gets its own freshly seeded project, so fixture
+`leave_cycles_worklogs_off` (S5: cycles + worklogs + workspace customers off),
+`leave_worklogs_off` (W11: worklogs only). Each task gets its own freshly seeded project, so fixture
 variants (e.g. `cycles_open_past`) don't leak between tasks.
 
 ### Writing a verifier

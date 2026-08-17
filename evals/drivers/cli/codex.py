@@ -424,13 +424,22 @@ class CodexCliDriver(CliDriver):
             }
 
         raw_ref = f"session:{session_id}" if session_id else None
+        # A nonzero exit means the process failed — authentication, network, a crash — so the
+        # transcript is not a finished attempt and must not be scored as one. opencode and
+        # antigravity already say so; codex defaulting to end_turn charged its own process
+        # failures to the model's success rate and biased every driver comparison against
+        # the other two.
+        stopped_reason = parsed.get("stopped_reason") or "end_turn"
+        if proc.returncode:
+            notes.append(f"codex_exit={proc.returncode}")
+            stopped_reason = "error"
         return CliOutput(
             calls=calls,
             final_text=parsed.get("final_text") or "",
             client_tool_calls=client_calls,
             usage=usage,
             usage_total=usage_total,
-            stopped_reason=parsed.get("stopped_reason") or "end_turn",
+            stopped_reason=stopped_reason,
             raw_ref=raw_ref,
             call_source=call_source,
             hit_max_turns=False,  # codex exec has no max-turns flag in --help

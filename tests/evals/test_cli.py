@@ -32,7 +32,8 @@ DESIGN_IDS = {
     "C2",
 }
 
-EXTRA_IDS = {"W9", "W10", "R7", "S5"}  # bulk, pages, transitions, features
+EXTRA_IDS = {"W9", "W10", "W11", "R7", "S5"}  # bulk, pages, feature recovery, transitions, features
+DEBIAS_IDS = {"I1", "I2", "I3", "I4", "I5", "L1", "L2", "L3", "L4", "L5"}
 
 
 @pytest.mark.parametrize("case", ["list-task-ids", "dry-run-all"])
@@ -40,7 +41,10 @@ def test_cmd_behaviours(case, capsys):
     if case == "list-task-ids":
         assert cmd_list() == 0
         out = capsys.readouterr().out
-        for task_id in DESIGN_IDS | EXTRA_IDS:
+        # Every registered task, not a subset: the listing is how a caller discovers the
+        # battery, and a task missing from it is invisible.
+        assert DESIGN_IDS | EXTRA_IDS | DEBIAS_IDS == {task["id"] for task in TASKS}
+        for task_id in DESIGN_IDS | EXTRA_IDS | DEBIAS_IDS:
             assert task_id in out
     else:
         assert cmd_dry_run(list(TASKS)) == 0
