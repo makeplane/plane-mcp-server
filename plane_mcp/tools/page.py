@@ -10,9 +10,9 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastmcp import FastMCP
-from plane.models.collections import AddCollectionPages, Collection, UpdateCollectionPage
+from plane.models.collections import AddCollectionPages, UpdateCollectionPage
 from plane.models.pages import CreatePage, Page, UpdatePage
-from plane.models.query_params import CollectionPageQueryParams, PaginatedQueryParams
+from plane.models.query_params import PaginatedQueryParams
 from plane.models.work_item_pages import CreateWorkItemPage, WorkItemPage
 
 from plane_mcp.client import get_plane_client_context
@@ -83,7 +83,8 @@ FOOTER = (
     "update changes only the fields you pass. A page must be archived before it can be deleted. "
     "Omit project_id to work with workspace-level pages. "
     "A page's parent is fixed at creation -- pass parent_id to create to build a hierarchy, since "
-    "nothing can reparent it afterwards. list reports each page's parent_id and collection_id. "
+    "nothing can reparent it afterwards. list and retrieve both report a page's parent_id and the "
+    "collection_id it is filed in, so neither needs looking up. "
     "Collections themselves live in the collection tool; here, create files a new page into one and "
     "set_collection files or moves an existing page."
 )
@@ -134,7 +135,7 @@ def register(mcp: FastMCP) -> None:
         external_id: str = "",
         cursor: str = "",
         per_page: int = 0,
-    ) -> Page | WorkItemPage | list[WorkItemPage] | list[Collection] | dict[str, Any] | str | None:
+    ) -> Page | WorkItemPage | list[WorkItemPage] | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if action == "list":
@@ -212,24 +213,9 @@ def register(mcp: FastMCP) -> None:
             if error := needs(action, page_id=page_id, collection_id=collection_id):
                 return error
 
-            named = client.pages.retrieve_workspace_page(workspace_slug=workspace_slug, page_id=page_id)
-            row = None
-            for collection in client.collections.list(workspace_slug=workspace_slug):
-                filed_cursor = ""
-                while True:
-                    rows = client.collections.pages.list(
-                        workspace_slug=workspace_slug,
-                        collection_id=str(collection.id),
-                        params=as_params(CollectionPageQueryParams, search=opt(named.name), cursor=filed_cursor),
-                    )
-                    row = next((r for r in rows.results if str((r.page or {}).get("id")) == page_id), None)
-                    if row is not None or not rows.next_page_results:
-                        break
-                    filed_cursor = rows.next_cursor
-                if row is not None:
-                    break
+            filed = client.pages.retrieve_workspace_page(workspace_slug=workspace_slug, page_id=page_id)
 
-            if row is None:
+            if not filed.collection_id:
                 added = client.collections.pages.add(
                     workspace_slug=workspace_slug,
                     collection_id=collection_id,
@@ -238,13 +224,13 @@ def register(mcp: FastMCP) -> None:
                 if not added:
                     return None
                 membership_id = added[0].id
-            elif str(row.collection_id) == collection_id:
-                membership_id = row.page_collection_id
+            elif str(filed.collection_id) == collection_id:
+                membership_id = filed.page_collection_id
             else:
                 membership_id = client.collections.pages.update(
                     workspace_slug=workspace_slug,
-                    collection_id=str(row.collection_id),
-                    page_collection_id=str(row.page_collection_id),
+                    collection_id=str(filed.collection_id),
+                    page_collection_id=str(filed.page_collection_id),
                     data=UpdateCollectionPage(collection=collection_id),
                 ).id
 
