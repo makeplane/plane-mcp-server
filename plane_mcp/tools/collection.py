@@ -165,6 +165,8 @@ def register(mcp: FastMCP) -> None:
             return collections.retrieve(workspace_slug=workspace_slug, collection_id=collection_id)
 
         if action == "update":
+            if not name and sort_order is None:
+                return missing(action, "name or sort_order")
             return collections.update(
                 workspace_slug=workspace_slug,
                 collection_id=collection_id,

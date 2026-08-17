@@ -68,7 +68,7 @@ Both implement `list_tools`/`get_tool` only, so execution keeps the full schema 
 
 | Transform | Effect |
 |---|---|
-| `StripOutputSchemas` | Drops `outputSchema` from the listing — roughly two thirds of the wire payload, for a field no client forwards to a model |
+| `StripOutputSchemas` | Drops `outputSchema` from the listing — roughly two-thirds of the wire payload, for a field no client forwards to a model |
 | `LegacyNames` | Resolves a retired tool name to its `(tool, action)` pair, with `action` hidden and pre-filled |
 
 ## Retired tool names
