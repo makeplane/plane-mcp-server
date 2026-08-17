@@ -179,7 +179,7 @@ Structured JSON. Each tool call logs its name, duration, status and — when
 available — an opaque user id and the workspace slug.
 
 ```bash
-export LOG_USER_INFO=true    # also log the display name (PII);
+export LOG_USER_INFO=false    # also log the display name (PII);
 export LOG_PAYLOADS=false    # keep request payloads out of logs; default true
 ```
 

@@ -44,6 +44,7 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
     # Without project_id this is the workspace catalogue, which requires a group.
     ("state", "create"): {"group": "started"},
     ("template", "update"): {"name": "Renamed"},
+    ("collection", "update"): {"name": "Renamed"},
     ("cycle", "manage_workitems"): {"add_ids": "id-1"},
     ("module", "manage_workitems"): {"add_ids": "id-1"},
     ("milestone", "manage_workitems"): {"add_ids": "id-1"},
