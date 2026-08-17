@@ -178,7 +178,14 @@ def test_work_item_read_truth_is_randomized_and_api_confirmed(task_id, oracle_ke
 
     assert ctx[oracle_key] not in (None, "", [])
     assert "confirmed" in ctx["randomized_truth"][truth_key]
-    assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE]
+    if task_id == "L2":
+        # L2 binds the activity count, not a sentinel value: Plane's activity payload carries
+        # the creation row and never the seeded comment text (revision 8).
+        assert ctx["evidence_aggregates"][TARGET_ENTITY_EVIDENCE] == (
+            {"kind": "total_count", "value": ctx[oracle_key]},
+        )
+    else:
+        assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE]
     assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE]
 
 

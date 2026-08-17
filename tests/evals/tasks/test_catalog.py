@@ -99,7 +99,7 @@ CATALOG_ID_ORDER = (
 # "77230f96962d" at revision 6 before target-entity response evidence.
 # This pin moves with every deliberate revision bump, and must not move otherwise — an
 # unexplained change means the serialization drifted, which is what the pin exists to catch.
-PINNED_SYNTHETIC_BATTERY = "e059523c9f3d"
+PINNED_SYNTHETIC_BATTERY = "3f6a3f44455d"
 
 
 @pytest.mark.parametrize("case", ["design-and-extras", "id-order"])
@@ -311,10 +311,13 @@ def test_fingerprint_records_the_revision_transition():
     unverifiable logged-date ask and W9's unverifiable batching ask, and tightens the
     affected end-state verifiers; its full-catalog value was ``ccf39203f656``. Revision 7
     binds read provenance to target-entity response evidence and gives C2/R7 randomised,
-    immutable seed-time oracles. Results across these transitions are not comparable.
+    immutable seed-time oracles; its full-catalog value was ``9ea76bf22ba0``. Revision 8 binds
+    L2's provenance to the activity count its verifier already checks, because the seeded
+    comment phrase it used to require is never present in Plane's activity payload. Results
+    across these transitions are not comparable.
     Asserting the constant rather than merely 'it changed' makes future drift visible.
     """
     from evals.tasks.catalog import CATALOG_REVISION
 
-    assert CATALOG_REVISION == 7
-    assert battery_fingerprint() == "9ea76bf22ba0"
+    assert CATALOG_REVISION == 8
+    assert battery_fingerprint() == "61bddef0dc76"

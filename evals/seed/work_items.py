@@ -427,7 +427,6 @@ def require_activities(plane: PlaneClient, workspace_slug: str, context: dict[st
     )
     rows = page.results if hasattr(page, "results") else page
     activity_rows = list(rows or [])
-    candidates = [str(value) for value in context.get("l2_comment_phrases") or []]
     activity_count = len(activity_rows)
     if activity_count < 1:
         raise TaskSkipped("env:no-activity-worker")
@@ -435,8 +434,8 @@ def require_activities(plane: PlaneClient, workspace_slug: str, context: dict[st
     if str(context.get("task_id") or "") == "L2":
         randomised = context.setdefault("randomized_truth", {}).setdefault("L2.activity_count", {})
         randomised["confirmed"] = activity_count
-        response_blob = _serialized_rows(activity_rows)
-        visible = [value for value in candidates if value in response_blob]
-        if not visible:
-            raise RuntimeError("seed L2 fixture error: activity readback omitted randomized comment evidence")
-        set_target_evidence(context, visible, target_ids=[work_item_id])
+        # Evidence is the activity count, which is what L2 actually asks for and what its
+        # verifier checks. It used to require the seeded comment phrase to appear in the
+        # activity readback — evidence Plane's activity API never emits: the endpoint returns
+        # the creation row and no comment text, so every L2 repetition died in seeding.
+        set_target_count_evidence(context, activity_count, target_ids=[work_item_id])

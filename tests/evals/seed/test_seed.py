@@ -1276,6 +1276,10 @@ def test_collision_category_coverage_matches_task_prompts():
             id="successful-nonempty-read-proceeds",
         ),
         pytest.param(
+            # Revision 8: a non-empty read is sufficient, and evidence is the activity count.
+            # This case used to require the seeded comment phrase in the readback and expect a
+            # fixture error without it — a contract Plane's activity API can never satisfy,
+            # because it returns the creation row and never the comment text.
             {
                 "task_id": "L2",
                 "project_id": "p1",
@@ -1283,9 +1287,9 @@ def test_collision_category_coverage_matches_task_prompts():
                 "l2_comment_phrases": ["hidden seeded comment"],
             },
             [SimpleNamespace(id="a1", comment="unrelated activity")],
-            RuntimeError,
-            "fixture error: activity readback omitted randomized comment evidence",
-            id="nonempty-read-without-seeded-evidence-is-fixture-error",
+            None,
+            None,
+            id="nonempty-read-without-comment-text-binds-count-evidence",
         ),
     ],
 )
@@ -1300,6 +1304,10 @@ def test_l2_activity_gate_outcomes(context, read_result, expected_error, match):
     plane = SimpleNamespace(work_items=SimpleNamespace(activities=SimpleNamespace(list=list_activities)))
     if expected_error is None:
         _gate_activity_worker(plane, "ws", context)
+        if context.get("task_id") == "L2":
+            aggregates = context["evidence_aggregates"][TARGET_ENTITY_EVIDENCE]
+            assert aggregates == ({"kind": "total_count", "value": 1},)
+            assert context["evidence_targets"][TARGET_ENTITY_EVIDENCE] == ("wi-r5",)
     else:
         with pytest.raises(expected_error, match=match):
             _gate_activity_worker(plane, "ws", context)

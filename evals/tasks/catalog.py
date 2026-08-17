@@ -80,9 +80,14 @@ def task_author(task: dict[str, Any]) -> str:
     return str(task.get("author") or "claude")
 
 
-CATALOG_REVISION = 7
+CATALOG_REVISION = 8
 """Bumped when a deliberate change to a fixture or verifier redefines what a task asks.
 
+Revision 8 binds L2's provenance to the activity count its verifier already checks, instead of
+requiring the seeded comment phrase to appear in the activity readback. Plane's activity API
+never emits comment text — it returns the creation row only — so the old requirement was
+unsatisfiable and L2 failed in seeding on every repetition. L2 results are not comparable
+across this transition, because before it there were none.
 Revision 7 makes read tasks require response evidence bound to the target entity and gives
 C2/R7 randomised, immutable seed-time oracles; pre-revision read results are not comparable.
 Revision 6 stops W8 and W9 asking for unverifiable logged-date and batching properties;
