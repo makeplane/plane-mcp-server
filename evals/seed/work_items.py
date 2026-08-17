@@ -9,12 +9,7 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.query_params import WorkItemQueryParams
 from plane.models.states import CreateState
-from plane.models.work_items import (
-    CreateWorkItem,
-    CreateWorkItemComment,
-    CreateWorkItemWorkLog,
-    UpdateWorkItem,
-)
+from plane.models.work_items import CreateWorkItem, CreateWorkItemComment, UpdateWorkItem
 
 from evals.changelog import normalize_changelog_text
 from evals.errors import TaskSkipped
@@ -383,7 +378,8 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
                 workspace_slug=workspace_slug,
                 project_id=project_id,
                 work_item_id=other_id,
-                data=CreateWorkItemWorkLog(duration=seeded_minutes, description=f"seeded {hidden_token}"),
+                # This resource takes a plain mapping, not a request model like its siblings.
+                data={"duration": seeded_minutes, "description": f"seeded {hidden_token}"},
             )
         confirmed_summary = plane.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
         confirmed_summary_ids = worklog_summary_item_ids(confirmed_summary)

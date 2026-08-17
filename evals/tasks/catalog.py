@@ -80,8 +80,21 @@ def task_author(task: dict[str, Any]) -> str:
     return str(task.get("author") or "claude")
 
 
-CATALOG_REVISION = 11
+CATALOG_REVISION = 12
 """Bumped when a deliberate change to a fixture or verifier redefines what a task asks.
+
+Revision 12 also disambiguates L1's answer contract. It asked for "exactly one
+'logged-minutes: 90' line and one 'summary-work-item-id' line for every row", which was
+unambiguous only while the summary held a single row. With a seeded second row every agent read
+"for every row" as governing both clauses and emitted one logged-minutes line per row — wrong for
+a row whose seeded duration is not 90. The prompt now separates the two clauses and says other
+items may already carry worklogs.
+
+Revision 12 gives R6's second project a Bug type of its own. Work item types are project-owned
+unless the workspace owns them, so creating that project's bugs with the main project's type id
+left them invisible to an agent resolving 'Bug' inside it: the agent counted zero there and named
+the main project, always in that direction, while the oracle read those ids back directly and
+disagreed. The seeded counts are unchanged; what changes is that the answer is now findable.
 
 Revision 11 gives L1 a worklog it did not create, on an item it is not told about. Its answer
 was the id of the item it had just logged time on, and that id is echoed by the write itself,

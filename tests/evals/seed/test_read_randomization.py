@@ -58,7 +58,9 @@ class _ReadSeedPlane:
         )
 
     def _create_work_log(self, *, work_item_id, data, **kwargs):
-        log = SimpleNamespace(id=f"log-{work_item_id}", duration=data.duration, description=data.description)
+        # The SDK resource takes a mapping here, so the fake must reject a model.
+        assert isinstance(data, dict), f"work_logs.create needs a mapping, got {type(data).__name__}"
+        log = SimpleNamespace(id=f"log-{work_item_id}", duration=data["duration"], description=data["description"])
         self._work_logs.setdefault(str(work_item_id), []).append(log)
         return log
 

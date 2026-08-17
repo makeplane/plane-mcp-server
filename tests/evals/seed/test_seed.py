@@ -123,9 +123,23 @@ def test_r6_random_truth_is_per_seed_and_oracle_is_api_confirmed():
         main_id = f"main-{run8}"
         main_name = f"EVAL {run8}"
         work_items = WorkItems(mark_second_non_bug=mark_second_non_bug)
+        # Types are project-owned in this fake, so the second project must be given its own
+        # Bug type: creating its items with the main project's type id is what made an agent
+        # resolving 'Bug' inside that project count zero.
+        project_types: dict[str, str] = {}
+
+        def create_project_type(*, project_id, data, **kwargs):
+            type_id = f"bug-{project_id}"
+            project_types[str(project_id)] = type_id
+            return SimpleNamespace(id=type_id, name=data.name)
+
         plane = SimpleNamespace(
             projects=Projects(main_id, main_name),
             work_items=work_items,
+            work_item_types=SimpleNamespace(
+                list=lambda **kwargs: [],
+                create=create_project_type,
+            ),
         )
         ctx = {
             "run_id": run_id,

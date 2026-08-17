@@ -305,10 +305,10 @@ L1_TASK: dict[str, Any] = {
     "tags": {"write", "read", "long_tail", "debias"},
     "prompt": (
         f"In project {{project}}, log 1.5 hours (90 minutes) of work on the item titled "
-        f"'{L1_TITLE}', then report the project's worklog summary. End with exactly "
-        "one 'logged-minutes: 90' line and one "
-        "'summary-work-item-id: <exact work item UUID>' line for every row returned "
-        "by the project worklog summary. Include no other lines with those prefixes."
+        f"'{L1_TITLE}', then report the project's worklog summary. End with exactly one "
+        "'logged-minutes: 90' line, and then, for each row the project worklog summary "
+        "returns, one 'summary-work-item-id: <exact work item UUID>' line. The project "
+        "may already have worklogs on other items. Include no other lines with those prefixes."
     ),
     "needs": {"items"},
     "verify": verify_l1,

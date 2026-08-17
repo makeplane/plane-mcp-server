@@ -219,6 +219,29 @@ def enable_project_features(
         )
 
 
+def _project_bug_type_id(plane: PlaneClient, workspace_slug: str, project_id: str) -> str:
+    """Resolve or create a project-owned Bug type, so each project answers for its own."""
+    from plane.models.work_item_types import CreateWorkItemType
+
+    from .item_types import BUG_TYPE_NAME, is_work_item_type_named
+
+    existing = next(
+        (
+            row
+            for row in plane.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id)
+            if is_work_item_type_named(row, BUG_TYPE_NAME)
+        ),
+        None,
+    )
+    if existing is None:
+        existing = plane.work_item_types.create(
+            workspace_slug=workspace_slug,
+            project_id=project_id,
+            data=CreateWorkItemType(name=BUG_TYPE_NAME),
+        )
+    return str(existing.id)
+
+
 def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:
     """Seed two API-confirmed Bug counts, randomising R6's winner per row."""
     from .item_types import seed_item_type
@@ -246,7 +269,12 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
     if not bug_id:
         raise RuntimeError("seed second_project: bug_type required for R6 bug counts")
 
-    # Import workspace-level type into second project when needed.
+    # Give the second project a Bug type of its own. Workspace-owned types are shared, so
+    # importing is enough; project-owned types are not, and creating B's items with the main
+    # project's type id left them invisible to an agent that resolves 'Bug' inside B. It
+    # counted zero there and named the main project, always in that direction, while the
+    # oracle — which reads those ids back directly — saw the seeded count and disagreed.
+    second_bug_id = bug_id
     if context.get("bug_type_workspace_level"):
         try:
             plane.work_item_types.import_to_project(
@@ -259,6 +287,8 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
                 # May already be imported.
                 if not (isinstance(exc, HttpError) and exc.status_code in (400, 409)):
                     raise
+    else:
+        second_bug_id = _project_bug_type_id(plane, workspace_slug, str(project.id))
 
     main_id = context["project_id"]
     task_id = str(context.get("task_id") or "")
@@ -293,7 +323,7 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         item = plane.work_items.create(
             workspace_slug=workspace_slug,
             project_id=project.id,
-            data=CreateWorkItem(name=title, priority="high", type_id=str(bug_id)),  # type: ignore[arg-type]
+            data=CreateWorkItem(name=title, priority="high", type_id=str(second_bug_id)),  # type: ignore[arg-type]
         )
         second_bug_ids.append(item.id)
         record_seeded_entity(context, "work_item", item.id)
@@ -303,7 +333,7 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         context["r6_more_bugs_project"] = name
         return
 
-    def confirmed_open_bug_count(project_id: str, work_item_ids: list[str]) -> int:
+    def confirmed_open_bug_count(project_id: str, work_item_ids: list[str], type_id: str) -> int:
         count = 0
         for work_item_id in work_item_ids:
             detail = plane.work_items.retrieve(
@@ -311,15 +341,15 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
                 project_id=project_id,
                 work_item_id=work_item_id,
             )
-            if str(getattr(detail, "type_id", None) or "") != str(bug_id):
+            if str(getattr(detail, "type_id", None) or "") != str(type_id):
                 continue
             if getattr(detail, "completed_at", None) or getattr(detail, "archived_at", None):
                 continue
             count += 1
         return count
 
-    confirmed_main = confirmed_open_bug_count(main_id, main_bug_ids)
-    confirmed_second = confirmed_open_bug_count(str(project.id), second_bug_ids)
+    confirmed_main = confirmed_open_bug_count(main_id, main_bug_ids, str(bug_id))
+    confirmed_second = confirmed_open_bug_count(str(project.id), second_bug_ids, str(second_bug_id))
     if confirmed_main == confirmed_second:
         raise RuntimeError(f"seed R6: API-confirmed open Bug counts tie ({confirmed_main} each)")
     main_project = plane.projects.retrieve(workspace_slug=workspace_slug, project_id=main_id)
