@@ -421,6 +421,31 @@ def observed_aggregate_labels(observations: Any, aggregates: Any) -> list[str]:
     return sorted(matched)
 
 
+def _register_targets(context: dict[str, Any], target_ids: Sequence[Any], *, what: str) -> None:
+    """Add seeded entity IDs to the label's target set, keeping any already registered."""
+    clean = tuple(dict.fromkeys(str(value).strip() for value in target_ids if value is not None and str(value).strip()))
+    if not clean:
+        raise RuntimeError(f"{what} has no seeded target entity ids")
+    targets = context.setdefault("evidence_targets", {})
+    current = targets.get(TARGET_ENTITY_EVIDENCE, ())
+    targets[TARGET_ENTITY_EVIDENCE] = tuple(dict.fromkeys((*current, *clean)))
+
+
+def _add_aggregate_specs(context: dict[str, Any], specs: Sequence[dict[str, Any]]) -> None:
+    """Append acceptable aggregate shapes rather than replacing the registered ones.
+
+    A task may reach its answer by more than one honest call shape — R6's winner is
+    provable by two per-project counts or by one count grouped by project. Replacing
+    here privileged whichever seeder ran last, and scored every other path unproven.
+    """
+    aggregates = context.setdefault("evidence_aggregates", {})
+    registered = list(aggregates.get(TARGET_ENTITY_EVIDENCE, ()))
+    for spec in specs:
+        if spec not in registered:
+            registered.append(spec)
+    aggregates[TARGET_ENTITY_EVIDENCE] = tuple(registered)
+
+
 def set_target_evidence(context: dict[str, Any], values: Sequence[Any], *, target_ids: Sequence[Any]) -> None:
     """Register API-confirmed values and the entity IDs whose reads may prove them."""
     clean_values: list[str] = []
@@ -433,24 +458,16 @@ def set_target_evidence(context: dict[str, Any], values: Sequence[Any], *, targe
     clean = tuple(dict.fromkeys(clean_values))
     if not clean:
         raise RuntimeError("target evidence has no API-confirmed sentinel values")
-    clean_targets = tuple(
-        dict.fromkeys(str(value).strip() for value in target_ids if value is not None and str(value).strip())
-    )
-    if not clean_targets:
-        raise RuntimeError("target evidence has no seeded target entity ids")
+    _register_targets(context, target_ids, what="target evidence")
     context["evidence_sentinels"] = {TARGET_ENTITY_EVIDENCE: clean}
-    context["evidence_targets"] = {TARGET_ENTITY_EVIDENCE: clean_targets}
 
 
-def set_target_count_evidence(context: dict[str, Any], count: int, *, target_ids: Sequence[Any]) -> None:
-    """Allow an exact ``total_count`` response whose request names the seeded target."""
-    clean_targets = tuple(str(value).strip() for value in target_ids if value is not None and str(value).strip())
-    if not clean_targets:
-        raise RuntimeError("target count evidence has no seeded target entity ids")
-    context.setdefault("evidence_targets", {})[TARGET_ENTITY_EVIDENCE] = clean_targets
-    context.setdefault("evidence_aggregates", {})[TARGET_ENTITY_EVIDENCE] = (
-        {"kind": "total_count", "value": int(count)},
-    )
+def set_target_count_evidence(context: dict[str, Any], *counts: int, target_ids: Sequence[Any]) -> None:
+    """Allow an exact ``total_count`` response whose request names a seeded target."""
+    if not counts:
+        raise RuntimeError("target count evidence has no API-confirmed counts")
+    _register_targets(context, target_ids, what="target count evidence")
+    _add_aggregate_specs(context, [{"kind": "total_count", "value": int(count)} for count in counts])
 
 
 def set_target_grouped_count_evidence(context: dict[str, Any], values: Mapping[Any, int]) -> None:
@@ -458,10 +475,8 @@ def set_target_grouped_count_evidence(context: dict[str, Any], values: Mapping[A
     clean = {str(target): int(count) for target, count in values.items() if str(target).strip()}
     if not clean:
         raise RuntimeError("target grouped-count evidence has no seeded targets")
-    context.setdefault("evidence_targets", {})[TARGET_ENTITY_EVIDENCE] = tuple(clean)
-    context.setdefault("evidence_aggregates", {})[TARGET_ENTITY_EVIDENCE] = (
-        {"kind": "grouped_counts", "values": clean},
-    )
+    _register_targets(context, clean, what="target grouped-count evidence")
+    _add_aggregate_specs(context, [{"kind": "grouped_counts", "values": clean}])
 
 
 __all__ = [

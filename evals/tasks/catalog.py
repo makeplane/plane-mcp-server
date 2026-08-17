@@ -80,9 +80,13 @@ def task_author(task: dict[str, Any]) -> str:
     return str(task.get("author") or "claude")
 
 
-CATALOG_REVISION = 9
+CATALOG_REVISION = 10
 """Bumped when a deliberate change to a fixture or verifier redefines what a task asks.
 
+Revision 10 lets R6's provenance be proven by one count per project, not only by a single
+count grouped by project. Both are honest routes to the winner, but only the grouped one
+was registered, so every agent that counted each project separately answered correctly and
+scored as unproven. R6 results are not comparable across this transition.
 Revision 9 also binds R1/I2 provenance to the seeded state, not the work item alone. A work
 item's `state` is an id, so resolving its name takes a second call, and the old rule needed the
 target id and the answer in one response — unsatisfiable against a surface that does not expand

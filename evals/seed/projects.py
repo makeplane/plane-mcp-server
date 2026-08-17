@@ -14,7 +14,7 @@ from plane.models.work_items import CreateWorkItem
 from plane.models.workspaces import WorkspaceFeature
 
 from evals.errors import TaskSkipped
-from evals.evidence import set_target_evidence, set_target_grouped_count_evidence
+from evals.evidence import set_target_count_evidence, set_target_evidence, set_target_grouped_count_evidence
 
 from .identities import record_seeded_entity
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
@@ -337,7 +337,11 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         "winner": context["r6_more_bugs_project"],
     }
     set_target_evidence(context, [*main_titles, *second_titles], target_ids=[main_id, project.id])
+    # Two honest call shapes reach this answer: one count grouped by project_id, or one
+    # count per project. Only the grouped shape was provable, so every agent that took
+    # the per-project route answered correctly and scored as unproven.
     set_target_grouped_count_evidence(
         context,
         {main_id: confirmed_main, str(project.id): confirmed_second},
     )
+    set_target_count_evidence(context, confirmed_main, confirmed_second, target_ids=[main_id, project.id])
