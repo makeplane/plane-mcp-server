@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from evals.drivers import (
+from evals.drivers.cli.sidecar import (
     apply_proxy_sidecar,
     ensure_proxy_pythonpath,
     load_proxy_sidecar,

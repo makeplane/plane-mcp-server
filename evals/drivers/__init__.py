@@ -2,113 +2,49 @@
 
 The ``api`` driver owns a provider-neutral loop; CLI drivers spawn locally installed
 agent CLIs on the user's own subscription. Probed CLI details live with each vendor.
+
+Only the registry lives here, and each driver is imported inside the branch that returns
+it. This file used to re-export forty names, most of them vendor internals reached only by
+tests — and because Python runs a package's ``__init__`` before any submodule, that wall
+made *every* consumer load all five agent CLIs. Importing the API backend, which shares
+nothing with them, pulled in the whole CLI tree.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from evals.drivers.api.driver import ApiDriver
-from evals.drivers.cli.antigravity import (
-    AntigravityCliDriver,
-    prepare_antigravity_fake_home,
-    write_antigravity_mcp_config,
-)
-from evals.drivers.cli.base import CliDriver, CliRunError
-from evals.drivers.cli.claude import (
-    ClaudeCliDriver,
-    find_claude_transcript,
-    normalize_claude_usage,
-    parse_claude_json_result,
-    parse_claude_transcript_calls,
-    prepare_claude_isolated_environment,
-    write_claude_mcp_config,
-)
-from evals.drivers.cli.codex import (
-    CodexCliDriver,
-    find_codex_rollout,
-    parse_codex_jsonl_events,
-    parse_codex_rollout_calls,
-    prepare_codex_home,
-    write_codex_mcp_config,
-    write_codex_mcp_override_args,
-)
-from evals.drivers.cli.opencode import (
-    OpencodeCliDriver,
-    prepare_opencode_isolated_environment,
-    write_opencode_mcp_config,
-)
-from evals.drivers.cli.process import kill_process_group, note_timeout_kill, run_cli_subprocess
-from evals.drivers.cli.sidecar import (
-    apply_proxy_sidecar,
-    ensure_proxy_pythonpath,
-    harvest_proxy_after_cli_timeout,
-    load_proxy_sidecar,
-    load_proxy_sidecar_calls,
-    proxy_pid_path,
-    proxy_session_paths,
-    proxy_wrap_server_command,
-    wait_for_proxy_meta,
-)
-
-# Registry
-# ---------------------------------------------------------------------------
+if TYPE_CHECKING:
+    from evals.drivers.api.driver import ApiDriver
+    from evals.drivers.cli.base import CliDriver
 
 KNOWN_DRIVERS = frozenset({"api", "claude-cli", "codex-cli", "antigravity-cli", "opencode-cli"})
 
 
 def get_driver(name: str, **kwargs: Any) -> ApiDriver | CliDriver:
-    """Return a driver instance."""
+    """Return a driver instance, loading only the surface it names."""
     key = (name or "api").strip().lower()
     if key == "api":
+        from evals.drivers.api.driver import ApiDriver
+
         return ApiDriver(**kwargs)
     if key == "claude-cli":
+        from evals.drivers.cli.claude import ClaudeCliDriver
+
         return ClaudeCliDriver(**kwargs)
     if key == "codex-cli":
+        from evals.drivers.cli.codex import CodexCliDriver
+
         return CodexCliDriver(**kwargs)
     if key == "antigravity-cli":
+        from evals.drivers.cli.antigravity import AntigravityCliDriver
+
         return AntigravityCliDriver(**kwargs)
     if key == "opencode-cli":
+        from evals.drivers.cli.opencode import OpencodeCliDriver
+
         return OpencodeCliDriver(**kwargs)
     raise ValueError(f"unknown driver {name!r}; expected one of {sorted(KNOWN_DRIVERS)}")
 
 
-__all__ = [
-    "KNOWN_DRIVERS",
-    "AntigravityCliDriver",
-    "ApiDriver",
-    "ClaudeCliDriver",
-    "CliDriver",
-    "CliRunError",
-    "CodexCliDriver",
-    "OpencodeCliDriver",
-    "apply_proxy_sidecar",
-    "ensure_proxy_pythonpath",
-    "find_claude_transcript",
-    "find_codex_rollout",
-    "get_driver",
-    "harvest_proxy_after_cli_timeout",
-    "kill_process_group",
-    "load_proxy_sidecar",
-    "load_proxy_sidecar_calls",
-    "normalize_claude_usage",
-    "note_timeout_kill",
-    "parse_claude_json_result",
-    "parse_claude_transcript_calls",
-    "parse_codex_jsonl_events",
-    "parse_codex_rollout_calls",
-    "prepare_antigravity_fake_home",
-    "prepare_claude_isolated_environment",
-    "prepare_codex_home",
-    "prepare_opencode_isolated_environment",
-    "proxy_pid_path",
-    "proxy_session_paths",
-    "proxy_wrap_server_command",
-    "run_cli_subprocess",
-    "wait_for_proxy_meta",
-    "write_antigravity_mcp_config",
-    "write_claude_mcp_config",
-    "write_codex_mcp_override_args",
-    "write_codex_mcp_config",
-    "write_opencode_mcp_config",
-]
+__all__ = ["KNOWN_DRIVERS", "get_driver"]

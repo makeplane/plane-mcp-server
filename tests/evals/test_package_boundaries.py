@@ -50,3 +50,39 @@ def test_import_does_not_cross_layer(module: str, forbidden: tuple[str, ...]):
 def test_the_probe_can_actually_observe_a_violation():
     """A boundary test that cannot fail is worse than none: prove the probe sees imports."""
     assert "runner" in loaded_subpackages("evals.runner.live")
+
+
+# The two driver surfaces are independent: the API driver owns its loop and speaks to a
+# provider, while a CLI driver supervises a subprocess and reads a recording proxy. Neither
+# needs anything the other has. Depth-1 names cannot express this — both live under
+# ``drivers`` — so these cases match module prefixes instead.
+#
+# (module to import, module prefixes it must not drag in)
+SURFACE_BOUNDARIES = [
+    # Reading the registry must load no surface at all, or get_driver's per-vendor imports
+    # are decoration: a flat re-export wall here once made every consumer load all five
+    # agent CLIs, because Python runs a package's __init__ before any submodule.
+    ("evals.drivers", ("evals.drivers.api.", "evals.drivers.cli.")),
+    ("evals.drivers.api.base", ("evals.drivers.cli.",)),
+    ("evals.drivers.api.driver", ("evals.drivers.cli.",)),
+    ("evals.drivers.cli.base", ("evals.drivers.api.",)),
+    ("evals.drivers.cli.claude", ("evals.drivers.api.",)),
+]
+
+
+def loaded_modules(module: str) -> set[str]:
+    """Return the full names of the ``evals.*`` modules present after importing ``module``."""
+    code = f"import {module}, sys\nprint(' '.join(sorted(m for m in sys.modules if m.startswith('evals'))))"
+    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    return set(completed.stdout.split())
+
+
+@pytest.mark.parametrize(("module", "forbidden"), SURFACE_BOUNDARIES, ids=[case[0] for case in SURFACE_BOUNDARIES])
+def test_import_does_not_cross_driver_surface(module: str, forbidden: tuple[str, ...]):
+    leaked = sorted(name for name in loaded_modules(module) if name.startswith(forbidden))
+    assert not leaked, f"importing {module} loaded {leaked}, which it must not depend on"
+
+
+def test_the_surface_probe_can_actually_observe_a_violation():
+    """Same guard as above, for the prefix probe: prove it sees a real intra-surface import."""
+    assert "evals.drivers.cli.base" in loaded_modules("evals.drivers.cli.claude")

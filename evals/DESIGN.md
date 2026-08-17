@@ -328,7 +328,7 @@ evals/
     cross.py             C1-C2 tasks and verifiers
     debias.py            I1-I5 and L1-L5 tasks and verifiers
   drivers/
-    __init__.py          public exports and driver registry
+    __init__.py          the driver registry, loading only the surface it is asked for
     api/
       base.py            neutral backend protocol and turn/tool dataclasses
       driver.py          the owned model/tool loop

@@ -14,23 +14,22 @@ from pathlib import Path
 import pytest
 import tomllib
 
-from evals.drivers import (
-    AntigravityCliDriver,
-    ClaudeCliDriver,
-    CodexCliDriver,
-    OpencodeCliDriver,
+from evals.drivers.cli.antigravity import AntigravityCliDriver
+from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput, CliOutputError
+from evals.drivers.cli.claude import ClaudeCliDriver
+from evals.drivers.cli.codex import CodexCliDriver, prepare_codex_home
+from evals.drivers.cli.opencode import OpencodeCliDriver
+from evals.drivers.cli.process import run_cli_subprocess
+from evals.drivers.cli.sidecar import (
     apply_proxy_sidecar,
     ensure_proxy_pythonpath,
     harvest_proxy_after_cli_timeout,
     load_proxy_sidecar,
     load_proxy_sidecar_calls,
-    prepare_codex_home,
     proxy_pid_path,
     proxy_wrap_server_command,
-    run_cli_subprocess,
     wait_for_proxy_meta,
 )
-from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput, CliOutputError
 from evals.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE
 from tests.evals.conftest import case_params
 
@@ -96,7 +95,7 @@ def _run_cli_subprocess_kills_process_group_on_timeout(tmp_path, _monkeypatch):
 
 
 def _run_cli_subprocess_baseexception_kills_group(tmp_path, monkeypatch):
-    import evals.drivers as drivers_mod
+    from evals.drivers.cli import process as process_mod
 
     pidfile = tmp_path / "pids.txt"
     script = tmp_path / "sticky.py"
@@ -153,7 +152,7 @@ def _run_cli_subprocess_baseexception_kills_group(tmp_path, monkeypatch):
     alive = [p for p in pids if _pid_alive(p)]
     assert not alive, f"group survived BaseException path: {alive}"
     # silence unused import lint if any
-    assert drivers_mod.run_cli_subprocess is run_cli_subprocess
+    assert process_mod.run_cli_subprocess is run_cli_subprocess
 
 
 @pytest.mark.parametrize(
@@ -172,7 +171,7 @@ def test_killpg_reaps_grandchild_when_leader_already_dead(tmp_path: Path):
     import signal
     from types import SimpleNamespace
 
-    from evals.drivers import kill_process_group
+    from evals.drivers.cli.process import kill_process_group
 
     pidfile = tmp_path / "pids.txt"
     script = tmp_path / "sticky_leader.py"
@@ -253,7 +252,7 @@ def _cli_driver_timeout_notes_process_group_kill(tmp_path, _monkeypatch):
     )
 
     # Use real run_cli_subprocess with a tiny timeout via fake that wraps it.
-    from evals.drivers import run_cli_subprocess as real_runner
+    from evals.drivers.cli.process import run_cli_subprocess as real_runner
 
     def short_timeout_runner(cmd, **kwargs):
         kwargs = dict(kwargs)

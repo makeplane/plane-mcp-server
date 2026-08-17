@@ -10,23 +10,22 @@ from typing import Any
 
 import pytest
 
-from evals.drivers import (
-    KNOWN_DRIVERS,
+from evals.drivers import KNOWN_DRIVERS, get_driver
+from evals.drivers.api.driver import ApiDriver
+from evals.drivers.cli.antigravity import (
     AntigravityCliDriver,
-    ApiDriver,
+    prepare_antigravity_fake_home,
+    write_antigravity_mcp_config,
+)
+from evals.drivers.cli.claude import (
     ClaudeCliDriver,
-    CodexCliDriver,
-    OpencodeCliDriver,
-    get_driver,
     normalize_claude_usage,
     parse_claude_json_result,
     parse_claude_transcript_calls,
-    parse_codex_jsonl_events,
-    prepare_antigravity_fake_home,
-    write_antigravity_mcp_config,
     write_claude_mcp_config,
-    write_opencode_mcp_config,
 )
+from evals.drivers.cli.codex import CodexCliDriver, parse_codex_jsonl_events
+from evals.drivers.cli.opencode import OpencodeCliDriver, write_opencode_mcp_config
 from evals.tool_names import (
     split_plane_and_client_calls,
 )
@@ -380,7 +379,7 @@ def test_parse_behaviours(case, tmp_path):
 
 
 def _find_codex_rollout_exact_match_and_unmatched(tmp_path, monkeypatch):
-    from evals import drivers as drivers_mod
+    from evals.drivers.cli import codex as codex_mod
 
     sessions = tmp_path / ".codex" / "sessions" / "2026" / "04" / "01"
     sessions.mkdir(parents=True)
@@ -399,18 +398,18 @@ def _find_codex_rollout_exact_match_and_unmatched(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    found = drivers_mod.find_codex_rollout(tid)
+    found = codex_mod.find_codex_rollout(tid)
     assert found is not None
     assert tid in found.name
     # Must not return the other concurrent session
     assert "other-session" not in found.name
 
-    assert drivers_mod.find_codex_rollout("does-not-exist-anywhere") is None
-    assert drivers_mod.find_codex_rollout(None) is None
+    assert codex_mod.find_codex_rollout("does-not-exist-anywhere") is None
+    assert codex_mod.find_codex_rollout(None) is None
 
 
 def _find_codex_rollout_session_meta_id(tmp_path, monkeypatch):
-    from evals import drivers as drivers_mod
+    from evals.drivers.cli import codex as codex_mod
 
     sessions = tmp_path / ".codex" / "sessions"
     sessions.mkdir(parents=True)
@@ -420,7 +419,7 @@ def _find_codex_rollout_session_meta_id(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    found = drivers_mod.find_codex_rollout("sess-meta-42")
+    found = codex_mod.find_codex_rollout("sess-meta-42")
     assert found is not None
     assert found.name == "rollout-meta-only.jsonl"
 

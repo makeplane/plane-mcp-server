@@ -10,9 +10,6 @@ from typing import Any
 
 import pytest
 
-from evals.drivers import (
-    ApiDriver,
-)
 from evals.drivers.api import (
     StopReason,
     ToolCall,
@@ -20,6 +17,7 @@ from evals.drivers.api import (
     ToolSpec,
     Turn,
 )
+from evals.drivers.api.driver import ApiDriver
 from evals.evidence import TARGET_ENTITY_EVIDENCE
 from evals.results import (
     AGENT_RESULT_COPY_FIELDS,

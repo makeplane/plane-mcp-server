@@ -14,9 +14,7 @@ import pytest
 from plane.errors.errors import HttpError
 
 from evals import cli as run_mod
-from evals.drivers import (
-    ClaudeCliDriver,
-)
+from evals.drivers.cli.claude import ClaudeCliDriver
 from evals.evidence import TARGET_ENTITY_EVIDENCE
 from evals.report import load_rows, summarize
 from evals.results import RESULT_SCHEMA_VERSION, AgentRun, TaskResult
