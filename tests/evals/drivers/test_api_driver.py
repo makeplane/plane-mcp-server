@@ -467,7 +467,7 @@ def _api_driver_records_only_matching_evidence_labels():
     session = FakeMcpSession(
         [
             ToolResult(call_id="a", text=f"state={sentinel}"),
-            ToolResult(call_id="b", text=f"state={sentinel}"),
+            ToolResult(call_id="b", text="no seeded value in this response"),
         ]
     )
 
@@ -476,11 +476,12 @@ def _api_driver_records_only_matching_evidence_labels():
         evidence_sentinels={TARGET_ENTITY_EVIDENCE: [sentinel]},
     )
 
-    # The sentinel only exists inside Plane, so either response having it is proof of
-    # surface use; which entity the request named does not change that.
+    # The sentinel only exists inside Plane, so the response carrying it is proof of
+    # surface use even though its request named an unrelated entity. The response without
+    # it is not evidence, whatever it was asked about.
     assert run.evidence_trace_available is True
     assert run.calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
-    assert run.calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert run.calls[1]["observed_sentinels"] == []
     assert "result_text" not in run.calls[1]
 
 

@@ -193,7 +193,7 @@ def _seed_fixtures(
             context.get("evidence_targets"),
             context.get("evidence_aggregates"),
         ):
-            raise RuntimeError(f"{task['id']} seed did not register target-bound response evidence")
+            raise RuntimeError(f"{task['id']} seed did not register any response evidence")
     except TaskSkipped as skip:
         row.skipped = skip.reason
         row.verify_note = skip.reason

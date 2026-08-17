@@ -263,27 +263,27 @@ def test_l1_grades_the_duration_contract_not_the_prose():
             "workspace_slug": "ws",
             "project_id": "p1",
             "items": {L1_TITLE: "wi-l1"},
-            "l1_expected_summary_ids": ["wi-l1"],
+            "l1_expected_summary_ids": ["wi-l1", "wi-seeded"],
         }
         cases = [
             ("untouched: no worklog", [], None, "", False, ()),
-            ("wrong duration 120", [120], ["wi-l1"], "Logged 120 minutes; summary ok.", False, ("90",)),
-            ("90m logged but empty answer", [90], ["wi-l1"], "", False, ("logged-minutes",)),
+            ("wrong duration 120", [120], ["wi-l1", "wi-seeded"], "Logged 120 minutes; summary ok.", False, ("90",)),
+            ("90m logged but empty answer", [90], ["wi-l1", "wi-seeded"], "", False, ("logged-minutes",)),
             (
                 "English 'ninety' is not a number",
                 [90],
-                ["wi-l1"],
+                ["wi-l1", "wi-seeded"],
                 "Logged one hundred ninety minutes. Project summary looks fine.",
                 False,
                 (),
             ),
-            ("correct facts, no contract", [90], ["wi-l1"], "Logged 1.5 hours total.", False, ()),
-            ("bare prose, no contract", [90], ["wi-l1"], "90 minutes of work", False, ("logged-minutes",)),
+            ("correct facts, no contract", [90], ["wi-l1", "wi-seeded"], "Logged 1.5 hours total.", False, ()),
+            ("bare prose, no contract", [90], ["wi-l1", "wi-seeded"], "90 minutes of work", False, ("logged-minutes",)),
             (
                 "exact contract",
                 [90],
-                ["wi-l1"],
-                "logged-minutes: 90\nsummary-work-item-id: wi-l1",
+                ["wi-l1", "wi-seeded"],
+                "logged-minutes: 90\nsummary-work-item-id: wi-l1\nsummary-work-item-id: wi-seeded",
                 True,
                 (),
             ),
@@ -296,7 +296,7 @@ def test_l1_grades_the_duration_contract_not_the_prose():
                 assert s in note.lower(), f"{label}: {note}"
 
         # The 'ninety' case must name the duration it objected to.
-        plane = _L1Plane([90], summary_ids=["wi-l1"])
+        plane = _L1Plane([90], summary_ids=["wi-l1", "wi-seeded"])
         _, note = await verify_l1(
             plane, dict(ctx), _run("Logged one hundred ninety minutes. Project summary looks fine.")
         )

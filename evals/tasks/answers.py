@@ -150,8 +150,9 @@ def answer_with_provenance(
 ) -> tuple[bool, str]:
     """Combine answer correctness with route-agnostic response evidence.
 
-    The two facts stay separate in the note. A successful unrelated call has no target
-    label and therefore cannot satisfy provenance.
+    The two facts stay separate in the note. Provenance needs a seeded value to have
+    appeared in a response the agent received; a run of successful calls that never
+    surfaced one does not satisfy it.
     """
     calls = run.get("calls")
     source = str(run.get("call_source") or "unknown")
@@ -161,7 +162,7 @@ def answer_with_provenance(
     if trace_incomplete:
         provenance_note = f"trace incomplete (source={source}; proxy sidecar was not authoritative)"
     elif provenance:
-        provenance_note = f"observed target-entity response evidence (source={source})"
+        provenance_note = f"observed seeded-value response evidence (source={source})"
     elif not available:
         provenance_note = f"unavailable (source={source}; response-evidence matching was not active)"
     elif isinstance(calls, list) and calls:

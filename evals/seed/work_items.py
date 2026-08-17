@@ -9,7 +9,12 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.query_params import WorkItemQueryParams
 from plane.models.states import CreateState
-from plane.models.work_items import CreateWorkItem, CreateWorkItemComment, UpdateWorkItem
+from plane.models.work_items import (
+    CreateWorkItem,
+    CreateWorkItemComment,
+    CreateWorkItemWorkLog,
+    UpdateWorkItem,
+)
 
 from evals.changelog import normalize_changelog_text
 from evals.errors import TaskSkipped
@@ -27,8 +32,10 @@ from evals.fixtures import (
     UNFINISHED_CYCLE_TITLES,
     WORK_ITEM_FIXTURES,
 )
+from evals.state_oracle import worklog_summary_item_ids
 
 from .identities import record_seeded_entity
+from .projects import plan_gate_skips
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth
 
 __all__ = [
@@ -365,8 +372,36 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
         confirmed_id = str(getattr(detail, "id", None) or "")
         if confirmed_id != work_item_id:
             raise RuntimeError(f"seed L1: target work item readback id={confirmed_id!r}; want {work_item_id!r}")
-        context["l1_expected_summary_ids"] = [confirmed_id]
-        set_target_evidence(context, [confirmed_id])
+        # Seed a worklog the agent did not create, on an item it is not told about. Without
+        # one, the summary contains only the row the agent just wrote, so reporting the id it
+        # already holds was both the correct answer and its own provenance — L1 could be
+        # passed without ever reading the summary it exists to exercise.
+        other_id = _second_worklog_item_id(context, exclude=confirmed_id)
+        seeded_minutes = rng.randrange(15, 240, 15)
+        with plan_gate_skips("worklogs"):
+            plane.work_items.work_logs.create(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_id=other_id,
+                data=CreateWorkItemWorkLog(duration=seeded_minutes, description=f"seeded {hidden_token}"),
+            )
+        confirmed_summary = plane.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
+        confirmed_summary_ids = worklog_summary_item_ids(confirmed_summary)
+        if other_id not in confirmed_summary_ids:
+            raise RuntimeError(
+                f"seed L1: seeded worklog on {other_id} is absent from the project summary {confirmed_summary_ids!r}"
+            )
+        record_randomized_truth(
+            context,
+            "L1.seeded_worklog",
+            {"intended_item": other_id, "intended_minutes": seeded_minutes},
+        )
+        context["randomized_truth"]["L1.seeded_worklog"]["confirmed"] = {
+            "summary_ids": list(confirmed_summary_ids),
+        }
+        # The agent's own 90-minute log adds the target row during the run.
+        context["l1_expected_summary_ids"] = sorted({*confirmed_summary_ids, confirmed_id})
+        set_target_evidence(context, [other_id])
 
     if task_id == "L5":
         attachment_target_id = context["fixture_item_ids"][PAYMENT_WEBHOOK_TITLE]
@@ -405,6 +440,24 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
                 f"seed L5: attachment readback exposed {len(confirmed_names)} randomized names; want {attachment_count}"
             )
         set_target_evidence(context, confirmed_names)
+
+
+def _second_worklog_item_id(context: dict[str, Any], *, exclude: str) -> str:
+    """Pick the seeded item that carries L1's pre-existing worklog.
+
+    Deterministic per run so the oracle is reproducible from the fixture seed, and never the
+    item the prompt names — the point is a summary row the agent can only learn by reading
+    the summary.
+    """
+    candidates = sorted(
+        str(item_id)
+        for item_id in (context.get("fixture_item_ids") or {}).values()
+        if str(item_id) and str(item_id) != str(exclude)
+    )
+    if not candidates:
+        raise RuntimeError("seed L1: no second work item available to carry a seeded worklog")
+    rng = random_truth_rng(context, "L1:second-worklog")
+    return rng.choice(candidates)
 
 
 def require_activities(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:

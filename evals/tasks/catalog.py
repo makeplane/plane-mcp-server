@@ -80,8 +80,13 @@ def task_author(task: dict[str, Any]) -> str:
     return str(task.get("author") or "claude")
 
 
-CATALOG_REVISION = 10
+CATALOG_REVISION = 11
 """Bumped when a deliberate change to a fixture or verifier redefines what a task asks.
+
+Revision 11 gives L1 a worklog it did not create, on an item it is not told about. Its answer
+was the id of the item it had just logged time on, and that id is echoed by the write itself,
+so both the answer and its provenance were satisfied without ever reading the project worklog
+summary the task exists to exercise. L1 results are not comparable across this transition.
 
 Revision 10 replaces the per-task list of accepted provenance shapes with one rule per kind of
 evidence. A sentinel is a per-run random string that exists only inside Plane, so its presence

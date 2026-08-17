@@ -98,9 +98,10 @@ CATALOG_ID_ORDER = (
 # "7b8dc6bd2f8f" at revision 5 before unverifiable W8/W9 asks were removed.
 # "77230f96962d" at revision 6 before target-entity response evidence.
 # "ea5bdba36109" at revision 9 before R6 accepted per-project counts as provenance.
+# "05176e65e594" at revision 10 before L1 got a worklog the agent did not create.
 # This pin moves with every deliberate revision bump, and must not move otherwise — an
 # unexplained change means the serialization drifted, which is what the pin exists to catch.
-PINNED_SYNTHETIC_BATTERY = "05176e65e594"
+PINNED_SYNTHETIC_BATTERY = "d9d087b763c8"
 
 
 @pytest.mark.parametrize("case", ["design-and-extras", "id-order"])
@@ -318,11 +319,13 @@ def test_fingerprint_records_the_revision_transition():
     full-catalog value was ``61bddef0dc76``. Revision 9 also binds R1/I2 provenance to the seeded
     state, because a work item's state is an id and resolving its name takes a second call;
     its full-catalog value was ``e9134604a0a7``. Revision 10 accepts one count per project as
-    R6 provenance, alongside the single count grouped by project it already accepted. Results
-    across these transitions are not comparable.
+    R6 provenance, alongside the single count grouped by project it already accepted; its
+    full-catalog value was ``9cce7ce77310``. Revision 11 gives L1 a worklog the agent did not
+    create, because reporting the id it had just logged time on required no summary read.
+    Results across these transitions are not comparable.
     Asserting the constant rather than merely 'it changed' makes future drift visible.
     """
     from evals.tasks.catalog import CATALOG_REVISION
 
-    assert CATALOG_REVISION == 10
-    assert battery_fingerprint() == "9cce7ce77310"
+    assert CATALOG_REVISION == 11
+    assert battery_fingerprint() == "fa1784b052cd"

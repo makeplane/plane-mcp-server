@@ -156,9 +156,12 @@ Matching happens while the successful response is in memory, and only a non-sens
 back on. CLI proxies receive sentinel lengths and SHA-256 fingerprints, plus the target IDs the
 aggregate rule needs, through a mode-0600 run-scoped file outside the agent cwd; the raw value
 is absent even from that file. Every MCP proxy session reads the same file, and the driver
-removes it with its temporary directory after the run. Neither the response body nor the
-sentinel enters the result row. Unavailable or incomplete matching is diagnosed and cannot
-pass a read verifier.
+removes it with its temporary directory after the run. The response body never enters the
+result row, and the evidence machinery persists only the matched label. The sentinel itself
+is not secret after the fact: a correct answer to R1 *is* the seeded state name, so it
+appears in the recorded `final_text`, and a failing verifier note names the value it wanted.
+Result rows are therefore run data, not a redacted artifact. Unavailable or incomplete
+matching is diagnosed and cannot pass a read verifier.
 
 ### Threat model: a cooperative agent
 

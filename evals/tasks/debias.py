@@ -17,6 +17,7 @@ from evals.fixtures import (
     W3_TITLE,
     W8_TITLE,
 )
+from evals.state_oracle import worklog_summary_item_ids
 from evals.tasks.answers import (
     answer_with_provenance,
     contract_values,
@@ -237,10 +238,17 @@ async def verify_l1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
     if not wid:
         return answer_with_provenance(False, f"seed item {L1_TITLE!r} missing", run)
     expected_summary_ids = [str(value) for value in (ctx.get("l1_expected_summary_ids") or [])]
-    if expected_summary_ids != [str(wid)]:
+    if str(wid) not in expected_summary_ids:
         return answer_with_provenance(
             False,
-            f"L1 fixture oracle mismatch: summary ids={expected_summary_ids!r}; target={wid!r}",
+            f"L1 fixture oracle mismatch: summary ids={expected_summary_ids!r} omit target={wid!r}",
+            run,
+        )
+    if len(expected_summary_ids) < 2:
+        return answer_with_provenance(
+            False,
+            f"L1 fixture error: the summary oracle {expected_summary_ids!r} holds only the agent's own "
+            "row, so the answer does not require reading the summary",
             run,
         )
     # SDK: 90m log must be on THIS work item (list is already scoped to work_item_id).
@@ -252,20 +260,10 @@ async def verify_l1(plane: Any, ctx: dict[str, Any], run: dict[str, Any]) -> tup
 
     try:
         summary = plane.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
-        raw = summary if isinstance(summary, list) else (getattr(summary, "results", None) or summary or [])
-        sum_rows = list(raw or [])
     except Exception as exc:
         raise_verifier_read_error("L1", "reading the project worklog summary", exc)
 
-    summary_ids: list[str] = []
-    for row in sum_rows:
-        dump = row.model_dump() if hasattr(row, "model_dump") else (row if isinstance(row, dict) else {})
-        value = getattr(row, "issue_id", None) or getattr(row, "work_item_id", None)
-        if value is None and isinstance(dump, dict):
-            value = dump.get("issue_id") or dump.get("work_item_id")
-        item_id = str(value or "").strip()
-        if item_id and item_id not in summary_ids:
-            summary_ids.append(item_id)
+    summary_ids = worklog_summary_item_ids(summary)
     if str(wid) not in summary_ids:
         return answer_with_provenance(
             False,

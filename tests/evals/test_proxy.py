@@ -741,11 +741,26 @@ def _sidecar_recorder_unit(tmp_path):
             "result": {"content": [{"type": "text", "text": f"target={sentinel}"}], "isError": False},
         }
     )
+    rec.on_client_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {"name": "t", "arguments": {"work_item_id": "target-1"}},
+        }
+    )
+    rec.on_server_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "result": {"content": [{"type": "text", "text": "no seeded value here"}], "isError": False},
+        }
+    )
     rec.write_meta()
     calls = load_proxy_sidecar_calls(tmp_path / "a.jsonl")
     raw_rows = [json.loads(line) for line in (tmp_path / "a.jsonl").read_text().splitlines()]
     raw_calls = [row for row in raw_rows if row.get("row_type") != "proxy_meta"]
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0]["tool"] == "t"
     assert calls[0]["args"] == {"work_item_id": "non-target"}
     assert calls[1]["args"] == {"work_item_id": "target-1"}
@@ -754,11 +769,14 @@ def _sidecar_recorder_unit(tmp_path):
     assert all("result_text" not in row for row in raw_calls)
     # A sentinel is a per-run random string that exists only inside Plane, so its
     # presence proves the response came from the surface whichever entity the request
-    # named. Both calls received it; both are evidence.
+    # named. Call 0 named an unrelated entity and is still evidence; call 2 named the
+    # seeded one but never received the value, and is not.
     assert calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert calls[2]["observed_sentinels"] == []
     assert raw_calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert raw_calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
+    assert raw_calls[2]["observed_sentinels"] == []
     assert sentinel not in (tmp_path / "a.jsonl").read_text(encoding="utf-8")
     assert rec.finalized is True
 
@@ -790,11 +808,29 @@ def test_proxy_records_exact_target_bound_aggregate_evidence_without_payload(tmp
             "result": {"content": [{"type": "text", "text": '{"total_count": 4}'}]},
         }
     )
+    # A count is guessable, so it is only evidence from a request naming a seeded entity.
+    # Without this case, dropping the target check from proxy wiring left every CLI test green.
+    rec.on_client_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "count_work_items", "arguments": {"pql": 'project = "project-other"'}},
+        }
+    )
+    rec.on_server_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {"content": [{"type": "text", "text": '{"total_count": 4}'}]},
+        }
+    )
     rec.write_meta()
 
     calls = load_proxy_sidecar_calls(path)
     assert calls[0]["observed_sentinels"] == []
     assert calls[0]["observed_aggregates"] == [{"label": TARGET_ENTITY_EVIDENCE, "kind": "total_count", "value": 4}]
+    assert calls[1]["observed_aggregates"] == []
     persisted = path.read_text(encoding="utf-8")
     assert "result_text" not in persisted
     assert '"content"' not in persisted
@@ -1897,3 +1933,31 @@ def test_cli_fallback_does_not_restore_trace_integrity(tmp_path: Path):
     assert applied.trace_integrity_reason == "recorder_loss"
     assert applied.tool_manifest_fingerprint is None
     assert "proxy_sidecar_deferred_to_cli_trace" in notes
+
+
+def test_a_response_the_agent_never_received_is_not_authoritative_evidence(tmp_path: Path):
+    """Recording happens before forwarding, so a broken pipe can match what nobody saw.
+
+    The ordering is deliberate — a fast child must not race an unregistered pending id — but
+    it meant a sentinel or count from a response that failed to reach the agent stayed in a
+    sidecar still marked complete, proving surface use the agent never had.
+    """
+    recorder = SidecarRecorder(tmp_path / "undelivered.jsonl")
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)  # nothing is listening: the forward will fail
+    line = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"content": []}}).encode() + b"\n"
+
+    with pytest.raises((BrokenPipeError, OSError)):
+        process_buffer_lines(
+            bytearray(line),
+            forward_fd=write_fd,
+            recorder=recorder,
+            is_client=False,
+            record_jsonrpc=True,
+        )
+    os.close(write_fd)
+    recorder.write_meta()
+
+    _calls, status = load_proxy_sidecar(tmp_path / "undelivered.jsonl")
+    assert status["undelivered_lines"] == 1
+    assert status["state"] == "incomplete"

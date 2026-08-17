@@ -46,6 +46,9 @@ class _ReadSeedPlane:
             activities=SimpleNamespace(list=self._list_activities),
             attachments=SimpleNamespace(upload_from_bytes=self._upload_attachment, list=self._list_attachments),
         )
+        self._work_logs: dict[str, list[SimpleNamespace]] = {}
+        self.work_items.work_logs = SimpleNamespace(create=self._create_work_log)
+        self.projects = SimpleNamespace(get_worklog_summary=self._worklog_summary)
         self.cycles = SimpleNamespace(
             create=self._create_cycle,
             update=self._update_cycle,
@@ -53,6 +56,14 @@ class _ReadSeedPlane:
             add_work_items=self._add_cycle_items,
             list_work_items=self._list_cycle_items,
         )
+
+    def _create_work_log(self, *, work_item_id, data, **kwargs):
+        log = SimpleNamespace(id=f"log-{work_item_id}", duration=data.duration, description=data.description)
+        self._work_logs.setdefault(str(work_item_id), []).append(log)
+        return log
+
+    def _worklog_summary(self, **kwargs):
+        return [SimpleNamespace(issue_id=item_id) for item_id in sorted(self._work_logs)]
 
     def _create_state(self, *, data, **kwargs):
         state = SimpleNamespace(
@@ -249,5 +260,12 @@ def test_l1_seed_oracle_is_the_api_confirmed_target_id():
 
     seed_work_items(plane, "ws", ctx)
 
-    assert ctx["l1_expected_summary_ids"] == [ctx["fixture_item_ids"]["Payment webhook drops retries"]]
-    assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE] == tuple(ctx["l1_expected_summary_ids"])
+    target_id = ctx["fixture_item_ids"]["Payment webhook drops retries"]
+    # The oracle holds the agent's own row plus a row it was never told about, so reporting
+    # the id it already has is no longer the whole answer.
+    assert target_id in ctx["l1_expected_summary_ids"]
+    assert len(ctx["l1_expected_summary_ids"]) == 2
+    seeded_id = next(i for i in ctx["l1_expected_summary_ids"] if i != target_id)
+    assert plane._work_logs[seeded_id]
+    # Provenance is the seeded row's id: the target's id is echoed by the agent's own write.
+    assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE] == (seeded_id,)

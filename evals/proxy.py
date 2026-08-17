@@ -175,6 +175,7 @@ class SidecarRecorder:
         self.non_json_lines = 0
         self.malformed_jsonrpc = 0
         self.recorder_errors = 0
+        self.undelivered_lines = 0
         self.unmatched_responses = 0
         self.non_tool_responses = 0
         self.notifications = 0
@@ -216,6 +217,17 @@ class SidecarRecorder:
         """Count a swallowed callback failure without depending on recorder state."""
         with self._error_lock:
             self.recorder_errors += 1
+
+    def note_undelivered(self) -> None:
+        """Count a line recorded here that never reached the other endpoint.
+
+        Recording happens before forwarding so a fast child cannot race an unregistered
+        pending id. The cost is that a broken pipe leaves a match in the sidecar for a
+        response the agent never saw, which would prove surface use it never had. Counting
+        it makes the sidecar non-authoritative instead of quietly wrong.
+        """
+        with self._error_lock:
+            self.undelivered_lines += 1
 
     def on_client_message(self, obj: dict[str, Any]) -> None:
         """Handle a parsed JSON-RPC message from the client (parent → child)."""
@@ -335,6 +347,7 @@ class SidecarRecorder:
                 return
             with self._error_lock:
                 recorder_errors = self.recorder_errors
+                undelivered_lines = self.undelivered_lines
             row = {
                 "row_type": "proxy_meta",
                 "relayed_lines": self.relayed_lines,
@@ -342,6 +355,7 @@ class SidecarRecorder:
                 "non_json_lines": self.non_json_lines,
                 "malformed_jsonrpc": self.malformed_jsonrpc,
                 "recorder_errors": recorder_errors,
+                "undelivered_lines": undelivered_lines,
                 "unmatched_responses": self.unmatched_responses,
                 "non_tool_responses": self.non_tool_responses,
                 "notifications": self.notifications,
@@ -459,7 +473,12 @@ def process_buffer_lines(
                 except Exception:
                     recorder.note_recorder_error()
         # Forward only after recording so the opposite endpoint cannot race.
-        write_all_fd(forward_fd, line)
+        try:
+            write_all_fd(forward_fd, line)
+        except (BrokenPipeError, OSError):
+            if recorder is not None:
+                recorder.note_undelivered()
+            raise
 
 
 def pump_raw(

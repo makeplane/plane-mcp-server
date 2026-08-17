@@ -232,7 +232,7 @@ def _infra_cases() -> list[Any]:
             "workspace_slug": "ws",
             "project_id": "p1",
             "items": {L1_TITLE: "item-1"},
-            "l1_expected_summary_ids": ["item-1"],
+            "l1_expected_summary_ids": ["item-1", "item-seeded"],
         },
     )
     add(

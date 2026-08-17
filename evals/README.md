@@ -130,7 +130,9 @@ both rules and the threat model they hold under.
 CLI proxies receive one-way value fingerprints, plus the target IDs the count rule needs,
 through a private run-scoped file; the raw sentinel is absent even if that file is inspected.
 Every proxy session can read it, and the driver removes it with its temporary directory after
-the run. Result rows contain the matched label, never the sentinel value or response body.
+the run. The evidence machinery records the matched label and never the response body. The
+sentinel value can still reach a row by the front door: a correct answer often *is* the seeded
+value, so it appears in `final_text`, and a failing verifier note names what it expected.
 Unavailable or incomplete matching is diagnosed and fails closed.
 
 ### Reading results

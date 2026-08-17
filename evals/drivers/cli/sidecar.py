@@ -190,6 +190,7 @@ def load_proxy_sidecar(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
         "non_json_lines",
         "malformed_jsonrpc",
         "recorder_errors",
+        "undelivered_lines",
     )
     fatal_counts = (
         "pending_left",
@@ -197,6 +198,7 @@ def load_proxy_sidecar(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
         "unmatched_responses",
         "unparsed_lines",
         "recorder_errors",
+        "undelivered_lines",
         "invalid_seq",
         "duplicate_seq",
         "missing_seq",
@@ -355,6 +357,7 @@ def _incompleteness_note(status: dict[str, Any]) -> str:
         "non_json_lines",
         "malformed_jsonrpc",
         "recorder_errors",
+        "undelivered_lines",
         "invalid_seq",
         "duplicate_seq",
         "missing_seq",
