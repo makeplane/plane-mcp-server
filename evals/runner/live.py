@@ -184,8 +184,14 @@ def _seed_fixtures(
             ctx=context,
             task_id=str(task["id"]),
         )
+        # Aggregates count as registered evidence: the proxy matches an exact total_count for a
+        # targeted request exactly as it matches a sentinel value. Omitting them here made the
+        # gate stricter than the matcher, so a task whose answer *is* a count could not seed —
+        # L2 registered its activity count and was rejected as having registered nothing.
         if "read" in set(task.get("tags") or set()) and not configured_evidence_labels(
-            context.get("evidence_sentinels"), context.get("evidence_targets")
+            context.get("evidence_sentinels"),
+            context.get("evidence_targets"),
+            context.get("evidence_aggregates"),
         ):
             raise RuntimeError(f"{task['id']} seed did not register target-bound response evidence")
     except TaskSkipped as skip:
