@@ -11,7 +11,8 @@ renamed `work_item_*` parameters to `workitem_*`, and a caller reaching a tool b
 its old name has no reason to have followed that: resolving the name but
 rejecting `work_item_id` would be a rename dressed up as compatibility.
 
-Each resolution is logged, so when removing these is scheduled, "nobody still
+Each resolution is logged, and every call through one records `tool` != `resource`
+(see `PlaneLoggingMiddleware`), so when removing these is scheduled, "nobody still
 calls them" is an observation rather than an assumption.
 """
 
@@ -41,8 +42,8 @@ class LegacyNames(Transform):
             return await call_next(name, version=version)
 
         tool_name, action = target
-        # Grep-able on purpose: the names appearing here over a release are the
-        # callers that removing these aliases would break.
+        # Kept alongside the `resource`/`retired` log fields: this line predates them and
+        # is grep-able, so removing it would break whatever already counts these.
         logger.info("Plane MCP: retired tool name %r resolved to %r %r", name, tool_name, action)
         parent = await call_next(tool_name, version=version)
         if parent is None:
