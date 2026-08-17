@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.results import TaskResult
-from evals.tasks import TASKS_BY_ID
+from evals.task_metadata import TaskMetadata, entry_prompt, task_metadata_from_rows
 
 from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
 from .off_surface import off_surface_statement
@@ -224,6 +224,11 @@ def build_multi_surface_table(
     columns: list[str] = []
     rows_by_column: dict[str, dict[str, list[TaskResult]]] = {}
     multiple_repetitions_by_column: dict[str, bool] = {}
+    # Prompt excerpts and mutation intent come from the runs being rendered, so collect the
+    # metadata every input file declared before the meta rows are filtered out below.
+    task_metadata: dict[str, dict[str, Any]] = {}
+    for _label, rows in file_rows:
+        task_metadata.update(task_metadata_from_rows(rows))
     for label, rows in file_rows:
         columns.append(label)
         column_rows: dict[str, list[TaskResult]] = defaultdict(list)
@@ -278,6 +283,7 @@ def build_multi_surface_table(
             [row for task_rows in rows_by_column[column].values() for row in task_rows],
             expected_rows=(expected_rows_by_column or {}).get(column),
             run_keys=(run_keys_by_column or {}).get(column),
+            task_metadata=task_metadata,
         )
         footer[column] = {
             "success": successes,
@@ -306,11 +312,17 @@ def build_multi_surface_table(
         "footer": footer,
         "multi_rep": multiple_repetitions,
         "multi_rep_by_col": multiple_repetitions_by_column,
+        "task_metadata": task_metadata,
     }
 
 
-def prompt_excerpt(task_id: str) -> str:
-    prompt = (TASKS_BY_ID.get(task_id, {}).get("prompt") or "").replace("{project}", "P")
+def prompt_excerpt(task_id: str, task_metadata: TaskMetadata | None = None) -> str:
+    """Render a short prompt excerpt from the run's own metadata.
+
+    Empty when the file predates the persisted header: an excerpt taken from the current
+    checkout can describe a prompt the run never used.
+    """
+    prompt = entry_prompt((task_metadata or {}).get(task_id)).replace("{project}", "P")
     return (prompt[:32] + "…") if len(prompt) > 32 else prompt
 
 
@@ -318,6 +330,7 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
     """Render multi-surface table as plain text or GitHub markdown."""
     columns: list[str] = table["columns"]
     task_ids: list[str] = table["task_ids"]
+    task_metadata: TaskMetadata = table.get("task_metadata") or {}
     cells: dict[str, dict[str, str]] = table["cells"]
     footer: dict[str, dict[str, Any]] = table["footer"]
     multiple_repetitions = bool(table.get("multi_rep"))
@@ -330,7 +343,7 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
         lines.append(separator)
         for task_id in task_ids:
             row_cells = " | ".join(cells[task_id].get(column, "—") for column in columns)
-            lines.append(f"| {task_id} | {prompt_excerpt(task_id)} | {row_cells} |")
+            lines.append(f"| {task_id} | {prompt_excerpt(task_id, task_metadata)} | {row_cells} |")
         # Footer
         footer_parts = []
         for column in columns:
@@ -381,7 +394,7 @@ def render_multi_surface_table(table: dict[str, Any], *, markdown: bool = False)
     lines.append(heading)
     lines.append("-" * len(heading))
     for task_id in task_ids:
-        line = f"{task_id:5} {prompt_excerpt(task_id):34} "
+        line = f"{task_id:5} {prompt_excerpt(task_id, task_metadata):34} "
         for column in columns:
             line += f"{cells[task_id].get(column, '—'):{column_width}} "
         lines.append(line.rstrip())

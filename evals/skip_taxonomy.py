@@ -10,6 +10,7 @@ worker reason must match exactly.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Literal
 
 SkipDisposition = Literal["expected-capability", "dirty-environment", "unexpected"]
@@ -50,11 +51,15 @@ def _plan_gated_capability(reason: str) -> str | None:
     return capability if capability in PLAN_GATED_CAPABILITIES else None
 
 
-def _task_expected_capability_reasons(task_id: str) -> frozenset[str]:
-    from evals.tasks import TASKS_BY_ID
+def _task_expected_capability_reasons(task_id: str, task_needs: Iterable[str] | None = None) -> frozenset[str]:
+    if task_needs is None:
+        # No run metadata: fall back to the checkout. Only reached for files written before
+        # the meta header carried each task's needs.
+        from evals.tasks import TASKS_BY_ID
 
-    task = TASKS_BY_ID.get(task_id)
-    needs = set(task.get("needs") or ()) if task is not None else set()
+        task = TASKS_BY_ID.get(task_id)
+        task_needs = task.get("needs") or () if task is not None else ()
+    needs = set(str(need) for need in task_needs)
     reasons = {
         f"{PLAN_GATED_PREFIX}{capability}"
         for need, capability in _PLAN_GATED_CAPABILITY_BY_NEED.items()
@@ -65,19 +70,29 @@ def _task_expected_capability_reasons(task_id: str) -> frozenset[str]:
     return frozenset(reasons)
 
 
-def classify_skip_reason(reason: str, *, task_id: str | None = None) -> SkipDisposition:
+def classify_skip_reason(
+    reason: str,
+    *,
+    task_id: str | None = None,
+    task_needs: Iterable[str] | None = None,
+) -> SkipDisposition:
     """Classify a known capability skip, dirty environment, or unknown reason."""
     is_known_capability = _plan_gated_capability(reason) is not None or reason == NO_ACTIVITY_WORKER_REASON
-    if is_known_capability and (task_id is None or reason in _task_expected_capability_reasons(task_id)):
+    if is_known_capability and (task_id is None or reason in _task_expected_capability_reasons(task_id, task_needs)):
         return "expected-capability"
     if reason.startswith(FIXTURE_COLLISION_PREFIX) and reason.removeprefix(FIXTURE_COLLISION_PREFIX):
         return "dirty-environment"
     return "unexpected"
 
 
-def is_expected_environment_capability_skip(reason: str, *, task_id: str | None = None) -> bool:
+def is_expected_environment_capability_skip(
+    reason: str,
+    *,
+    task_id: str | None = None,
+    task_needs: Iterable[str] | None = None,
+) -> bool:
     """Return whether a known absent environment capability caused the skip."""
-    return classify_skip_reason(reason, task_id=task_id) == "expected-capability"
+    return classify_skip_reason(reason, task_id=task_id, task_needs=task_needs) == "expected-capability"
 
 
 def skip_reason_family(reason: str) -> str:

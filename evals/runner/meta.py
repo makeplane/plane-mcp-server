@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.results import RESULT_SCHEMA_VERSION
+from evals.task_metadata import METADATA_FIELD, normalize_task_metadata
 
 
 def read_git_revision() -> str:
@@ -49,6 +50,7 @@ def make_run_meta_row(
     expected_rows: int | None = None,
     expected_task_ids: list[str] | tuple[str, ...] | None = None,
     expected_reps: int | None = None,
+    task_metadata: dict[str, Any] | None = None,
     ts: str | None = None,
 ) -> dict[str, Any]:
     """Build the single first-line meta record for a new output JSONL."""
@@ -85,6 +87,9 @@ def make_run_meta_row(
         row["expected_task_ids"] = task_ids
     if expected_reps is not None:
         row["expected_reps"] = expected_reps
+    if task_metadata:
+        # Persisted so a report describes the run it reads rather than today's catalog.
+        row[METADATA_FIELD] = normalize_task_metadata(task_metadata)
     return row
 
 

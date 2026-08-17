@@ -9,7 +9,7 @@ from typing import Any
 
 from evals.evidence import TARGET_ENTITY_EVIDENCE
 from evals.results import TRACE_INTEGRITY_SCHEMA_VERSION, CallRecord, TaskResult
-from evals.tasks import TASKS_BY_ID
+from evals.task_metadata import task_metadata_from_rows
 
 from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
 from .statistics import percentile
@@ -98,6 +98,8 @@ class OffSurfaceMeasurement:
     """Per-row findings and their run-level aggregate views."""
 
     rows: tuple[OffSurfaceRow, ...] = ()
+    mutation_intent_available: bool = True
+    """False when no run declared its task tags, so write-intent cannot be judged."""
 
     @property
     def flagged_rows(self) -> int:
@@ -125,7 +127,7 @@ def _successful_row(row: TaskResult) -> bool:
 
 
 def task_requires_mutation(task: Mapping[str, Any] | None) -> bool:
-    """Derive mutation intent from catalog tags instead of a task-id allowlist."""
+    """Derive mutation intent from persisted tags instead of a task-id allowlist."""
     tags = task.get("tags") if task is not None else ()
     return bool(_MUTATING_TASK_TAGS.intersection(str(tag) for tag in (tags or ())))
 
@@ -157,9 +159,18 @@ def _answer_was_correct(row: TaskResult) -> bool:
 def measure_off_surface(
     rows: list[ResultRow],
     *,
-    task_catalog: Mapping[str, Mapping[str, Any]] = TASKS_BY_ID,
+    task_catalog: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> OffSurfaceMeasurement:
-    """Compute suspicion indicators without changing row success or completeness."""
+    """Compute suspicion indicators without changing row success or completeness.
+
+    ``task_catalog`` carries the run's own task facts. When absent it falls back to the
+    metadata persisted in the rows' meta header; a file written before that header existed
+    yields no mutation intent, which suppresses one indicator rather than inventing it from
+    a catalog that may have changed since.
+    """
+    if task_catalog is None:
+        task_catalog = task_metadata_from_rows(rows)
+    mutation_intent_available = bool(task_catalog)
     results: list[TaskResult] = []
     for raw_row in rows:
         if is_meta_row(raw_row):
@@ -211,7 +222,7 @@ def measure_off_surface(
         for index, row in enumerate(results)
         if flags_by_index[index]
     )
-    return OffSurfaceMeasurement(rows=findings)
+    return OffSurfaceMeasurement(rows=findings, mutation_intent_available=mutation_intent_available)
 
 
 def off_surface_statement(measurement: OffSurfaceMeasurement) -> str:
@@ -225,6 +236,14 @@ def off_surface_statement(measurement: OffSurfaceMeasurement) -> str:
         headline = "off-surface indicators: 0"
     lines = [headline]
     for indicator in INDICATOR_ORDER:
+        # An indicator that could not be evaluated says so in its own position. A bare zero
+        # here would read as "checked and clean", which is the opposite of unknown.
+        if indicator == WRITE_WITHOUT_WRITE_CALL and not measurement.mutation_intent_available:
+            lines.append(
+                f"  {INDICATOR_LABELS[indicator]}: not evaluated — this file declares no task tags, "
+                "so mutation intent is unknown"
+            )
+            continue
         addresses = measurement.addresses(indicator)
         suffix = f" [{', '.join(addresses)}]" if addresses else ""
         rule = f"; rule: {LOW_CALL_RULE}" if indicator == IMPLAUSIBLY_FEW_CALLS else ""

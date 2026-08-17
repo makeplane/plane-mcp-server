@@ -23,6 +23,7 @@ from evals.results import TaskResult, agent_run_to_task_result
 from evals.seed import make_plane_client, seed, teardown
 from evals.seed.identities import capture_seed_artifacts
 from evals.server_env import stdio_server_env
+from evals.task_metadata import build_task_metadata
 from evals.tasks.catalog import battery_fingerprint, task_author, task_fingerprint
 from evals.tasks.prompts import PromptBindError, format_task_prompt
 
@@ -594,6 +595,7 @@ async def run_live(
         expected_rows=total_runs,
         expected_task_ids=[str(task["id"]) for task in tasks],
         expected_reps=reps,
+        task_metadata=build_task_metadata(tasks),
     )
     if maybe_write_run_meta(out_path, meta):
         print(f"wrote meta header battery={battery} label={label}", flush=True)

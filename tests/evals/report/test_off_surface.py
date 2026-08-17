@@ -141,7 +141,10 @@ def test_reports_print_explicit_zero_addresses_rule_and_limitation(capsys):
     assert "RUN COMPLETE:" in single_output
 
     bypass = _row("W1", rep=3, num_calls=0, calls=[])
-    comparison = ab_compare([clean], [bypass])
+    # Mutation intent is a fact about the run, so the file carries it. Without the header a
+    # hand-built row has no tags and the write indicator is correctly silent.
+    write_meta = {"row_type": "meta", "task_metadata": {"W1": {"tags": ["write"]}}}
+    comparison = ab_compare([write_meta, clean], [write_meta, bypass])
     print_ab_report(comparison, Path("a.jsonl"), Path("b.jsonl"))
     ab_output = capsys.readouterr().out
 

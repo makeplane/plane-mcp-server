@@ -8,6 +8,7 @@ from typing import Literal
 
 from evals.results import TRACE_INTEGRITY_SCHEMA_VERSION, TaskResult
 from evals.skip_taxonomy import is_expected_environment_capability_skip, skip_reason_family
+from evals.task_metadata import TaskMetadata, entry_needs, task_metadata_from_rows
 
 from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
 from .off_surface import OffSurfaceMeasurement, measure_off_surface
@@ -201,6 +202,7 @@ def summarize(
     *,
     expected_rows: int | None = None,
     run_keys: RunKeyValidation | None = None,
+    task_metadata: TaskMetadata | None = None,
 ) -> Summary:
     """Aggregate per-task metrics.
 
@@ -209,6 +211,11 @@ def summarize(
     ``error`` rows remain harness errors (excluded from success, counted in
     ``harness_err``).
     """
+    # The run's own task facts, so skip expectations and mutation intent describe what ran
+    # rather than what the working tree happens to say now. A caller that already filtered
+    # the meta header out of ``rows`` passes it explicitly.
+    if task_metadata is None:
+        task_metadata = task_metadata_from_rows(rows)
     by_task: dict[str, list[TaskResult]] = defaultdict(list)
     harness_errors_by_task: dict[str, int] = defaultdict(int)
     infrastructure_errors_by_task: dict[str, int] = defaultdict(int)
@@ -248,7 +255,11 @@ def summarize(
         if row.skipped:
             family = skip_reason_family(row.skipped)
             skipped_task_reasons[row.skipped].add(task_id)
-            if is_expected_environment_capability_skip(row.skipped, task_id=task_id):
+            if is_expected_environment_capability_skip(
+                row.skipped,
+                task_id=task_id,
+                task_needs=entry_needs(task_metadata.get(task_id)) if task_metadata else None,
+            ):
                 expected_skips += 1
                 expected_skip_reasons[family] += 1
                 completed_rows += 1
@@ -372,6 +383,6 @@ def summarize(
         unexpected_run_keys=run_keys.unexpected if run_keys is not None else (),
         multi_rep=any(len(repetitions) > 1 for repetitions in repetitions_by_task.values()),
         result_tokens_mode=result_tokens_mode([row for task_results in by_task.values() for row in task_results]),
-        off_surface=measure_off_surface(rows),
+        off_surface=measure_off_surface(rows, task_catalog=task_metadata or None),
         schema_friction=measure_schema_friction(rows),
     )

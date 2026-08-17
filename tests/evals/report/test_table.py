@@ -330,7 +330,13 @@ def test_multi_surface_behaviours(case):
 
 
 def test_single_rep_multi_surface_renders_tool_distribution_unavailable():
-    rows = [_synth_row("R1", label="local", success=True, num_calls=2)]
+    # The prompt excerpt is read from the run's own metadata, never from the checkout, so a
+    # rendered table describes the prompt that actually ran.
+    meta = {
+        "row_type": "meta",
+        "task_metadata": {"R1": {"prompt": "In project {project}, what is the current state of the item?"}},
+    }
+    rows = [meta, _synth_row("R1", label="local", success=True, num_calls=2)]
 
     rendered = render_multi_surface_table(build_multi_surface_table([("local", rows)]))
 
@@ -360,8 +366,9 @@ def test_single_rep_multi_surface_renders_tool_distribution_unavailable():
 
 
 def test_multi_surface_table_reports_off_surface_indicators_per_column_in_plain_and_markdown():
+    write_meta = {"row_type": "meta", "task_metadata": {"W1": {"tags": ["write"]}}}
     clean = [_synth_row("R1", label="clean", num_calls=1, calls=[{"tool": "list_work_items"}])]
-    bypass = [_synth_row("W1", label="bypass", num_calls=0, calls=[])]
+    bypass = [write_meta, _synth_row("W1", label="bypass", num_calls=0, calls=[])]
     table = build_multi_surface_table([("clean", clean), ("bypass", bypass)])
 
     plain = render_multi_surface_table(table)
