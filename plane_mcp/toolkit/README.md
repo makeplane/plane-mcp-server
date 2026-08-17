@@ -7,7 +7,7 @@ Shared building blocks for the tool surface, split by *when* they act. All re-ex
 | `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
 | `runtime.py` | call | `missing`, `needs`, `require`, `one_of`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
 | `paging.py` | response | `envelope`, `dump_results`, `pql_failure`, `workitem_page` |
-| `governance.py` | policy | `workspace_owns_resource`, `workspace_owns`, `wrong_scope`, `scoped`, `plan_gated` |
+| `governance.py` | policy | `workspace_owns_resource`, `workspace_owns`, `scoped`, `plan_gated` |
 | `transforms.py` | listing | `StripOutputSchemas` |
 
 Nothing here knows which catalogue is calling it. Anything encoding this server's own history — the `RESOURCES` tuple, retired names — lives under `tools/`.
