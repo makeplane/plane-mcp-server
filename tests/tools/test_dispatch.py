@@ -41,6 +41,8 @@ SAMPLES: dict[str, object] = {
 CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
     # An update has to carry a field to change; page_id alone is refused.
     ("page", "update"): {"name": "Renamed"},
+    # Without project_id this is the workspace catalogue, which requires a group.
+    ("state", "create"): {"group": "started"},
     ("template", "update"): {"name": "Renamed"},
     ("cycle", "manage_workitems"): {"add_ids": "id-1"},
     ("module", "manage_workitems"): {"add_ids": "id-1"},

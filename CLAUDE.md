@@ -106,7 +106,7 @@ Shared building blocks for the tool surface, split by *when* they act:
 | `governance.py` | policy | `workspace_owns_resource`, `GOVERNED_BY`, `workspace_owns`, `migration_in_progress`, `plan_gated` |
 | `transforms.py` | listing | `StripOutputSchemas` |
 
-Governance has two questions, and both matter. `workspace_owns_resource` reads the workspace flag that governs a resource — used *before* a write, to pick the scope. `workspace_owns` reads the refusal — used *after*, because the flag is cached and the lockout outlives it being toggled off. There is no single flag: work item types carry their own (`is_work_item_types_enabled`, public `work_item_types`), while states, labels, workflows, templates and automations share `workspace_governance_status` (public `states_owned_by_workspace`). `GOVERNED_BY` maps resource to flag so a newly governed resource is one row.
+Governance, plan gates and the rest of the toolkit conventions are documented in `plane_mcp/toolkit/README.md`, including what adding a newly governed resource takes.
 
 Names are re-exported from `plane_mcp/toolkit/__init__.py`, so a resource module needs one import: `from plane_mcp.toolkit import Action, build_description, missing, opt`.
 

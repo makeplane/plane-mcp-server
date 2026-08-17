@@ -12,6 +12,7 @@ from typing import Literal, get_args, get_origin, get_type_hints
 
 import pytest
 
+from plane_mcp.toolkit.governance import WORKSPACE_MANAGED
 from plane_mcp.toolkit.spec import action_names
 
 # Ratchets. Lowering these is routine; raising one is a design decision.
@@ -261,3 +262,46 @@ def test_unmapped_stays_small(unmapped):
 
 def test_aliases_do_not_shadow_a_resource_tool(aliases, registered):
     assert not set(aliases) & set(registered)
+
+
+# A resource whose scope can be refused must say which noun it is refusing, or the
+# caller gets a raw 400 and no idea which scope to use. Structure is each resource's
+# own business; this is about what a caller sees.
+
+SCOPED_WRITES = [
+    (
+        "state",
+        "states.create",
+        {"action": "create", "project_id": "p", "name": "S", "color": "#fff"},
+        {"code": WORKSPACE_MANAGED},
+    ),
+    (
+        "workitem_type",
+        "work_item_types.create",
+        {"action": "create", "project_id": "p", "name": "T"},
+        {"code": WORKSPACE_MANAGED},
+    ),
+    (
+        "workitem_property",
+        "workspace_work_item_properties.create",
+        {"action": "create", "workitem_type_id": "t", "display_name": "P", "property_type": "TEXT"},
+        {"error": "Workspace work item types are not enabled"},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "method", "arguments", "refusal"), SCOPED_WRITES, ids=[case[0] for case in SCOPED_WRITES]
+)
+def test_a_wrong_scope_refusal_is_answered_not_raised(name, method, arguments, refusal, registered, spy):
+    """Without `@scoped` the caller gets a raw 400 and no idea which scope to use."""
+    from plane.errors.errors import HttpError
+
+    spy.returns[method] = HttpError("refused", status_code=400, response=refusal)
+
+    result = registered[name].fn(**arguments)
+
+    assert isinstance(result, str) and result.startswith("Error:"), (
+        f"{name} let a wrong-scope refusal out raw; it needs @scoped"
+    )
+    assert "project_id" in result, "named the problem without naming the fix"
