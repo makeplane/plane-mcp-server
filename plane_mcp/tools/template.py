@@ -1,12 +1,15 @@
 """Templates: the reusable shape of a work item, a page, or a project.
 
-Two things pick the endpoint. `kind` says what is being templated, and project_id
-says where it lives -- with it a project template, without it a workspace one. A
-project kind exists only at workspace scope, since a project template is what
-creates projects.
+`kind` says what is templated, project_id where it lives -- with it a project
+template, without it a workspace one. A project kind exists only at workspace scope,
+since a project template is what creates projects. `template_data` carries the body
+being templated; everything else on the tool is the template's own metadata.
 
-`template_data` carries the body being templated (the work item's own fields, for
-instance); everything else on the tool is the template's own metadata.
+Listing without project_id is the wider view, not the other half: for a workitem or
+page kind it returns a project's templates too, marked by a non-null `project`.
+
+Governance refuses project-scoped writes where the workspace owns its templates.
+Reads are never refused, so a project still lists what it already has.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import json
 from typing import Any, Literal
 
 from fastmcp import FastMCP
+from plane.errors.errors import HttpError
 from plane.models import project_templates as project_models
 from plane.models import workspace_templates as workspace_models
 
@@ -27,6 +31,7 @@ from plane_mcp.toolkit import (
     needs,
     one_of,
     opt,
+    workspace_owns,
 )
 
 NAME = "template"
@@ -47,16 +52,26 @@ ACTIONS = (
 )
 
 FOOTER = (
-    f"kind is one of: {', '.join(KINDS)}. Omit project_id for the workspace's own templates, "
-    "which is also the only scope a project template can live at. "
+    f"kind is one of: {', '.join(KINDS)}. project_id chooses the scope a write lands in; omit it "
+    "for the workspace, which is also the only scope a project kind can live at. "
+    "For a workitem or page kind, listing without project_id is the wider view: it returns a "
+    "project's templates as well as the workspace's own, told apart by a non-null project. "
+    "Pass project_id to list one project's alone. "
     "template_data is a JSON object holding what gets templated -- for a work item template, "
     'the fields a work item created from it starts with, such as {"name": "Spec", '
     '"description_html": "<p>Context / Acceptance criteria</p>", "priority": "medium"}. '
+    "update merges it into what is there rather than replacing it, so pass only what changes. "
     "description is the template's own summary, not the templated body."
 )
 
 # Templates are new to this surface, so no retired name maps onto them.
 LEGACY: dict[str, str] = {}
+
+OWNED_BY_WORKSPACE = (
+    "Error: this workspace owns its templates, so a project's own are read-only -- listing them "
+    "still works, but they cannot be created, changed or deleted. Omit project_id to write at "
+    "the workspace instead."
+)
 
 _WORKSPACE = {
     "workitem": (workspace_models.CreateWorkItemTemplate, workspace_models.UpdateWorkItemTemplate),
@@ -157,29 +172,36 @@ def register(mcp: FastMCP) -> None:
         except ValueError as exc:
             return f"Error: {exc}."
 
-        if action == "create":
-            if error := needs(action, name=name, template_data=template_data):
-                return error
-            return namespace.create(
-                workspace_slug=workspace_slug,
-                **target,
-                data=_payload(create_model, name, description, body),
-            )
+        try:
+            if action == "create":
+                if error := needs(action, name=name, template_data=template_data):
+                    return error
+                return namespace.create(
+                    workspace_slug=workspace_slug,
+                    **target,
+                    data=_payload(create_model, name, description, body),
+                )
 
-        if not template_id:
-            return missing(action, "template_id")
+            if not template_id:
+                return missing(action, "template_id")
 
-        if action == "update":
-            if body == {}:
-                return "Error: template_data must contain at least one field."
-            if not (name or description or body):
-                return missing(action, "name, description or template_data")
-            return namespace.update(
-                workspace_slug=workspace_slug,
-                **target,
-                template_id=template_id,
-                data=_payload(update_model, name, description, body),
-            )
+            if action == "update":
+                if body == {}:
+                    return "Error: template_data must contain at least one field."
+                if not (name or description or body):
+                    return missing(action, "name, description or template_data")
+                return namespace.update(
+                    workspace_slug=workspace_slug,
+                    **target,
+                    template_id=template_id,
+                    data=_payload(update_model, name, description, body),
+                )
 
-        namespace.delete(workspace_slug=workspace_slug, **target, template_id=template_id)
-        return None
+            namespace.delete(workspace_slug=workspace_slug, **target, template_id=template_id)
+            return None
+        except HttpError as exc:
+            # Only a project-scoped write draws this, so the answer is the same for
+            # all three: the workspace owns them, write there instead.
+            if workspace_owns(exc):
+                return OWNED_BY_WORKSPACE
+            raise
