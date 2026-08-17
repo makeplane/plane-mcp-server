@@ -197,7 +197,11 @@ def _seed_fixtures(
     except TaskSkipped as skip:
         row.skipped = skip.reason
         row.verify_note = skip.reason
-        print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}", flush=True)
+        print(
+            f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}"
+            + (f" — {skip.detail}" if getattr(skip, "detail", None) else ""),
+            flush=True,
+        )
         return False
     except Exception as exc:
         row.success = False
@@ -397,7 +401,11 @@ async def _verify_task(
     except TaskSkipped as skip:
         row.skipped = skip.reason
         row.verify_note = skip.reason
-        print(f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}", flush=True)
+        print(
+            f"  {task['id']} rep={repetition} SKIPPED: {skip.reason}"
+            + (f" — {skip.detail}" if getattr(skip, "detail", None) else ""),
+            flush=True,
+        )
     except Exception as exc:
         row.success = False
         row.error = f"{type(exc).__name__}: {exc}"

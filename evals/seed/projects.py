@@ -73,7 +73,9 @@ def plan_gate_skips(feature: str) -> Iterator[None]:
         yield
     except Exception as exc:
         if is_plan_gate(exc):
-            raise TaskSkipped(f"env:plan-gated:{feature}") from exc
+            status = getattr(exc, "status_code", None)
+            detail = f"HTTP {status}: {exc}" if status else str(exc)
+            raise TaskSkipped(f"env:plan-gated:{feature}", detail=detail[:300]) from exc
         raise
 
 
