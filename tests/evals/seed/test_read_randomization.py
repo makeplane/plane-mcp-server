@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.evidence import TARGET_ENTITY_EVIDENCE, configured_evidence_labels
 from evals.seed.cycles import seed_cycles
 from evals.seed.states import seed_r7_state_oracle
 from evals.seed.work_items import require_activities, seed_work_items
@@ -186,7 +186,12 @@ def test_work_item_read_truth_is_randomized_and_api_confirmed(task_id, oracle_ke
         )
     else:
         assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE]
-    assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE]
+    # Whichever kind of evidence the task registered, the live seed gate must accept it.
+    assert configured_evidence_labels(
+        ctx.get("evidence_sentinels"),
+        ctx.get("evidence_targets"),
+        ctx.get("evidence_aggregates"),
+    ) == (TARGET_ENTITY_EVIDENCE,)
 
 
 def test_r2_randomized_counts_differ_between_rows_after_api_readback():
@@ -221,7 +226,6 @@ def test_r4_cycle_inventory_is_randomized_and_api_confirmed():
         "overdue_titles": ctx["r4_overdue_titles"],
     }
     assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE]
-    assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE]
 
 
 def test_r7_state_truth_is_randomized_api_confirmed_and_evidence_bearing():
@@ -237,7 +241,6 @@ def test_r7_state_truth_is_randomized_api_confirmed_and_evidence_bearing():
         truth = ctx["randomized_truth"]["R7.states"]
         assert truth["confirmed"] == ctx["r7_state_pairs"]
         assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE]
-        assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE]
 
 
 def test_l1_seed_oracle_is_the_api_confirmed_target_id():
@@ -248,4 +251,3 @@ def test_l1_seed_oracle_is_the_api_confirmed_target_id():
 
     assert ctx["l1_expected_summary_ids"] == [ctx["fixture_item_ids"]["Payment webhook drops retries"]]
     assert ctx["evidence_sentinels"][TARGET_ENTITY_EVIDENCE] == tuple(ctx["l1_expected_summary_ids"])
-    assert ctx["evidence_targets"][TARGET_ENTITY_EVIDENCE] == (ctx["project_id"],)

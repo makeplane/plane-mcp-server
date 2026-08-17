@@ -53,7 +53,7 @@ def seed_r7_state_oracle(plane: PlaneClient, workspace_slug: str, context: dict[
             "confirmed": list(pairs),
         },
     )
-    set_target_evidence(context, [state_name], target_ids=[project_id])
+    set_target_evidence(context, [state_name])
 
 
 __all__ = ["seed_r7_state_oracle"]

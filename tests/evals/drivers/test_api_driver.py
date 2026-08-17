@@ -466,8 +466,6 @@ def _api_driver_records_only_matching_evidence_labels():
     )
     session = FakeMcpSession(
         [
-            # A real response carrying the sentinel is insufficient when the request
-            # targeted an unrelated entity (write-there/read-back bypass).
             ToolResult(call_id="a", text=f"state={sentinel}"),
             ToolResult(call_id="b", text=f"state={sentinel}"),
         ]
@@ -476,11 +474,12 @@ def _api_driver_records_only_matching_evidence_labels():
     run = run_driver(
         make_driver(backend, session),
         evidence_sentinels={TARGET_ENTITY_EVIDENCE: [sentinel]},
-        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target"]},
     )
 
+    # The sentinel only exists inside Plane, so either response having it is proof of
+    # surface use; which entity the request named does not change that.
     assert run.evidence_trace_available is True
-    assert run.calls[0]["observed_sentinels"] == []
+    assert run.calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert run.calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert "result_text" not in run.calls[1]
 

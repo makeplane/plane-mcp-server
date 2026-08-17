@@ -83,4 +83,4 @@ def seed_release(plane: PlaneClient, workspace_slug: str, context: dict[str, Any
             "changelog": confirmed_text,
             "items": list(items),
         }
-        set_target_evidence(context, items, target_ids=[release.id])
+        set_target_evidence(context, items)

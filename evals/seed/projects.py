@@ -336,7 +336,7 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
         "second": confirmed_second,
         "winner": context["r6_more_bugs_project"],
     }
-    set_target_evidence(context, [*main_titles, *second_titles], target_ids=[main_id, project.id])
+    set_target_evidence(context, [*main_titles, *second_titles])
     # Two honest call shapes reach this answer: one count grouped by project_id, or one
     # count per project. Only the grouped shape was provable, so every agent that took
     # the per-project route answered correctly and scored as unproven.

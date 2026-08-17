@@ -710,7 +710,6 @@ def _sidecar_recorder_unit(tmp_path):
     rec = SidecarRecorder(
         tmp_path / "a.jsonl",
         evidence_sentinels={TARGET_ENTITY_EVIDENCE: [sentinel]},
-        evidence_targets={TARGET_ENTITY_EVIDENCE: ["target-1"]},
     )
     rec.on_client_message(
         {
@@ -753,9 +752,12 @@ def _sidecar_recorder_unit(tmp_path):
     assert calls[0]["origin"] == "plane"
     assert "result_text" not in calls[0]
     assert all("result_text" not in row for row in raw_calls)
-    assert calls[0]["observed_sentinels"] == []
+    # A sentinel is a per-run random string that exists only inside Plane, so its
+    # presence proves the response came from the surface whichever entity the request
+    # named. Both calls received it; both are evidence.
+    assert calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
-    assert raw_calls[0]["observed_sentinels"] == []
+    assert raw_calls[0]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert raw_calls[1]["observed_sentinels"] == [TARGET_ENTITY_EVIDENCE]
     assert sentinel not in (tmp_path / "a.jsonl").read_text(encoding="utf-8")
     assert rec.finalized is True

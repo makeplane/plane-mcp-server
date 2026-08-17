@@ -369,14 +369,7 @@ class ApiDriver:
                             )
                             calls[idx]["observed_aggregates"] = aggregate_observations
                             calls[idx]["observed_sentinels"] = sorted(
-                                set(
-                                    observed_sentinel_labels(
-                                        result.text,
-                                        evidence,
-                                        request_args=calls[idx]["args"],
-                                        evidence_targets=targets,
-                                    )
-                                )
+                                set(observed_sentinel_labels(result.text, evidence))
                                 | set(observed_aggregate_labels(aggregate_observations, aggregates))
                             )
                         pending_results.append((idx, result.text))

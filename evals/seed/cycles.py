@@ -199,8 +199,4 @@ def seed_cycles(
             "active_titles": list(confirmed_active_titles),
             "overdue_titles": list(confirmed_overdue_titles),
         }
-        set_target_evidence(
-            context,
-            [context["r4_cycle_name"], *confirmed_active_titles],
-            target_ids=[current.id],
-        )
+        set_target_evidence(context, [context["r4_cycle_name"], *confirmed_active_titles])

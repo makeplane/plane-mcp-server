@@ -83,10 +83,15 @@ def task_author(task: dict[str, Any]) -> str:
 CATALOG_REVISION = 10
 """Bumped when a deliberate change to a fixture or verifier redefines what a task asks.
 
-Revision 10 lets R6's provenance be proven by one count per project, not only by a single
-count grouped by project. Both are honest routes to the winner, but only the grouped one
-was registered, so every agent that counted each project separately answered correctly and
-scored as unproven. R6 results are not comparable across this transition.
+Revision 10 replaces the per-task list of accepted provenance shapes with one rule per kind of
+evidence. A sentinel is a per-run random string that exists only inside Plane, so its presence
+in a response the agent received proves surface use on its own; the request no longer has to
+name a particular entity. A count is guessable, so it still counts only from a request naming a
+seeded entity, and R6 accepts one count per project as well as one count grouped by project.
+The old rule enumerated routes through a 183-action surface and could never be complete: it
+rejected reading a state by listing a project's states, finding a cycle by listing a project's
+cycles, and counting two projects separately — all correct answers scored as unproven. Every
+read task's results are not comparable across this transition.
 Revision 9 also binds R1/I2 provenance to the seeded state, not the work item alone. A work
 item's `state` is an id, so resolving its name takes a second call, and the old rule needed the
 target id and the answer in one response — unsatisfiable against a surface that does not expand

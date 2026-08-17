@@ -132,22 +132,50 @@ Payload recording is off by default because tool results contain live workspace 
 make sidecars larger. The character-derived estimate remains useful for surface comparison
 because it is deterministic and monotonic in the recorded response size.
 
-Read-task provenance does not turn payload recording back on. Each read seeder registers a
-hidden, per-run sentinel and its seeded target entity ID. At the API loop or CLI recording
-proxy, the harness requires the request arguments to target that ID and matches the sentinel
-while the successful response is in memory, persisting only a non-sensitive
-`observed_sentinels` label. CLI proxies receive only target IDs plus sentinel lengths and
-SHA-256 fingerprints through a mode-0600 run-scoped file outside the agent cwd; the raw value
-is absent even from that file. Every MCP proxy session reads the same file, and the driver
-removes it with its temporary directory after the run. A successful response from
-an unrelated entity therefore does not count, and neither the response body nor sentinel
-enters the payload-free result row. Unavailable or incomplete matching is diagnosed and
-cannot pass a read verifier.
+### Provenance: what counts as proof the answer came from the surface
 
-Two count-oriented tasks have an equally narrow alternative evidence shape. R2 accepts an
-exact `total_count` only when the request arguments contain the seeded project ID; R6 accepts
-only grouped counts containing both seeded project IDs with their exact API-confirmed counts.
-No other read task receives this relaxation, and both transports still persist labels only.
+A read verifier asks two independent questions — is the answer right, and did the agent get
+it from the tool surface. This is the definition of the second one. It is a property, not a
+list of approved call sequences: an enumeration of routes through 183 actions can never be
+complete, and each gap in it fails an agent that answered correctly by an unlisted route.
+
+**A sentinel proves itself.** A sentinel is a per-run random string a seeder wrote into
+Plane — a state name, a work item title, a comment phrase. It exists nowhere else, and the
+agent's only route to Plane is the surface under measurement. So if a sentinel appears in a
+response the agent received, the agent used the surface. Nothing further is required: not
+which entity the request named, not which tool was called, not how many calls it took.
+
+**A count does not.** Where the seeded truth is a number, presence proves nothing — a small
+integer appears by coincidence. Aggregate evidence therefore keeps a target binding: an exact
+`total_count` counts only from a request whose arguments name a seeded entity. R2 binds one
+project's count; L2 binds a work item's activity count; R6 accepts either one count per
+project or one count grouped by project, since both are honest routes to its answer.
+
+Matching happens while the successful response is in memory, and only a non-sensitive
+`observed_sentinels` label is persisted. Read-task provenance does not turn payload recording
+back on. CLI proxies receive sentinel lengths and SHA-256 fingerprints, plus the target IDs the
+aggregate rule needs, through a mode-0600 run-scoped file outside the agent cwd; the raw value
+is absent even from that file. Every MCP proxy session reads the same file, and the driver
+removes it with its temporary directory after the run. Neither the response body nor the
+sentinel enters the result row. Unavailable or incomplete matching is diagnosed and cannot
+pass a read verifier.
+
+### Threat model: a cooperative agent
+
+The harness measures an agent that is trying to do the task, not one trying to defeat the
+measurement. That is a deliberate scope decision, and the numbers should be read with it in
+mind.
+
+The agent under measurement runs as the same OS user, in the same filesystem, holding the same
+Plane credentials as the harness. An agent that wanted to could read the evidence
+configuration, edit an earlier row in the result file, fabricate a proxy sidecar session, or
+skip MCP and call Plane directly — and off-surface indicators report such signals without
+gating success. None of this is closed by any verifier rule; closing it requires running the
+agent in a separate trust domain, which is a different project.
+
+For the question this harness exists to answer — how well does our own tool surface serve a
+capable agent — a cooperative agent is the right subject. Treat every integrity property above
+as holding against accident and drift, not against an adversary.
 
 Provider usage is a different measurement: where the driver supplies it, the harness keeps
 input, output, cache-read, and cache-creation usage. Tool-result sizing describes one source

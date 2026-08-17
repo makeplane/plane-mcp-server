@@ -1,10 +1,19 @@
-"""Target-bound response-evidence matching without retaining response bodies.
+"""Response-evidence matching without retaining response bodies.
 
-Seeders register hidden, per-run sentinel values under a non-sensitive label. Drivers
-compare each Plane response with those values only when the request targets the seeded
-entity, then retain only the labels that matched. CLI proxies consume the matching
-configuration from a one-shot file before the agent starts; sentinel values never enter
-agent-visible argv/config, result rows, or payload-free sidecars.
+Provenance asks one question: did the answer come from the tool surface? Two kinds of
+evidence answer it, under different rules, because they differ in how guessable they are.
+
+A **sentinel** is a per-run random string a seeder wrote into Plane. The agent's only
+route to Plane is the surface, so the string appearing in a response the agent received
+proves surface use by itself. Nothing else needs to hold.
+
+An **aggregate** is a count. A small integer is guessable, so a count proves nothing on
+its own: it counts only from a request that named a seeded entity.
+
+Drivers compare each Plane response against the configured evidence and retain only the
+labels that matched. CLI proxies consume the matching configuration from a file before the
+agent starts; sentinel values never enter agent-visible argv/config, result rows, or
+payload-free sidecars.
 """
 
 from __future__ import annotations
@@ -115,11 +124,16 @@ def normalize_evidence_aggregate_shapes(value: Any) -> dict[str, tuple[dict[str,
 
 
 def configured_evidence_labels(sentinels: Any, targets: Any, aggregates: Any = None) -> tuple[str, ...]:
-    """Return labels that have both response values and target entity IDs."""
-    values_by_label = normalize_evidence_sentinels(sentinels)
+    """Return labels this run can actually prove, by whichever rule governs their kind.
+
+    A sentinel proves itself. A count does not — a small integer is guessable, so it
+    counts only from a request that named a seeded entity, and an aggregate label with
+    no registered target can never match.
+    """
+    sentinel_labels = normalize_evidence_sentinels(sentinels).keys()
     targets_by_label = normalize_evidence_targets(targets)
-    aggregate_labels = normalize_evidence_aggregates(aggregates)
-    return tuple(sorted((values_by_label.keys() | aggregate_labels.keys()) & targets_by_label.keys()))
+    aggregate_labels = normalize_evidence_aggregates(aggregates).keys() & targets_by_label.keys()
+    return tuple(sorted(sentinel_labels | aggregate_labels))
 
 
 def fingerprint_evidence_sentinels(value: Any) -> dict[str, tuple[tuple[int, str], ...]]:
@@ -268,46 +282,27 @@ def _request_targets(request_args: Any, target_ids: Sequence[str]) -> bool:
     return contains(request_args)
 
 
-def observed_sentinel_labels(
-    response_text: str,
-    sentinels: Any,
-    *,
-    request_args: Any,
-    evidence_targets: Any,
-) -> list[str]:
-    """Return labels whose target request exposed a hidden value in its response."""
+def observed_sentinel_labels(response_text: str, sentinels: Any) -> list[str]:
+    """Return labels whose hidden value appeared in this response.
+
+    A sentinel is a per-run random string written into Plane at seed time, and the
+    agent's only route to Plane is the tool surface. Its presence in a response the
+    agent received is therefore proof of surface use on its own, with no need to also
+    inspect which entity the request named.
+    """
     text = str(response_text or "")
     if not text:
         return []
     normalized = normalize_evidence_sentinels(sentinels)
-    targets = normalize_evidence_targets(evidence_targets)
-    return sorted(
-        label
-        for label, values in normalized.items()
-        if label in targets
-        and _request_targets(request_args, targets[label])
-        and any(value in text for value in values)
-    )
+    return sorted(label for label, values in normalized.items() if any(value in text for value in values))
 
 
-def observed_fingerprint_labels(
-    response_text: str,
-    fingerprints: Any,
-    *,
-    request_args: Any,
-    evidence_targets: Any,
-) -> list[str]:
-    """Match target-bound value fingerprints without ever receiving the raw values."""
+def observed_fingerprint_labels(response_text: str, fingerprints: Any) -> list[str]:
+    """Match sentinel fingerprints without ever receiving the raw values."""
     text = str(response_text or "")
     if not text:
         return []
-    normalized = normalize_evidence_fingerprints(fingerprints)
-    targets = normalize_evidence_targets(evidence_targets)
-    eligible = {
-        label: specs
-        for label, specs in normalized.items()
-        if label in targets and _request_targets(request_args, targets[label])
-    }
+    eligible = normalize_evidence_fingerprints(fingerprints)
     if not eligible:
         return []
 
@@ -446,8 +441,8 @@ def _add_aggregate_specs(context: dict[str, Any], specs: Sequence[dict[str, Any]
     aggregates[TARGET_ENTITY_EVIDENCE] = tuple(registered)
 
 
-def set_target_evidence(context: dict[str, Any], values: Sequence[Any], *, target_ids: Sequence[Any]) -> None:
-    """Register API-confirmed values and the entity IDs whose reads may prove them."""
+def set_target_evidence(context: dict[str, Any], values: Sequence[Any]) -> None:
+    """Register the API-confirmed hidden values whose presence proves surface use."""
     clean_values: list[str] = []
     for value in values:
         if value is None:
@@ -458,7 +453,6 @@ def set_target_evidence(context: dict[str, Any], values: Sequence[Any], *, targe
     clean = tuple(dict.fromkeys(clean_values))
     if not clean:
         raise RuntimeError("target evidence has no API-confirmed sentinel values")
-    _register_targets(context, target_ids, what="target evidence")
     context["evidence_sentinels"] = {TARGET_ENTITY_EVIDENCE: clean}
 
 

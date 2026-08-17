@@ -118,14 +118,20 @@ estimate is monotonic in the thing being compared anyway. Do not enable payload 
 habit; use it only when the more sensitive, larger sidecar is justified.
 
 Read-task provenance is stricter than “a call happened.” Seeders place a hidden per-run
-sentinel on the target entity, and the API driver or CLI proxy records only whether a
-successful response exposed it **and its request targeted that seeded entity ID**. CLI
-proxies receive only target IDs and one-way value fingerprints through a private run-scoped
-file; the raw sentinel is absent even if that file is inspected. Every proxy session can read it, and the driver
-removes it with its temporary directory after the run. Result rows contain the matched label, never the sentinel
-value or response body. Thus an unrelated
-successful response cannot satisfy provenance; unavailable or incomplete matching is
-diagnosed and fails closed.
+sentinel — a random string that exists only inside Plane — and the API driver or CLI proxy
+records whether a successful response exposed it. Because the agent's only route to Plane is
+the surface under measurement, a sentinel in a response it received is proof of surface use by
+itself; the harness deliberately does not also require the request to have named a particular
+entity, because that rejected honest routes to the same answer. Where the seeded truth is a
+count rather than a string, presence proves nothing and the target binding still applies: an
+exact `total_count` counts only from a request naming a seeded entity. `evals/DESIGN.md` states
+both rules and the threat model they hold under.
+
+CLI proxies receive one-way value fingerprints, plus the target IDs the count rule needs,
+through a private run-scoped file; the raw sentinel is absent even if that file is inspected.
+Every proxy session can read it, and the driver removes it with its temporary directory after
+the run. Result rows contain the matched label, never the sentinel value or response body.
+Unavailable or incomplete matching is diagnosed and fails closed.
 
 ### Reading results
 

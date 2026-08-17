@@ -295,17 +295,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
         oracle_key = "r1_state_name" if task_id == "R1" else "i2_state_name"
         context[oracle_key] = confirmed_name
         context["randomized_truth"][f"{task_id}.state"]["confirmed"] = confirmed_name
-        # The state entity carries the answer, so it is a target too. A work item's `state` is a
-        # bare id, so reading the name takes a second call — one naming the work item and
-        # returning no name, one returning the name and naming only the state. Binding evidence
-        # to the work item alone demanded both halves in a single response, which no surface that
-        # returns state as an id can produce: R1 and I2 failed every repetition while answering
-        # correctly. Both ids are seeded, so the agent must still name the thing it was asked about.
-        target_ids = [target_id]
-        state_id = _as_id(detail.state)
-        if state_id:
-            target_ids.append(state_id)
-        set_target_evidence(context, [confirmed_name], target_ids=target_ids)
+        set_target_evidence(context, [confirmed_name])
 
     if task_id == "R2":
         confirmed_titles = _confirm_open_urgent_items(plane, workspace_slug, project_id)
@@ -313,7 +303,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
             raise RuntimeError("seed R2: API readback found no urgent open work items")
         context["r2_urgent_open_count"] = len(confirmed_titles)
         context["randomized_truth"]["R2.urgent_open_count"]["confirmed"] = len(confirmed_titles)
-        set_target_evidence(context, confirmed_titles, target_ids=[project_id])
+        set_target_evidence(context, confirmed_titles)
         set_target_count_evidence(context, len(confirmed_titles), target_ids=[project_id])
 
     if task_id == "R3":
@@ -341,7 +331,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
                 "count": len(confirmed_due_titles),
             },
         }
-        set_target_evidence(context, confirmed_due_titles, target_ids=[project_id])
+        set_target_evidence(context, confirmed_due_titles)
 
     if task_id == "R5":
         page = plane.work_items.comments.list(
@@ -361,7 +351,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
             )
         context["r5_comment_phrases"] = confirmed_comments
         context["randomized_truth"]["R5.comments"]["confirmed"] = list(confirmed_comments)
-        set_target_evidence(context, confirmed_comments, target_ids=[target_id])
+        set_target_evidence(context, confirmed_comments)
 
     if task_id == "L1":
         work_item_id = str(context["fixture_item_ids"].get(PAYMENT_WEBHOOK_TITLE) or "")
@@ -376,7 +366,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
         if confirmed_id != work_item_id:
             raise RuntimeError(f"seed L1: target work item readback id={confirmed_id!r}; want {work_item_id!r}")
         context["l1_expected_summary_ids"] = [confirmed_id]
-        set_target_evidence(context, [confirmed_id], target_ids=[project_id])
+        set_target_evidence(context, [confirmed_id])
 
     if task_id == "L5":
         attachment_target_id = context["fixture_item_ids"][PAYMENT_WEBHOOK_TITLE]
@@ -414,7 +404,7 @@ def seed_work_items(plane: PlaneClient, workspace_slug: str, context: dict[str, 
             raise RuntimeError(
                 f"seed L5: attachment readback exposed {len(confirmed_names)} randomized names; want {attachment_count}"
             )
-        set_target_evidence(context, confirmed_names, target_ids=[attachment_target_id])
+        set_target_evidence(context, confirmed_names)
 
 
 def require_activities(plane: PlaneClient, workspace_slug: str, context: dict[str, Any]) -> None:

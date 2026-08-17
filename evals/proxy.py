@@ -162,7 +162,7 @@ class SidecarRecorder:
         self.evidence_targets = normalize_evidence_targets(evidence_targets)
         self.evidence_aggregates = normalize_evidence_aggregate_shapes(evidence_aggregates)
         self.evidence_active = bool(
-            (self.evidence_fingerprints.keys() | self.evidence_aggregates.keys()) & self.evidence_targets.keys()
+            self.evidence_fingerprints or (self.evidence_aggregates.keys() & self.evidence_targets.keys())
         )
         self._lock = threading.Lock()
         self._error_lock = threading.Lock()
@@ -316,12 +316,7 @@ class SidecarRecorder:
             # target-bound aggregate values the agent already received. The
             # expected aggregate truth and complete result body never enter
             # the proxy process.
-            row["observed_sentinels"] = observed_fingerprint_labels(
-                result_text,
-                self.evidence_fingerprints,
-                request_args=pending["args"],
-                evidence_targets=self.evidence_targets,
-            )
+            row["observed_sentinels"] = observed_fingerprint_labels(result_text, self.evidence_fingerprints)
             row["observed_aggregates"] = observed_aggregates(
                 result_text,
                 self.evidence_aggregates,
