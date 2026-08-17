@@ -63,6 +63,9 @@ CATALOGUE = [
     "workitem_relation",
     "workitem_type",
     "workspace",
+    # Appended, not sorted in: see registry.py.
+    "template",
+    "collection",
 ]
 
 
@@ -194,9 +197,16 @@ def test_tool_names_leave_room_for_client_prefixes(listing):
 
 
 def test_listing_is_deterministic(registered):
-    """Tool definitions head a client's prompt cache; reordering invalidates it."""
-    names = list(registered)
-    assert names == sorted(names)
+    """Tool definitions head a client's prompt cache; reordering invalidates it.
+
+    Pinned to `CATALOGUE` rather than asserted `sorted()`. Alphabetical order was an
+    artefact of the `pkgutil` scan this package used to do over sorted filenames; kept
+    as an assertion afterwards, it forced every new resource into the middle of the
+    listing, shifting every tool below it and costing the cached prefix each time.
+    `test_resource_order_is_pinned` checks the same order at the module level, so a
+    mismatch between the two means registration dropped or reordered a resource.
+    """
+    assert list(registered) == CATALOGUE
 
 
 def test_tool_count_is_within_client_caps(listing):

@@ -1,6 +1,6 @@
 # The tool surface
 
-**29 tools**, one per Plane resource, each taking an `action` parameter that selects the operation — 190 actions in total, ~59k characters, so the catalogue loads fully in every MCP client.
+**30 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 204 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")
@@ -8,7 +8,7 @@ workitem(action="list", project_id=..., pql='state__group = "started"')
 cycle(action="archive", project_id=..., cycle_id=...)
 ```
 
-## A resource module
+A compact catalogue — 30 tools, ~67k characters — loads fully in every MCP client and leaves the context budget to the conversation.
 
 Five parts, in this order:
 
@@ -91,6 +91,7 @@ Where the workspace owns a resource outright, both directions of wrong-scope wri
 
 | Tool | Actions |
 |---|---|
+| `collection` | `list` · `retrieve` · `create` · `update` · `delete` · `list_pages` · `search_pages` · `add_pages` · `remove_page` · `list_members` · `add_member` · `update_member` · `remove_member` |
 | `customer` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` |
 | `customer_property` | `list` · `retrieve` · `create` · `update` · `delete` · `get_values` · `set_values` |
 | `customer_request` | `list` · `retrieve` · `create` · `update` · `delete` |
@@ -102,13 +103,14 @@ Where the workspace owns a resource outright, both directions of wrong-scope wri
 | `member` | `me` · `list_workspace` · `list_project` · `list_roles` · `retrieve_role` |
 | `milestone` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` |
 | `module` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` · `archive` · `unarchive` |
-| `page` | `list` · `retrieve` · `create` · `list_workitem_pages` · `attach_to_workitem` · `detach_from_workitem` |
+| `page` | `list` · `retrieve` · `create` · `update` · `archive` · `delete` · `set_collection` · `list_workitem_pages` · `attach_to_workitem` · `detach_from_workitem` |
 | `project` | `list` · `retrieve` · `create` · `update` · `delete` · `archive` · `unarchive` · `worklog_summary` · `get_features` · `update_features` |
 | `project_estimate` | `retrieve` · `create` · `update` · `delete` · `link` · `list_points` · `create_points` · `update_point` · `delete_point` |
 | `release` | `list` · `retrieve` · `create` · `update` · `delete` · `get_changelog` · `update_changelog` · `list_workitems` · `manage_workitems` |
 | `release_label` | `list` · `create` · `update` · `delete` · `attach` · `detach` |
 | `release_tag` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `state` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `template` | `list` · `create` · `update` · `delete` |
 | `work_log` | `list` · `create` · `update` · `delete` |
 | `workitem` | `list` · `list_archived` · `retrieve` · `retrieve_by_identifier` · `search` · `count` · `create` · `update` · `delete` · `archive` · `manage_assignee` · `manage_label` |
 | `workitem_activity` | `list` · `retrieve` |

@@ -57,6 +57,16 @@ Ordered as registered; the earlier one wraps the later:
 | `CoerceArguments` | repairs arguments a client encoded as strings, before validation (`coercion.py`) |
 | `ValidateActionArguments` | refuses arguments the chosen action does not accept, from the `ACTIONS` declaration |
 
+A dispatch tool's name is not its operation, so `PlaneLoggingMiddleware` adds `resource` and `action` to every `tools/call` record — start, success and error alike, where previously only success and error carried anything. For a retired name both are resolved through the alias table, since it carries no `action` of its own.
+
+| field | means |
+|---|---|
+| `tool` | the name the caller used — **unchanged**, so existing dashboards keep counting the same thing |
+| `resource` | the resource tool that ran (`workitem`); equals `tool` for a current call |
+| `action` | the operation (`count`), absent only for a tool that has no actions |
+
+`resource` + `action` names one operation however it was reached, and `tool != resource` is exactly the set of calls still arriving on a retired name. `legacy.py` also keeps its per-resolution log line, which predates these fields.
+
 Coercion runs before validation so an argument is judged by the value it repairs to. `ValidateActionArguments` closes a gap a per-tool schema cannot: every action's parameters share one schema, so an argument meant for another action validated cleanly and was then dropped, and the call answered a different question than the one asked. Only arguments carrying a value are judged, and retired names are exempt — they arrive with no `action` and under their own parameter spelling.
 
 ### Client Context (`client.py`)
@@ -70,7 +80,7 @@ Coercion runs before validation so an argument is judged by the value it repairs
 
 ### Tools (`tools/`)
 
-One action-dispatch tool per Plane resource: **28 tools, 183 actions, ~57k chars advertised**. `tools/__init__.py` re-exports `register_tools`, so `server.py` and `__main__.py` see a single entry point.
+One action-dispatch tool per Plane resource: **30 tools, 204 actions, ~67k chars advertised**. `tools/__init__.py` re-exports `register_tools`, so `server.py` and `__main__.py` see a single entry point.
 
 One module per resource, each exporting `NAME`, `ACTIONS`, `LEGACY` and `register(mcp)`. `ACTIONS` is the single source of truth: the tool description and its `ToolAnnotations` are generated from it, and the conformance suite asserts they agree with the function signature. See `tools/README.md` for the full convention.
 
@@ -122,3 +132,4 @@ Integration tests in `tests/test_integration.py` use `FastMCP.Client` with `Stre
 | `PLANE_OAUTH_PROVIDER_*` | http/sse OAuth | OAuth client credentials and base URL |
 | `PLANE_OAUTH_ALLOWED_REDIRECT_URIS` | http/sse OAuth (optional) | Comma-separated redirect URI patterns appended to the built-in allowlist (onboard clients without a release) |
 | `LOG_USER_INFO` | all (optional, default: false) | When `true`, include user info (PII such as display name) in logs alongside the opaque user id |
+| `LOG_PAYLOADS` | all (optional, default: true) | Log request payloads.|
