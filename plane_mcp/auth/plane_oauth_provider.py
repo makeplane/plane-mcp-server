@@ -187,7 +187,9 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                 return AccessToken(
                     token=token,
                     client_id=user.id or "unknown",
-                    scopes=["read", "write"],  # Plane doesn't expose scopes in user endpoint
+                    # Plane does not expose granted scopes in the user endpoint.
+                    # The completed OAuth flow requested these required scopes.
+                    scopes=list(self.required_scopes or []),
                     expires_at=expires_at,
                     claims={
                         "auth_method": "oauth",
