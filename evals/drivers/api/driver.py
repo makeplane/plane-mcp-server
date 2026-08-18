@@ -23,15 +23,7 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-from evals.drivers.api.base import (
-    KNOWN_API_PROVIDERS,
-    ModelBackend,
-    StopReason,
-    ToolResult,
-    ToolSpec,
-    create_backend,
-)
-from evals.evidence import (
+from evals.core.evidence import (
     configured_evidence_labels,
     normalize_evidence_aggregates,
     normalize_evidence_sentinels,
@@ -40,9 +32,17 @@ from evals.evidence import (
     observed_aggregates,
     observed_sentinel_labels,
 )
-from evals.results import AgentRun, Usage
-from evals.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
-from evals.tool_manifest import ToolManifestCapture, tools_page
+from evals.core.results import AgentRun, Usage
+from evals.core.token_counting import TOKEN_ESTIMATE_METHOD, estimate_result_tokens
+from evals.core.tool_manifest import ToolManifestCapture, tools_page
+from evals.drivers.api.base import (
+    KNOWN_API_PROVIDERS,
+    ModelBackend,
+    StopReason,
+    ToolResult,
+    ToolSpec,
+    create_backend,
+)
 
 DEFAULT_MAX_TOKENS = 8192
 

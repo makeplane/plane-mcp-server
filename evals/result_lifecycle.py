@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from evals.results import TaskResult
+from evals.core.results import TaskResult
 from evals.skip_taxonomy import is_expected_environment_capability_skip
 
 

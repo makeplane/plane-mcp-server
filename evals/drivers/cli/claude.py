@@ -23,8 +23,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from evals.core.tool_names import normalize_tool_call, split_plane_and_client_calls
 from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput, CliOutputError
-from evals.tool_names import normalize_tool_call, split_plane_and_client_calls
 
 
 def normalize_claude_usage(data: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:

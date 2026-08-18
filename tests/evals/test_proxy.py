@@ -14,6 +14,13 @@ from pathlib import Path
 
 import pytest
 
+from evals.core.evidence import (
+    EVIDENCE_SENTINELS_ENV,
+    TARGET_ENTITY_EVIDENCE,
+    consume_evidence_config,
+    write_evidence_config,
+)
+from evals.core.results import AgentRun, TaskResult, agent_run_to_task_result
 from evals.drivers.cli.sidecar import (
     apply_proxy_sidecar,
     ensure_proxy_pythonpath,
@@ -21,12 +28,6 @@ from evals.drivers.cli.sidecar import (
     load_proxy_sidecar_calls,
     proxy_pid_path,
     proxy_session_paths,
-)
-from evals.evidence import (
-    EVIDENCE_SENTINELS_ENV,
-    TARGET_ENTITY_EVIDENCE,
-    consume_evidence_config,
-    write_evidence_config,
 )
 from evals.proxy import (
     SHUTDOWN_DEADLINE_S,
@@ -39,7 +40,6 @@ from evals.proxy import (
 )
 from evals.proxy import main as proxy_main
 from evals.report.summary import summarize
-from evals.results import AgentRun, TaskResult, agent_run_to_task_result
 from evals.runner.live import _record_trace_infra
 from tests.evals.conftest import case_params
 

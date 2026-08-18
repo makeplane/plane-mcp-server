@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from evals.core.results import TaskResult
 from evals.result_lifecycle import is_terminal_result
-from evals.results import TaskResult
 
 DedupeMode = Literal["latest", "none"]
 ResultRow = TaskResult | dict[str, Any]

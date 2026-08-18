@@ -7,7 +7,7 @@ from typing import Any
 
 from plane import PlaneClient
 
-from evals.errors import TaskSkipped
+from evals.core.errors import TaskSkipped
 
 from .customers import (
     CUSTOMER_NAME,

@@ -10,6 +10,9 @@ from typing import Any
 
 import pytest
 
+from evals.core.tool_names import (
+    split_plane_and_client_calls,
+)
 from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api.driver import ApiDriver
 from evals.drivers.cli.antigravity import (
@@ -26,9 +29,6 @@ from evals.drivers.cli.claude import (
 )
 from evals.drivers.cli.codex import CodexCliDriver, parse_codex_jsonl_events
 from evals.drivers.cli.opencode import OpencodeCliDriver, write_opencode_mcp_config
-from evals.tool_names import (
-    split_plane_and_client_calls,
-)
 from tests.evals.conftest import case_params
 
 CLAUDE_JSON_RESULT = {

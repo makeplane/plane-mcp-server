@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from evals.results import RESULT_SCHEMA_VERSION
-from evals.task_metadata import METADATA_FIELD, normalize_task_metadata
+from evals.core.results import RESULT_SCHEMA_VERSION
+from evals.core.task_metadata import METADATA_FIELD, normalize_task_metadata
 
 
 def read_git_revision() -> str:

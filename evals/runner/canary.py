@@ -6,7 +6,7 @@ import sys
 import uuid
 from typing import Any
 
-from evals.errors import TaskSkipped
+from evals.core.errors import TaskSkipped
 from evals.seed import make_plane_client, seed, teardown
 from evals.tasks.catalog import battery_fingerprint
 

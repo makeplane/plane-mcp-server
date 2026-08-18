@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from evals.fixtures import R1_TITLE, R5_TITLE
-from evals.state_oracle import state_name_group_pairs
+from evals.core.fixtures import R1_TITLE, R5_TITLE
+from evals.core.state_oracle import state_name_group_pairs
 from evals.tasks.answers import (
     answer_with_provenance,
     contract_values,

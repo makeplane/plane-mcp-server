@@ -7,7 +7,7 @@ from typing import Any
 from plane.errors.errors import HttpError
 from plane.models.query_params import PaginatedQueryParams, RetrieveQueryParams, WorkItemQueryParams
 
-from evals.fixtures import (
+from evals.core.fixtures import (
     CYCLE_CURRENT,
     CYCLE_PAST,
     MODULE_COMPLETED_TITLES,

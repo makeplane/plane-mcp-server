@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from evals import report as report_mod
+from evals.core.results import RESULT_SCHEMA_VERSION
 from evals.report import (
     completeness_statement,
     execution_coverage_statement,
@@ -18,7 +19,6 @@ from evals.report import (
     summarize,
     wilson_interval,
 )
-from evals.results import RESULT_SCHEMA_VERSION
 from tests.evals.conftest import case_params
 
 

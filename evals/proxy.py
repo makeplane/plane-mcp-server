@@ -21,7 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from evals.evidence import (
+from evals.core.evidence import (
     EVIDENCE_SENTINELS_ENV,
     consume_evidence_config,
     fingerprint_evidence_sentinels,
@@ -32,7 +32,7 @@ from evals.evidence import (
     observed_aggregates,
     observed_fingerprint_labels,
 )
-from evals.tool_manifest import ToolManifestCapture
+from evals.core.tool_manifest import ToolManifestCapture
 
 # Single post-EOF / child-exit deadline for the whole shutdown sequence.
 SHUTDOWN_DEADLINE_S = 10.0

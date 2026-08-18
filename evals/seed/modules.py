@@ -8,7 +8,7 @@ from plane import PlaneClient
 from plane.models.modules import CreateModule
 from plane.models.work_items import CreateWorkItem, UpdateWorkItem
 
-from evals.fixtures import MODULE_COMPLETED_TITLES, MODULE_NAME
+from evals.core.fixtures import MODULE_COMPLETED_TITLES, MODULE_NAME
 
 from .identities import record_seeded_entity
 from .work_items import find_completed_state, list_states

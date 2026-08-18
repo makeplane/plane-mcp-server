@@ -7,9 +7,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE
-from evals.results import TRACE_INTEGRITY_SCHEMA_VERSION, CallRecord, TaskResult
-from evals.task_metadata import task_metadata_from_rows
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.results import TRACE_INTEGRITY_SCHEMA_VERSION, CallRecord, TaskResult
+from evals.core.task_metadata import task_metadata_from_rows
 
 from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
 from .statistics import percentile

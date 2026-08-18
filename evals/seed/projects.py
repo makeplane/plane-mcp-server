@@ -11,7 +11,7 @@ from plane.models.projects import CreateProject, ProjectFeature, UpdateProject
 from plane.models.work_items import CreateWorkItem
 from plane.models.workspaces import WorkspaceFeature
 
-from evals.evidence import set_target_count_evidence, set_target_evidence, set_target_grouped_count_evidence
+from evals.core.evidence import set_target_count_evidence, set_target_evidence, set_target_grouped_count_evidence
 
 from .gates import is_plan_gate
 from .identities import record_seeded_entity

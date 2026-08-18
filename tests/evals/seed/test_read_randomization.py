@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE, configured_evidence_labels
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE, configured_evidence_labels
 from evals.seed.cycles import seed_cycles
 from evals.seed.states import seed_r7_state_oracle
 from evals.seed.work_items import require_activities, seed_work_items

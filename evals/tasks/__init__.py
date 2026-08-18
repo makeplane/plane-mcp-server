@@ -1,6 +1,6 @@
 """Public task catalog and verifier API."""
 
-from evals.errors import TaskSkipped
+from evals.core.errors import TaskSkipped
 from evals.tasks.answers import (
     contract_values,
     get_final_text,

@@ -6,7 +6,7 @@ def test_aggregate_evidence_alone_counts_as_registered_target_bound_evidence():
     none. L2 failed that way on every repetition of the first full-catalog battery, after the
     seeding bug that had hidden it was fixed.
     """
-    from evals.evidence import TARGET_ENTITY_EVIDENCE, configured_evidence_labels
+    from evals.core.evidence import TARGET_ENTITY_EVIDENCE, configured_evidence_labels
 
     targets = {TARGET_ENTITY_EVIDENCE: ("wi-1",)}
     aggregates = {TARGET_ENTITY_EVIDENCE: ({"kind": "total_count", "value": 3},)}

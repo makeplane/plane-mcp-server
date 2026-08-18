@@ -6,7 +6,7 @@ from typing import Any
 
 from plane.models.query_params import RetrieveQueryParams
 
-from evals.fixtures import (
+from evals.core.fixtures import (
     CUSTOMER_NAME,
     CYCLE_CURRENT,
     DEBIAS_CUSTOMER_PROP_DISPLAY,
@@ -17,7 +17,7 @@ from evals.fixtures import (
     W3_TITLE,
     W8_TITLE,
 )
-from evals.state_oracle import worklog_summary_item_ids
+from evals.core.state_oracle import worklog_summary_item_ids
 from evals.tasks.answers import (
     answer_with_provenance,
     contract_values,

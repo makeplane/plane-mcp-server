@@ -7,7 +7,7 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.customers import CreateCustomer, CreateCustomerRequest
 
-from evals.fixtures import (
+from evals.core.fixtures import (
     CUSTOMER_NAME,
     CUSTOMER_REQUEST_NAME,
     EVALUATION_CUSTOMER_PROPERTY_NAME,

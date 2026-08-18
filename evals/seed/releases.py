@@ -7,9 +7,9 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.releases import CreateRelease, UpdateReleaseChangelog
 
-from evals.changelog import changelog_items, normalize_changelog_text
-from evals.evidence import set_target_evidence
-from evals.fixtures import (
+from evals.core.changelog import changelog_items, normalize_changelog_text
+from evals.core.evidence import set_target_evidence
+from evals.core.fixtures import (
     EVALUATION_RELEASE_TAG_VERSION,
     RELEASE_CHANGELOG_TEXT,
     RELEASE_NAME,

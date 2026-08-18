@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 from plane.errors.errors import HttpError
 
-from evals.changelog import normalize_changelog_text
-from evals.fixtures import (
+from evals.core.changelog import normalize_changelog_text
+from evals.core.fixtures import (
     CUSTOMER_NAME,
     CUSTOMER_REQUEST_NAME,
     CYCLE_CURRENT,

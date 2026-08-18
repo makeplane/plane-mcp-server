@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from evals.results import TaskResult
+from evals.core.results import TaskResult
 
 from .compare import ab_compare, print_ab_report
 from .identity import (

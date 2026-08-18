@@ -342,9 +342,18 @@ evals/
       codex.py           Codex CLI driver
       antigravity.py     Antigravity CLI driver
       opencode.py        OpenCode CLI driver
-  results.py             run/task result types and common row mapping
-  tool_names.py          whose MCP tool a call is, and what to call it
-  token_counting.py      tool-result token sizing
+  core/                  shared floor: may import only core (+ stdlib/third-party)
+    changelog.py         changelog text normalization helpers
+    errors.py            neutral exceptions (TaskSkipped, …)
+    evidence.py          target-binding evidence labels and sentinels
+    fixtures.py          seeded fixture name/title constants
+    results.py           run/task result types and common row mapping
+    server_env.py        stdio MCP server env construction
+    state_oracle.py      Plane state lookups used as verifier truth
+    task_metadata.py     task tags/needs/prompt persisted in the run's meta header
+    token_counting.py    tool-result token sizing
+    tool_manifest.py     tools/list capture and fingerprinting
+    tool_names.py        whose MCP tool a call is, and what to call it
   proxy.py               stdlib-only JSON-RPC recording relay
   seed/                  Plane fixture creation and teardown
   report/                summaries, A/B comparison, and multi-surface tables

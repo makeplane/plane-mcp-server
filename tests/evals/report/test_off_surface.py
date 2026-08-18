@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.results import RESULT_SCHEMA_VERSION
 from evals.report import (
     ANSWER_WITHOUT_PROVENANCE,
     IMPLAUSIBLY_FEW_CALLS,
@@ -17,7 +18,6 @@ from evals.report import (
     print_table,
     summarize,
 )
-from evals.results import RESULT_SCHEMA_VERSION
 
 
 def _row(

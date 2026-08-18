@@ -6,8 +6,8 @@ import sys
 
 import pytest
 
-from evals.results import AgentRun, agent_run_to_harness_dict
-from evals.token_counting import estimate_result_tokens
+from evals.core.results import AgentRun, agent_run_to_harness_dict
+from evals.core.token_counting import estimate_result_tokens
 
 
 @pytest.mark.parametrize("has_tokenizer", [True, False], ids=["importable-tokenizer", "estimator-fallback"])

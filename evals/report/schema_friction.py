@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from evals.results import TaskResult
+from evals.core.results import TaskResult
 
 from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
 from .statistics import median

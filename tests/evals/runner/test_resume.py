@@ -9,10 +9,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from evals.core.results import AgentRun
 from evals.report import (
     is_meta_row,
 )
-from evals.results import AgentRun
 from evals.runner import (
     is_meta_or_non_task_row,
     load_resume_skip_keys,

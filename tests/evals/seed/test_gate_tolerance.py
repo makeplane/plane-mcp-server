@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from plane.errors.errors import HttpError
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
 from evals.seed import seed_customer, seed_release
 from evals.tasks.skip import TaskSkipped
 

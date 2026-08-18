@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from evals.tool_manifest import ToolManifestCapture, tool_manifest_fingerprint
+from evals.core.tool_manifest import ToolManifestCapture, tool_manifest_fingerprint
 
 
 def test_same_tool_names_with_different_schemas_have_different_manifest_fingerprints():

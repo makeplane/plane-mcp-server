@@ -6,7 +6,7 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
 from evals.seed import W2_TITLE
 from evals.tasks.debias import (
     I1_TITLE,

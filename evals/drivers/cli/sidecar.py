@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from evals import REPO_ROOT
-from evals.results import TraceIntegrityReason
+from evals.core.results import TraceIntegrityReason
 
 ProxyMetaWaitOutcome = Literal["meta_present", "proxy_exited", "proxy_not_observed", "timeout"]
 

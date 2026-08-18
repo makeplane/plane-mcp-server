@@ -6,8 +6,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from evals.results import TaskResult
-from evals.task_metadata import TaskMetadata, entry_prompt, task_metadata_from_rows
+from evals.core.results import TaskResult
+from evals.core.task_metadata import TaskMetadata, entry_prompt, task_metadata_from_rows
 
 from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
 from .off_surface import off_surface_statement

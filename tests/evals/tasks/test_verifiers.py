@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from plane.errors.errors import HttpError
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
 from evals.seed import (
     CUSTOMER_NAME,
     CUSTOMER_REQUEST_NAME,

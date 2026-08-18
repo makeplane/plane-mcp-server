@@ -10,6 +10,9 @@ from typing import Any
 
 import pytest
 
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.token_counting import estimate_result_tokens
+from evals.core.tool_manifest import tool_manifest_fingerprint
 from evals.drivers.api import (
     KNOWN_API_PROVIDERS,
     AnthropicBackend,
@@ -26,9 +29,6 @@ from evals.drivers.api import (
     unregister_backend,
 )
 from evals.drivers.api.driver import ApiDriver
-from evals.evidence import TARGET_ENTITY_EVIDENCE
-from evals.token_counting import estimate_result_tokens
-from evals.tool_manifest import tool_manifest_fingerprint
 from tests.evals.conftest import case_params
 
 

@@ -14,10 +14,10 @@ import pytest
 from plane.errors.errors import HttpError
 
 from evals import cli as run_mod
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.results import RESULT_SCHEMA_VERSION, AgentRun, TaskResult
 from evals.drivers.cli.claude import ClaudeCliDriver
-from evals.evidence import TARGET_ENTITY_EVIDENCE
 from evals.report import load_rows, summarize
-from evals.results import RESULT_SCHEMA_VERSION, AgentRun, TaskResult
 from evals.runner import (
     is_infra_cli_stop_reason,
     run_live,
@@ -302,7 +302,7 @@ def _run_driver_exception_is_infra_cli(tmp_path, monkeypatch, _capsys):
 
 
 def _run_timeout_agent_is_infra_cli(tmp_path, monkeypatch, _capsys):
-    from evals.results import agent_run_to_harness_dict
+    from evals.core.results import agent_run_to_harness_dict
 
     out = tmp_path / "rows.jsonl"
     fake_plane = MagicMock()

@@ -11,10 +11,10 @@ from plane.models.query_params import WorkItemQueryParams
 from plane.models.states import CreateState
 from plane.models.work_items import CreateWorkItem, CreateWorkItemComment, UpdateWorkItem
 
-from evals.changelog import normalize_changelog_text
-from evals.errors import TaskSkipped
-from evals.evidence import set_target_count_evidence, set_target_evidence
-from evals.fixtures import (
+from evals.core.changelog import normalize_changelog_text
+from evals.core.errors import TaskSkipped
+from evals.core.evidence import set_target_count_evidence, set_target_evidence
+from evals.core.fixtures import (
     BLOCKING_REFERENCE_ADDRESS,
     BLOCKING_SOURCE_TITLE,
     BLOCKING_TARGET_TITLE,
@@ -27,7 +27,7 @@ from evals.fixtures import (
     UNFINISHED_CYCLE_TITLES,
     WORK_ITEM_FIXTURES,
 )
-from evals.state_oracle import worklog_summary_item_ids
+from evals.core.state_oracle import worklog_summary_item_ids
 
 from .gates import plan_gate_skips
 from .identities import record_seeded_entity

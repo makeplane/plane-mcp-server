@@ -16,9 +16,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from evals.core.tool_names import normalize_tool_call, split_plane_and_client_calls
 from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput
 from evals.drivers.cli.process import run_cli_subprocess
-from evals.tool_names import normalize_tool_call, split_plane_and_client_calls
 
 
 def _codex_parse_tool_args(raw_args: Any) -> dict[str, Any]:

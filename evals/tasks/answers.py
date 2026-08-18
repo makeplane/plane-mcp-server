@@ -7,7 +7,7 @@ from collections import Counter
 from html import unescape
 from typing import Any
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
 
 
 def word_boundary(value: str) -> re.Pattern[str]:

@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from evals.core.results import TaskResult
 from evals.result_lifecycle import is_terminal_result
-from evals.results import TaskResult
 
 from .meta import is_meta_or_non_task_row
 

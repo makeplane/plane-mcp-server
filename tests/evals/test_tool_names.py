@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from evals.tool_names import (
+from evals.core.tool_names import (
     is_plane_mcp_tool,
     strip_mcp_prefix,
 )

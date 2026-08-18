@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from evals.changelog import changelog_items, normalize_changelog_text
-from evals.fixtures import (
+from evals.core.changelog import changelog_items, normalize_changelog_text
+from evals.core.fixtures import (
     CUSTOMER_NAME,
     CUSTOMER_REQUEST_NAME,
     R1_TITLE,

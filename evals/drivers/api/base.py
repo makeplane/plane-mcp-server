@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
-from evals.results import Usage
+from evals.core.results import Usage
 
 MODEL_TIERS = frozenset({"standard", "fast"})
 

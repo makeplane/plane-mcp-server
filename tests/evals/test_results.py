@@ -10,16 +10,8 @@ from typing import Any
 
 import pytest
 
-from evals.drivers.api import (
-    StopReason,
-    ToolCall,
-    ToolResult,
-    ToolSpec,
-    Turn,
-)
-from evals.drivers.api.driver import ApiDriver
-from evals.evidence import TARGET_ENTITY_EVIDENCE
-from evals.results import (
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.results import (
     AGENT_RESULT_COPY_FIELDS,
     AGENT_RESULT_OPTIONAL_IDENTITY_FIELDS,
     RESULT_SCHEMA_VERSION,
@@ -30,10 +22,18 @@ from evals.results import (
     Usage,
     agent_run_to_harness_dict,
 )
-from evals.token_counting import estimate_result_tokens
-from evals.tool_names import (
+from evals.core.token_counting import estimate_result_tokens
+from evals.core.tool_names import (
     normalize_tool_call,
 )
+from evals.drivers.api import (
+    StopReason,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+    Turn,
+)
+from evals.drivers.api.driver import ApiDriver
 from tests.evals.conftest import case_params
 
 

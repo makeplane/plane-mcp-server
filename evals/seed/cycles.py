@@ -9,8 +9,8 @@ from plane import PlaneClient
 from plane.models.cycles import CreateCycle, UpdateCycle
 from plane.models.work_items import UpdateWorkItem
 
-from evals.evidence import set_target_evidence
-from evals.fixtures import CYCLE_CURRENT, CYCLE_PAST, PAYMENT_WEBHOOK_TITLE, UNFINISHED_CYCLE_TITLES
+from evals.core.evidence import set_target_evidence
+from evals.core.fixtures import CYCLE_CURRENT, CYCLE_PAST, PAYMENT_WEBHOOK_TITLE, UNFINISHED_CYCLE_TITLES
 
 from .identities import record_seeded_entity
 from .randomize import random_truth_rng, record_randomized_truth

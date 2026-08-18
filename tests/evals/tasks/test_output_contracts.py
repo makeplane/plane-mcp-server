@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
 from evals.seed import CYCLE_CURRENT, R1_TITLE, R5_COMMENT_PHRASES, W2_TITLE, W8_TITLE
 from evals.tasks.cross import verify_c2
 from evals.tasks.debias import verify_i2, verify_l2, verify_l5

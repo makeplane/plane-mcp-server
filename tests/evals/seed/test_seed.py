@@ -13,8 +13,8 @@ from plane.errors.errors import HttpError
 
 from evals import cleanup as cleanup_mod
 from evals import seed as seed_mod
-from evals.errors import TaskSkipped
-from evals.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.errors import TaskSkipped
+from evals.core.evidence import TARGET_ENTITY_EVIDENCE
 from evals.seed import (
     R5_TITLE,
     create_project_with_identifier_retry,

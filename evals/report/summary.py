@@ -6,9 +6,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Literal
 
-from evals.results import TRACE_INTEGRITY_SCHEMA_VERSION, TaskResult
+from evals.core.results import TRACE_INTEGRITY_SCHEMA_VERSION, TaskResult
+from evals.core.task_metadata import TaskMetadata, entry_needs, task_metadata_from_rows
 from evals.skip_taxonomy import is_expected_environment_capability_skip, skip_reason_family
-from evals.task_metadata import TaskMetadata, entry_needs, task_metadata_from_rows
 
 from .load import ResultRow, RunKeyValidation, is_infra_error_row, is_meta_row, read_result
 from .off_surface import OffSurfaceMeasurement, measure_off_surface

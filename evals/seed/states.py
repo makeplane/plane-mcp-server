@@ -7,8 +7,8 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.states import CreateState
 
-from evals.evidence import set_target_evidence
-from evals.state_oracle import state_name_group_pairs
+from evals.core.evidence import set_target_evidence
+from evals.core.state_oracle import state_name_group_pairs
 
 from .identities import record_seeded_entity
 from .randomize import random_truth_rng, random_truth_token, record_randomized_truth

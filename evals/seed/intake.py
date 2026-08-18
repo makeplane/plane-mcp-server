@@ -7,7 +7,7 @@ from typing import Any
 from plane import PlaneClient
 from plane.models.intake import CreateIntakeWorkItem, WorkItemForIntakeRequest
 
-from evals.fixtures import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE
+from evals.core.fixtures import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE
 
 from .identities import record_seeded_entity
 

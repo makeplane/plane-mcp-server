@@ -22,6 +22,15 @@ from pathlib import Path
 from typing import Any
 
 from evals import REPO_ROOT
+from evals.core.evidence import (
+    configured_evidence_labels,
+    normalize_evidence_aggregates,
+    normalize_evidence_sentinels,
+    normalize_evidence_targets,
+    observed_aggregate_labels,
+    write_evidence_config,
+)
+from evals.core.results import AgentRun
 from evals.drivers.cli.process import note_timeout_kill, run_cli_subprocess
 from evals.drivers.cli.sidecar import (
     ProxySidecarResult,
@@ -31,15 +40,6 @@ from evals.drivers.cli.sidecar import (
     load_proxy_sidecar,
     proxy_wrap_server_command,
 )
-from evals.evidence import (
-    configured_evidence_labels,
-    normalize_evidence_aggregates,
-    normalize_evidence_sentinels,
-    normalize_evidence_targets,
-    observed_aggregate_labels,
-    write_evidence_config,
-)
-from evals.results import AgentRun
 
 
 @dataclass

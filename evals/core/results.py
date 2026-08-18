@@ -6,12 +6,12 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from evals.token_counting import (
+from evals.core.token_counting import (
     TOKEN_ESTIMATE_METHOD,
     count_result_text_tokens,
     estimate_result_tokens,
 )
-from evals.tool_names import split_plane_and_client_calls
+from evals.core.tool_names import split_plane_and_client_calls
 
 RESULT_SCHEMA_VERSION = 6
 TRACE_INTEGRITY_SCHEMA_VERSION = 5

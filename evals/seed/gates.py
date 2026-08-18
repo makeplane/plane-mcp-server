@@ -13,7 +13,7 @@ from collections.abc import Iterator
 
 from plane.errors.errors import HttpError
 
-from evals.errors import TaskSkipped
+from evals.core.errors import TaskSkipped
 
 # Wording a refusal uses when the workspace's plan is what stands in the way. A feature
 # switched off for a project says "not enabled for this project" instead, which is a

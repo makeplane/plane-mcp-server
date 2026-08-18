@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 import tomllib
 
+from evals.core.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE
 from evals.drivers.cli.antigravity import AntigravityCliDriver
 from evals.drivers.cli.base import CliDriver, CliLaunch, CliOutput, CliOutputError
 from evals.drivers.cli.claude import ClaudeCliDriver
@@ -30,7 +31,6 @@ from evals.drivers.cli.sidecar import (
     proxy_wrap_server_command,
     wait_for_proxy_meta,
 )
-from evals.evidence import EVIDENCE_SENTINELS_ENV, TARGET_ENTITY_EVIDENCE
 from tests.evals.conftest import case_params
 
 
