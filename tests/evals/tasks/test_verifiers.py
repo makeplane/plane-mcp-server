@@ -10,7 +10,9 @@ from typing import Any
 import pytest
 from plane.errors.errors import HttpError
 
+from evals.core.errors import TaskSkipped
 from evals.core.evidence import TARGET_ENTITY_EVIDENCE
+from evals.core.fixtures import INTAKE_BILLING_TITLE, INTAKE_SPAM_TITLE
 from evals.seed import (
     CUSTOMER_NAME,
     CUSTOMER_REQUEST_NAME,
@@ -24,16 +26,19 @@ from evals.seed import (
 )
 from evals.tasks.cross import verify_c1
 from evals.tasks.read import verify_r3
-from evals.tasks.schema import verify_s3, verify_s5
+from evals.tasks.schema import verify_s1, verify_s2, verify_s3, verify_s4, verify_s5
+from evals.tasks.verification import VerifierReadError
 from evals.tasks.write import (
     W10_PAGE_BODY,
     W10_PAGE_NAME,
+    verify_w1,
     verify_w3,
     verify_w4,
     verify_w5,
     verify_w6,
     verify_w7,
     verify_w8,
+    verify_w9,
     verify_w10,
 )
 
@@ -694,3 +699,365 @@ def test_s5_requires_all_three_features_not_a_majority(cycle_view, tracking, cus
     assert ok is want, note
     for text in expect:
         assert text in note, note
+
+
+# ---------------------------------------------------------------------------
+# The five verifiers that shipped without a behavioural test: W1, W9, S1, S2, S4.
+# Each case below is one a *wrong* verifier would accept, so a regression that
+# loosens a check fails here rather than inflating a battery score.
+# ---------------------------------------------------------------------------
+
+W1_TITLE = "Login page 500s on empty password"
+ME_ID = "me-1"
+
+
+class _W1Plane:
+    def __init__(self, items: list[Any], detail: Any):
+        self._items = items
+        self._detail = detail
+        self.work_items = SimpleNamespace(list=lambda **kw: _Page(self._items), retrieve=self._retrieve)
+        self.users = SimpleNamespace(get_me=lambda **kw: SimpleNamespace(id=ME_ID))
+
+    def _retrieve(self, **kw):
+        # W1 verifies the newest duplicate, so the detail must be keyed by the id it asked for.
+        return self._detail(kw["work_item_id"]) if callable(self._detail) else self._detail
+
+
+def _w1_detail(
+    *, priority: str = "urgent", assignees: tuple[str, ...] = (ME_ID,), labels: tuple[str, ...] = ("auth-id",)
+):
+    return SimpleNamespace(
+        priority=priority,
+        assignees=[SimpleNamespace(id=a) for a in assignees],
+        labels=[SimpleNamespace(id=lid) for lid in labels],
+    )
+
+
+@pytest.mark.parametrize(
+    ("items", "detail", "ctx_labels", "want", "expect"),
+    [
+        pytest.param(
+            [_item("w1", W1_TITLE)], _w1_detail(), {"auth": "auth-id"}, True, "auth label attached", id="all-three-met"
+        ),
+        pytest.param([], _w1_detail(), {"auth": "auth-id"}, False, "not found", id="never-created"),
+        pytest.param(
+            [_item("w1", W1_TITLE)],
+            _w1_detail(priority="high"),
+            {"auth": "auth-id"},
+            False,
+            "want urgent",
+            id="priority-close-but-wrong",
+        ),
+        pytest.param(
+            [_item("w1", W1_TITLE)],
+            _w1_detail(assignees=("someone-else",)),
+            {"auth": "auth-id"},
+            False,
+            "missing me",
+            id="assigned-to-the-wrong-person",
+        ),
+        # A label *named* auth is not the seeded label. Matching on name would pass this.
+        pytest.param(
+            [_item("w1", W1_TITLE)],
+            _w1_detail(labels=("decoy-id",)),
+            {"auth": "auth-id"},
+            False,
+            "missing auth",
+            id="decoy-label-with-the-right-name",
+        ),
+        # Fail closed: a seed that never produced the label must not make the requirement vanish.
+        pytest.param(
+            [_item("w1", W1_TITLE)],
+            _w1_detail(),
+            {},
+            False,
+            "auth label id missing from seed ctx",
+            id="seed-lost-the-label",
+        ),
+    ],
+)
+def test_w1_requires_all_three_conditions_and_the_seeded_label_id(items, detail, ctx_labels, want, expect):
+    ctx = {"workspace_slug": "ws", "project_id": "p1", "labels": ctx_labels}
+    ok, note = asyncio.run(verify_w1(_W1Plane(items, detail), ctx, _run()))
+    assert ok is want, note
+    assert expect in note, note
+
+
+def test_w1_verifies_the_newest_duplicate_and_says_so():
+    """Two items share the title; only the newest satisfies the ask."""
+    items = [
+        _item("old", W1_TITLE, created_at="2026-01-01T00:00:00Z"),
+        _item("new", W1_TITLE, created_at="2026-06-01T00:00:00Z"),
+    ]
+    details = {"old": _w1_detail(priority="low"), "new": _w1_detail()}
+    ctx = {"workspace_slug": "ws", "project_id": "p1", "labels": {"auth": "auth-id"}}
+    ok, note = asyncio.run(verify_w1(_W1Plane(items, lambda wid: details[wid]), ctx, _run()))
+    assert ok is True, note
+    assert "2 items with title" in note, note
+
+
+W9_TITLES = (
+    "Checkout times out on 3DS challenge",
+    "Session cookie not rotated after login",
+    "Inventory count goes negative under load",
+)
+
+
+class _W9Plane:
+    def __init__(self, priorities: dict[str, str], missing: tuple[str, ...] = ()):
+        self._priorities = priorities
+        rows = [_item(f"id-{i}", t) for i, t in enumerate(W9_TITLES) if t not in missing]
+        self.work_items = SimpleNamespace(
+            list=lambda **kw: _Page(rows),
+            retrieve=lambda **kw: SimpleNamespace(priority=self._priorities.get(kw["work_item_id"])),
+        )
+
+
+@pytest.mark.parametrize(
+    ("priorities", "missing", "want", "expect"),
+    [
+        pytest.param(
+            {"id-0": "high", "id-1": "high", "id-2": "high"}, (), True, "3 items priority=high", id="all-three"
+        ),
+        # The majority trap: two of three is a failed task, not a pass.
+        pytest.param({"id-0": "high", "id-1": "high", "id-2": "medium"}, (), False, "Inventory", id="two-of-three"),
+        pytest.param({"id-0": "high", "id-1": "high"}, (W9_TITLES[2],), False, "missing", id="one-never-existed"),
+        pytest.param({"id-0": "High", "id-1": "HIGH", "id-2": "high"}, (), True, "3 items", id="priority-case-varies"),
+        pytest.param({"id-0": None, "id-1": "high", "id-2": "high"}, (), False, "Checkout", id="priority-unset"),
+    ],
+)
+def test_w9_requires_all_three_items_not_a_majority(priorities, missing, want, expect):
+    ctx = {"workspace_slug": "ws", "project_id": "p1"}
+    ok, note = asyncio.run(verify_w9(_W9Plane(priorities, missing), ctx, _run()))
+    assert ok is want, note
+    assert expect in note, note
+
+
+class _S1Props:
+    """Type-scoped property listing, with the options collection as a separate endpoint."""
+
+    def __init__(self, props: list[Any] | Exception, options: list[Any] | Exception | None = None):
+        self._props = props
+        self._options = options if options is not None else []
+        self.list = self._list
+        self.options = SimpleNamespace(list=self._options_list)
+
+    def _list(self, **kw):
+        if isinstance(self._props, Exception):
+            raise self._props
+        return self._props
+
+    def _options_list(self, **kw):
+        if isinstance(self._options, Exception):
+            raise self._options
+        return self._options
+
+
+def _severity(*, property_type: Any = "OPTION", options: tuple[str, ...] = ("Critical", "Major", "Minor"), **kw: Any):
+    return SimpleNamespace(
+        id="sev-1",
+        display_name="Severity",
+        property_type=property_type,
+        options=[SimpleNamespace(name=name) for name in options],
+        **kw,
+    )
+
+
+@pytest.mark.parametrize(
+    ("props", "options", "want", "expect"),
+    [
+        pytest.param(
+            [_severity()], None, True, "Severity OPTION with Critical/Major/Minor", id="option-with-all-three"
+        ),
+        pytest.param([_severity(property_type="TEXT")], None, False, "want OPTION", id="text-instead-of-option"),
+        pytest.param(
+            [_severity(options=("Critical", "Major"))], None, False, "missing ['minor']", id="one-choice-short"
+        ),
+        pytest.param(
+            [_severity(options=("CRITICAL", "major", "MiNoR"))],
+            None,
+            True,
+            "Severity OPTION",
+            id="choice-casing-varies",
+        ),
+        # A Severity bound to some other work item type does not satisfy "on the Bug type".
+        pytest.param([_severity(issue_type="other-type")], None, False, "not found", id="attached-to-the-wrong-type"),
+        pytest.param([], None, False, "not found", id="never-created"),
+        # An empty inline collection falls back to the options endpoint.
+        pytest.param(
+            [_severity(options=())],
+            [SimpleNamespace(name="Critical"), SimpleNamespace(name="Major"), SimpleNamespace(name="Minor")],
+            True,
+            "Severity OPTION",
+            id="options-only-on-the-endpoint",
+        ),
+        # A 404 on the options endpoint means the choices definitively are not there.
+        pytest.param([_severity(options=())], _http404(), False, "missing", id="options-endpoint-404"),
+        # A type-scoped 404 is authoritative absence, not an infrastructure failure.
+        pytest.param(_http404(), None, False, "type-scoped list empty/404", id="type-scoped-404-is-a-real-failure"),
+    ],
+)
+def test_s1_requires_an_option_severity_attached_to_the_bug_type(props, options, want, expect):
+    plane = SimpleNamespace(work_item_properties=_S1Props(props, options))
+    ctx = {"workspace_slug": "ws", "project_id": "p1", "bug_type": {"id": "bug-type-1"}}
+    ok, note = asyncio.run(verify_s1(plane, ctx, _run()))
+    assert ok is want, note
+    assert expect in note, note
+
+
+def test_s1_skips_when_the_bug_type_was_never_seeded():
+    """No fixture means the question was never asked — not an agent failure."""
+    plane = SimpleNamespace(work_item_properties=_S1Props([_severity()]))
+    with pytest.raises(TaskSkipped):
+        asyncio.run(verify_s1(plane, {"workspace_slug": "ws", "project_id": "p1"}, _run()))
+
+
+def test_s1_surfaces_a_non_404_read_failure_as_infrastructure():
+    """A 500 while reading authoritative state must not be scored as a failed task."""
+    plane = SimpleNamespace(work_item_properties=_S1Props(HttpError("boom", status_code=500, response={})))
+    ctx = {"workspace_slug": "ws", "project_id": "p1", "bug_type": {"id": "bug-type-1"}}
+    with pytest.raises(VerifierReadError):
+        asyncio.run(verify_s1(plane, ctx, _run()))
+
+
+class _S2Plane:
+    def __init__(
+        self,
+        *,
+        values: tuple[str, ...],
+        estimate_point: Any,
+        item: bool = True,
+        retrieve_error: Exception | None = None,
+    ):
+        self._error = retrieve_error
+        self._points = [SimpleNamespace(id=f"pt-{v}", value=v) for v in values]
+        self._estimate_point = estimate_point
+        rows = [_item("w8", W8_TITLE)] if item else []
+        self.estimates = SimpleNamespace(retrieve=self._retrieve, list_points=lambda **kw: self._points)
+        self.work_items = SimpleNamespace(
+            list=lambda **kw: _Page(rows),
+            retrieve=lambda **kw: SimpleNamespace(estimate_point=self._estimate_point),
+        )
+
+    def _retrieve(self, **kw):
+        if self._error:
+            raise self._error
+        return SimpleNamespace(id="est-1")
+
+
+FIB = ("1", "2", "3", "5", "8")
+
+
+@pytest.mark.parametrize(
+    ("plane", "want", "expect"),
+    [
+        pytest.param(
+            _S2Plane(values=FIB, estimate_point="pt-5"), True, "item estimate_point=5", id="scale-and-item-both-right"
+        ),
+        # Both halves are required; a correct scale with the wrong point is not a pass.
+        pytest.param(_S2Plane(values=FIB, estimate_point="pt-3"), False, "want 5", id="item-points-at-the-wrong-value"),
+        pytest.param(
+            _S2Plane(values=("1", "2", "3", "5"), estimate_point="pt-5"),
+            False,
+            "missing fib subset",
+            id="scale-missing-8",
+        ),
+        pytest.param(_S2Plane(values=FIB, estimate_point=None), False, "want 5", id="item-has-no-estimate"),
+        pytest.param(_S2Plane(values=FIB, estimate_point="pt-5", item=False), False, "missing", id="target-item-gone"),
+        # estimate_point may arrive expanded rather than as a UUID; both are the same end state.
+        pytest.param(
+            _S2Plane(values=FIB, estimate_point=SimpleNamespace(value="5")),
+            True,
+            "item estimate value=5",
+            id="expanded-estimate-point",
+        ),
+        # No estimate at all reads as "the requested scale was never created", not an error.
+        pytest.param(
+            _S2Plane(values=FIB, estimate_point="pt-5", retrieve_error=_http404()),
+            False,
+            "was not created",
+            id="estimate-404",
+        ),
+    ],
+)
+def test_s2_requires_both_the_fibonacci_scale_and_the_item_estimate(plane, want, expect):
+    ctx = {"workspace_slug": "ws", "project_id": "p1"}
+    ok, note = asyncio.run(verify_s2(plane, ctx, _run()))
+    assert ok is want, note
+    assert expect in note, note
+
+
+class _S4Intake:
+    def __init__(
+        self, statuses: dict[str, int | None], *, retrieve_works: bool = True, list_error: Exception | None = None
+    ):
+        self._statuses = statuses
+        self._retrieve_works = retrieve_works
+        self._list_error = list_error
+
+    def retrieve(self, **kw):
+        if not self._retrieve_works:
+            raise _http404()
+        return SimpleNamespace(status=self._statuses.get(kw["work_item_id"]))
+
+    def list(self, **kw):
+        if self._list_error:
+            raise self._list_error
+        return _Page(
+            [
+                SimpleNamespace(
+                    status=self._statuses.get("billing-1"), issue_detail=SimpleNamespace(name=INTAKE_BILLING_TITLE)
+                ),
+                SimpleNamespace(
+                    status=self._statuses.get("spam-1"), issue_detail=SimpleNamespace(name=INTAKE_SPAM_TITLE)
+                ),
+            ]
+        )
+
+
+def _s4_ctx(*, billing: str | None = "billing-1", spam: str | None = "spam-1"):
+    return {
+        "workspace_slug": "ws",
+        "project_id": "p1",
+        "intake": {"billing": {"issue_id": billing}, "spam": {"issue_id": spam}},
+    }
+
+
+@pytest.mark.parametrize(
+    ("statuses", "ctx", "want", "expect"),
+    [
+        pytest.param(
+            {"billing-1": 1, "spam-1": -1}, _s4_ctx(), True, "billing accepted; spam declined", id="right-call-on-both"
+        ),
+        # The sign is the whole task: triaging both the same way is not partial credit.
+        pytest.param({"billing-1": -1, "spam-1": 1}, _s4_ctx(), False, "billing status=-1", id="decisions-swapped"),
+        pytest.param({"billing-1": 1, "spam-1": 1}, _s4_ctx(), False, "spam status=1", id="accepted-the-spam-too"),
+        pytest.param(
+            {"billing-1": None, "spam-1": -1}, _s4_ctx(), False, "billing status=None", id="billing-untouched"
+        ),
+        pytest.param(
+            {"billing-1": 1, "spam-1": -1}, _s4_ctx(billing=None), False, "billing status=None", id="seed-lost-the-id"
+        ),
+    ],
+)
+def test_s4_requires_the_opposite_decision_on_each_intake_row(statuses, ctx, want, expect):
+    plane = SimpleNamespace(intake=_S4Intake(statuses))
+    ok, note = asyncio.run(verify_s4(plane, ctx, _run()))
+    assert ok is want, note
+    assert expect in note, note
+
+
+def test_s4_falls_back_to_the_intake_list_when_retrieve_is_unavailable():
+    """Retrieve is optional; the list is independently authoritative for the same rows."""
+    plane = SimpleNamespace(intake=_S4Intake({"billing-1": 1, "spam-1": -1}, retrieve_works=False))
+    ok, note = asyncio.run(verify_s4(plane, _s4_ctx(), _run()))
+    assert ok is True, note
+
+
+def test_s4_surfaces_a_double_read_failure_as_infrastructure():
+    """With neither endpoint readable, the state is unknown — not declined."""
+    plane = SimpleNamespace(
+        intake=_S4Intake({}, retrieve_works=False, list_error=HttpError("boom", status_code=500, response={}))
+    )
+    with pytest.raises(VerifierReadError):
+        asyncio.run(verify_s4(plane, _s4_ctx(), _run()))
