@@ -15,6 +15,11 @@ from plane_mcp.tools.registry import action_arguments
 logger = get_logger(__name__)
 
 
+def missing_action_error(tool: str, actions: Collection[str]) -> str:
+    """Error naming the actions `tool` offers, for a call that chose none."""
+    return f"Error: {tool} requires an action. It takes: {', '.join(sorted(actions))}."
+
+
 def stray_argument_error(action: str, arguments: dict, accepted: Collection[str]) -> str | None:
     """Error naming the arguments `action` does not take, or None when all are valid."""
     stray = sorted(n for n, value in arguments.items() if n != "action" and value and n not in accepted)
@@ -25,7 +30,7 @@ def stray_argument_error(action: str, arguments: dict, accepted: Collection[str]
 
 
 class ValidateActionArguments(Middleware):
-    """Refuse arguments the chosen action has no use for, before they are dropped."""
+    """Refuse a call whose action is absent, or whose arguments that action has no use for."""
 
     def __init__(self) -> None:
         self._accepted = action_arguments()
@@ -40,8 +45,17 @@ class ValidateActionArguments(Middleware):
     def rejection(self, tool: str, arguments: dict) -> str | None:
         """The message refusing this call, or None to let it through."""
         by_action = self._accepted.get(tool)
-        action = arguments.get("action")
-        if by_action is None or action not in by_action:
+        if by_action is None:
+            # A retired name, or not ours at all. Either way not our business.
+            return None
+        if "action" not in arguments:
+            # Pydantic names the parameter but not one permitted value, so a caller
+            # that omitted the choice learns nothing it did not already know.
+            return missing_action_error(tool, by_action)
+        action = arguments["action"]
+        if action not in by_action:
+            # A present-but-wrong action is left alone: the Literal already reports
+            # the permitted set, and a second opinion here would only muddle it.
             return None
         return stray_argument_error(action, arguments, by_action[action])
 

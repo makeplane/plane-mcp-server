@@ -31,7 +31,12 @@ TYPES = ("categories", "points", "time")
 
 ACTIONS = (
     Action("retrieve", ("project_id",), note="a project has at most one estimate", read=True),
-    Action("create", ("project_id", "name"), ("type", "description", "last_used", "external_source", "external_id")),
+    Action(
+        "create",
+        ("project_id", "name"),
+        ("type", "description", "last_used", "external_source", "external_id"),
+        note="creates the estimate only; add its values afterwards with create_points",
+    ),
     Action("update", ("project_id",), ("name", "description", "external_source", "external_id")),
     Action("delete", ("project_id",), destructive=True),
     Action("link", ("project_id", "estimate_id"), note="makes that estimate the project's active one"),
