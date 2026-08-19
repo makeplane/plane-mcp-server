@@ -1259,3 +1259,59 @@ def test_elapsed_formats_minutes_then_hours(monkeypatch):
     assert _elapsed(1000.0) == "01:15"
     clock["now"] = 1000.0 + 3671
     assert _elapsed(1000.0) == "1:01:11"
+
+
+@pytest.mark.parametrize(
+    ("tags", "calls", "expect_pass", "why"),
+    [
+        pytest.param({"write"}, [], False, "mutation with no tool call", id="write-with-zero-calls"),
+        pytest.param({"write"}, [{"tool": "cycle"}], True, "mutation through the surface", id="write-with-calls"),
+        # An errored call is not use of the surface.
+        pytest.param(
+            {"write"}, [{"tool": "cycle", "is_error": True}], False, "only failed calls", id="write-all-errored"
+        ),
+        # Non-write tasks are gated by answer_with_provenance instead; do not double-charge them.
+        pytest.param({"schema"}, [], True, "not a write task", id="non-write-untouched"),
+    ],
+)
+def test_a_write_task_must_change_plane_through_the_surface(monkeypatch, tmp_path, tags, calls, expect_pass, why):
+    """An off-surface mutation verifies as correct state; it must not score as a pass.
+
+    Measured: an agent read the repo it was standing in, took the API key from its own
+    environment and mutated Plane over REST. The verifier read the state back, found it
+    correct, and the row passed with zero tool calls recorded.
+    """
+    from evals.runner import live as runner_live
+
+    out = tmp_path / "out.jsonl"
+    monkeypatch.setattr(runner_live, "make_plane_client", lambda: (MagicMock(), "test-ws"))
+
+    def ok_seed(plane, run_id, needs, ctx, task_id=None):
+        ctx.update({"project_name": "EVAL surface", "project_id": "p1"})
+
+    monkeypatch.setattr(runner_live, "seed", ok_seed)
+    monkeypatch.setattr(runner_live, "teardown", lambda plane, ctx: None)
+
+    class SurfacelessDriver:
+        name = "claude-cli"
+
+        def run_task(self, *args, **kwargs):
+            return AgentRun(
+                calls=list(calls),
+                final_text="done",
+                usage=None,
+                stopped_reason="end_turn",
+                call_source="proxy",
+                trace_integrity=True,
+            )
+
+    async def verify(*args, **kwargs):
+        return True, "state is correct"
+
+    monkeypatch.setattr(runner_live, "get_driver", lambda name, **kw: SurfacelessDriver())
+    task = {"id": "T9", "prompt": "mutate {project}", "tags": tags, "needs": set(), "verify": verify}
+    asyncio.run(run_live([task], model_alias="haiku", reps=1, label="l", out_path=out, driver_name="claude-cli"))
+    row = [json.loads(line) for line in out.read_text().splitlines() if json.loads(line).get("row_type") != "meta"][0]
+    assert row["success"] is expect_pass, f"{why}: {row.get('verify_note') or row.get('error')}"
+    if not expect_pass:
+        assert "surface=missing" in row["verify_note"], row["verify_note"]

@@ -2010,3 +2010,34 @@ def _meta(**kw: Any) -> dict[str, Any]:
 )
 def test_only_a_pump_that_could_have_lost_something_invalidates_the_trace(meta, blocking, why):
     assert _pumps_blocking(meta) is blocking, why
+
+
+@pytest.mark.parametrize(
+    ("metas", "fingerprint", "disagreement", "why"),
+    [
+        pytest.param([{"tool_manifest_fingerprint": "fp1"}], "fp1", False, "one session, one listing", id="single"),
+        # Claude Code lists tools in one session and makes the calls in another. The quiet
+        # session has no opinion, and counting it as a dissenter discarded the fingerprint
+        # on nearly every row and left the reporter unable to compare the file.
+        pytest.param(
+            [{"tool_manifest_fingerprint": "fp1"}, {}], "fp1", False, "abstaining session", id="one-lists-one-calls"
+        ),
+        pytest.param([{}, {}], None, False, "nobody listed", id="no-listing-anywhere"),
+        # Real disagreement is two sessions naming different surfaces.
+        pytest.param(
+            [{"tool_manifest_fingerprint": "fp1"}, {"tool_manifest_fingerprint": "fp2"}],
+            None,
+            True,
+            "genuinely different surfaces",
+            id="conflicting",
+        ),
+    ],
+)
+def test_a_session_that_never_listed_tools_does_not_veto_the_manifest(tmp_path, metas, fingerprint, disagreement, why):
+    base = tmp_path / "sidecar.jsonl"
+    for index, meta in enumerate(metas):
+        row = {"row_type": "proxy_meta", "finalized": True, "last_seq": 0, "tool_request_count": 0, **meta}
+        (tmp_path / f"sidecar.jsonl.{index}.jsonl").write_text(json.dumps(row) + "\n")
+    _calls, status = load_proxy_sidecar(base)
+    assert status["tool_manifest_fingerprint"] == fingerprint, why
+    assert status["tool_manifest_disagreement"] is disagreement, why

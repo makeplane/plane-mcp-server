@@ -15,7 +15,7 @@ from evals.core.errors import TaskSkipped
 from evals.core.evidence import configured_evidence_labels
 from evals.core.results import TaskResult, agent_run_to_task_result
 from evals.core.server_env import stdio_server_env
-from evals.core.task_metadata import build_task_metadata
+from evals.core.task_metadata import build_task_metadata, entry_requires_mutation
 from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api import MODEL_TIERS
 from evals.report.load import RunExpectation, dedupe_rows_latest, load_rows, validate_run_keys
@@ -362,6 +362,28 @@ async def _verify_task(
 ) -> None:
     """Run one verifier and record task outcomes or verifier failures."""
     verify = task["verify"]
+
+    def _require_surface_for_mutation(task: dict, agent: Any, *, ok: bool, note: str) -> tuple[bool, str]:
+        """A write task that changed Plane without calling a tool did not demonstrate the surface.
+
+        Write verifiers read Plane back, so they answer "did the state change", not "did the
+        agent change it through the surface under test". Measured: an agent that could not
+        work the tools out read the repo it was standing in, took the API key from its own
+        environment and mutated Plane over REST. The state was correct and the task scored a
+        pass with no tool call recorded.
+
+        Only applied to a trustworthy trace — when integrity is false the row is already an
+        infrastructure error, and zero calls there means the recording failed, not the agent.
+        """
+        if not ok or not entry_requires_mutation({"tags": task.get("tags") or ()}):
+            return ok, note
+        if agent.trace_integrity is False:
+            return ok, note
+        calls = [call for call in (agent.to_row().get("calls") or []) if not bool(call.get("is_error"))]
+        if calls:
+            return ok, note
+        return False, f"{note}; surface=missing (write task changed Plane with 0 successful tool calls)"
+
     try:
         agent_row = agent.to_row()
         ok, note = await verify(
@@ -378,6 +400,7 @@ async def _verify_task(
                 "trace_integrity_reason": agent.trace_integrity_reason,
             },
         )
+        ok, note = _require_surface_for_mutation(task, agent, ok=bool(ok), note=note)
         row.success = bool(ok)
         row.verify_note = note
         print(

@@ -330,10 +330,14 @@ def load_proxy_sidecar(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
     missing_manifests = len(metas) - len(manifests)
     status["tool_manifest_fingerprints"] = unique_manifests
     status["tool_manifest_missing_sessions"] = missing_manifests
-    status["tool_manifest_disagreement"] = len(unique_manifests) > 1 or bool(unique_manifests and missing_manifests)
-    status["tool_manifest_fingerprint"] = (
-        unique_manifests[0] if len(unique_manifests) == 1 and missing_manifests == 0 else None
-    )
+    # A session that never called tools/list has no opinion about the manifest, and silence
+    # is not contradiction. Claude Code splits the work — one session lists the tools, a
+    # second makes the calls and never lists — so counting the quiet one as a dissenter
+    # discarded the fingerprint on almost every row and left the reporter unable to
+    # establish that a file's rows hit the same surface. Real disagreement is two sessions
+    # reporting different fingerprints, which len(unique) > 1 already catches.
+    status["tool_manifest_disagreement"] = len(unique_manifests) > 1
+    status["tool_manifest_fingerprint"] = unique_manifests[0] if len(unique_manifests) == 1 else None
     status["evidence_trace_available"] = (
         bool(metas)
         and len(metas) == len(session_statuses)
