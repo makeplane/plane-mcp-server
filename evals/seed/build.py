@@ -8,6 +8,7 @@ from typing import Any
 from plane import PlaneClient
 
 from evals.core.errors import TaskSkipped
+from evals.core.fixtures import eval_project_name
 
 from .customers import (
     CUSTOMER_NAME,
@@ -270,7 +271,7 @@ def seed(
     even if a later fixture step raises (F5).
     """
     run_prefix = run_id[:8]
-    project_name = f"EVAL {run_prefix}"
+    project_name = eval_project_name(run_prefix)
     workspace_slug = os.environ["EVAL_PLANE_WORKSPACE_SLUG"]
 
     # Reset known keys while preserving object identity for the caller.

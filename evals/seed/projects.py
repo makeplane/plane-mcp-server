@@ -12,6 +12,7 @@ from plane.models.work_items import CreateWorkItem
 from plane.models.workspaces import WorkspaceFeature
 
 from evals.core.evidence import set_target_count_evidence, set_target_evidence, set_target_grouped_count_evidence
+from evals.core.fixtures import eval_project_name
 
 from .gates import is_plan_gate
 from .identities import record_seeded_entity
@@ -204,7 +205,7 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
     from .item_types import seed_item_type
 
     run_prefix = context["run8"]
-    name = f"EVAL {run_prefix} B"
+    name = eval_project_name(run_prefix, second=True)
     project = create_project_with_identifier_retry(
         plane,
         workspace_slug,

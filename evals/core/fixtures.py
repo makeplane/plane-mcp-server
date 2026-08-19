@@ -86,7 +86,109 @@ def is_evaluation_customer_name(name: str | None) -> bool:
     return (name or "").strip().casefold() in _EVALUATION_CUSTOMER_NAMES
 
 
+# Project names. Nothing here may look like an id.
+#
+# Seeded projects used to be called "EVAL 3c128f21". An agent is told only the project name
+# and has to resolve it to a UUID, since project_id is required by 121 of the 183 actions —
+# and a weaker model skipped the resolution and submitted a hex-looking substring as the id.
+# Moving the hex into parentheses made it worse, not better: it became a cleaner token to
+# extract, and non-UUID project_id attempts went from 4 to 17 across six repetitions.
+#
+# So the name carries no hex at all. Teardown deletes by recorded project_id, so per-run
+# uniqueness in the *name* is not required for correctness; the word suffix exists only so a
+# leftover project from a crashed run cannot make an agent's name lookup ambiguous, and so R6
+# can tell its two projects apart. `python -m evals.cleanup --prefix "EVAL "` still matches.
+EVAL_PROJECT_PREFIX = "EVAL "
+PROJECT_TITLES = ("Delivery Planning", "Platform Migration")
+# 64 words: one per run, derived from the seed so a name is reproducible from its run id.
+PROJECT_SUFFIX_WORDS = (
+    "Kestrel",
+    "Osprey",
+    "Falcon",
+    "Harrier",
+    "Merlin",
+    "Kite",
+    "Buzzard",
+    "Goshawk",
+    "Heron",
+    "Egret",
+    "Curlew",
+    "Plover",
+    "Godwit",
+    "Dunlin",
+    "Sanderling",
+    "Turnstone",
+    "Petrel",
+    "Fulmar",
+    "Gannet",
+    "Guillemot",
+    "Razorbill",
+    "Puffin",
+    "Skua",
+    "Tern",
+    "Swift",
+    "Martin",
+    "Swallow",
+    "Wagtail",
+    "Pipit",
+    "Dipper",
+    "Wren",
+    "Dunnock",
+    "Redstart",
+    "Whinchat",
+    "Wheatear",
+    "Fieldfare",
+    "Redwing",
+    "Blackcap",
+    "Chiffchaff",
+    "Firecrest",
+    "Treecreeper",
+    "Nuthatch",
+    "Jackdaw",
+    "Chough",
+    "Raven",
+    "Rook",
+    "Magpie",
+    "Jay",
+    "Linnet",
+    "Twite",
+    "Redpoll",
+    "Siskin",
+    "Crossbill",
+    "Hawfinch",
+    "Brambling",
+    "Yellowhammer",
+    "Corncrake",
+    "Lapwing",
+    "Woodcock",
+    "Snipe",
+    "Avocet",
+    "Oystercatcher",
+    "Shelduck",
+    "Wigeon",
+)
+
+
+def eval_project_name(run_prefix: str, *, second: bool = False) -> str:
+    """Build a seeded project's display name: readable, and never id-shaped.
+
+    Deterministic in ``run_prefix`` so the same run always produces the same name, which
+    keeps a resumed run and its teardown in agreement.
+    """
+    try:
+        index = int(str(run_prefix)[:8], 16)
+    except ValueError:
+        index = sum(ord(ch) for ch in str(run_prefix))
+    word = PROJECT_SUFFIX_WORDS[index % len(PROJECT_SUFFIX_WORDS)]
+    title = PROJECT_TITLES[1 if second else 0]
+    return f"{EVAL_PROJECT_PREFIX}{title} {word}"
+
+
 __all__ = [
+    "EVAL_PROJECT_PREFIX",
+    "PROJECT_SUFFIX_WORDS",
+    "PROJECT_TITLES",
+    "eval_project_name",
     "BLOCKING_REFERENCE_ADDRESS",
     "BLOCKING_SOURCE_TITLE",
     "BLOCKING_TARGET_TITLE",

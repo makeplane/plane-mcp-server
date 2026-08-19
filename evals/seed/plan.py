@@ -18,7 +18,7 @@ from .work_items import (
 def seed_plan(needs: set[str]) -> list[str]:
     """Human-readable seed plan for --dry-run (no network)."""
     lines = [
-        "project: EVAL {run8} (identifier EV{XXXX})",
+        "project: EVAL Delivery Planning {Word} (identifier EV{XXXX})",
     ]
     if "items" in needs:
         lines.append(f"items: {len(WORK_ITEM_FIXTURES)} work items (read truth randomised per row; default 4 urgent)")
@@ -52,7 +52,10 @@ def seed_plan(needs: set[str]) -> list[str]:
     if "release" in needs:
         lines.append(f"release: {RELEASE_NAME!r} with changelog body (2 entries as plain text)")
     if "second_project" in needs:
-        lines.append("second_project: EVAL {run8} B with random unequal open Bug counts across both projects (R6)")
+        lines.append(
+            "second_project: EVAL Platform Migration {Word} "
+            "with random unequal open Bug counts across both projects (R6)"
+        )
     if "leave_cycles_worklogs_off" in needs:
         lines.append(
             "feature_exclusions (S5): project cycles+worklogs OFF; workspace customers OFF "

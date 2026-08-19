@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -1666,3 +1667,35 @@ def _list_projects_two_page_pagination():
 )
 def test_list_projects_behaviours(case):
     case()
+
+
+def test_a_seeded_project_name_contains_nothing_that_looks_like_an_id():
+    """The name is all an agent gets, and it must not offer a substring to submit as an id.
+
+    Measured: with "EVAL 3c128f21" a weaker model sent project_id="EVAL 3c128f21" verbatim;
+    with "EVAL Delivery Planning (3c128f21)" it extracted the bare hex and sent that, 17
+    times across six repetitions. The hex was the bait either way, so it is gone.
+    """
+    from evals.core.fixtures import EVAL_PROJECT_PREFIX, PROJECT_SUFFIX_WORDS, eval_project_name
+
+    for run_prefix in ("3c128f21", "cad7f69b", "deadbeef", "00000000", "ffffffff"):
+        for second in (False, True):
+            name = eval_project_name(run_prefix, second=second)
+            assert name.startswith(EVAL_PROJECT_PREFIX), f"cleanup --prefix must still match: {name}"
+            # No hex run of 6+ characters, which is what the model was pattern-matching on.
+            assert not re.search(r"\b[0-9a-f]{6,}\b", name, re.I), name
+            # No bare digits at all: a number is the other thing an id looks like.
+            assert not re.search(r"\d", name), name
+            assert name.split()[-1] in PROJECT_SUFFIX_WORDS, name
+
+    # Deterministic in the run prefix, so a resumed run and its teardown agree on the name.
+    assert eval_project_name("3c128f21") == eval_project_name("3c128f21")
+    # The two projects stay distinguishable — R6's answer is a project name.
+    assert eval_project_name("3c128f21") != eval_project_name("3c128f21", second=True)
+
+
+def test_a_non_hex_run_prefix_still_produces_a_name():
+    """Never raise on the naming path: a fixture seed id shape change must not break seeding."""
+    from evals.core.fixtures import eval_project_name
+
+    assert eval_project_name("not-hex-at-all").startswith("EVAL ")
