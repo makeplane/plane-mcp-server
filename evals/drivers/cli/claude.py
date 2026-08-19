@@ -344,6 +344,7 @@ class ClaudeCliDriver(CliDriver):
         python_bin: str | None = None,
         permission_mode: str = "bypassPermissions",
         strict_mcp: bool = True,
+        builtin_tools: str | None = "",
         runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
         server_command: list[str] | None = None,
         use_proxy: bool = True,
@@ -352,6 +353,14 @@ class ClaudeCliDriver(CliDriver):
         self.claude_bin = claude_bin
         self.permission_mode = permission_mode
         self.strict_mcp = strict_mcp
+        # Which of Claude Code's own tools the agent keeps. Empty means none, which is
+        # what an eval of a *tool surface* wants: with Bash and Read in hand a model that
+        # cannot work the surface out reads the repo it is standing in, harvests the API
+        # key and calls Plane's REST API directly — measured, not hypothesised. Removing
+        # the built-ins also drops the total tool count under the threshold that defers
+        # MCP tools behind ToolSearch, so the surface arrives directly, as it does for
+        # every other driver. None keeps Claude Code's default set.
+        self.builtin_tools = builtin_tools
         # Full replacement for the MCP server launch (external surfaces under
         # benchmark): [command, *args]. None → this repo's `-m plane_mcp stdio`.
         super().__init__(
@@ -412,6 +421,9 @@ class ClaudeCliDriver(CliDriver):
         ]
         if self.strict_mcp:
             command.append("--strict-mcp-config")
+        if self.builtin_tools is not None:
+            # `=` form: --tools is variadic and would otherwise swallow the trailing prompt.
+            command.append(f"--tools={self.builtin_tools}")
         if model:
             command.extend(["--model", model])
         if system:

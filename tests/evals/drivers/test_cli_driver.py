@@ -1621,3 +1621,28 @@ def test_codex_nonzero_exit_is_not_scored_as_a_finished_attempt(tmp_path: Path):
         notes=[],
     )
     assert clean.stopped_reason == "end_turn"
+
+
+def _claude_command(**kw):
+    driver = ClaudeCliDriver(**kw)
+    launch = CliLaunch(cwd=Path("/tmp"), config_args=["--mcp-config", "/tmp/cfg.json"])
+    return driver.build_command("do the task", model="haiku", max_turns=8, system=None, launch=launch)
+
+
+def test_the_agent_gets_no_builtin_tools_by_default():
+    """An eval of a tool surface must not hand the agent a shell to route around it.
+
+    Measured: with Bash available, a model that could not work the surface out read the
+    repo it was standing in, harvested the API key from its own environment and called
+    Plane's REST API directly — the task verified as passed with zero MCP calls.
+    """
+    command = _claude_command()
+    assert "--tools=" in command, command
+    # The `=` form matters: --tools is variadic and the bare form eats the prompt.
+    assert not any(part == "--tools" for part in command), command
+    assert command[-1] == "do the task", command[-1]
+
+
+def test_builtin_tools_can_be_restored_or_named():
+    assert "--tools=" not in _claude_command(builtin_tools=None)
+    assert "--tools=Bash,Read" in _claude_command(builtin_tools="Bash,Read")
