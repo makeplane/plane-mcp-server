@@ -64,7 +64,14 @@ ACTIONS = (
         ("add_ids", "remove_ids"),
         note="pass at least one of add_ids or remove_ids; returns nothing, read back with list_workitems",
     ),
-    Action("transfer_workitems", ("project_id", "cycle_id", "new_cycle_id"), note="moves everything to new_cycle_id"),
+    Action(
+        "transfer_workitems",
+        ("project_id", "cycle_id", "new_cycle_id"),
+        note=(
+            "moves only the unfinished work items to new_cycle_id; the source cycle must have "
+            "ended first, so complete it before transferring or the call is rejected"
+        ),
+    ),
     Action("complete", ("project_id", "cycle_id"), note="sets end_date to today"),
     Action("archive", ("project_id", "cycle_id"), note="ends the cycle first if it is still running"),
     Action("unarchive", ("project_id", "cycle_id")),
