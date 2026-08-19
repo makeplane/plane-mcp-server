@@ -182,6 +182,10 @@ class SidecarRecorder:
         self.server_requests = 0
         self.child_killed = False
         self.pumps_alive = False
+        # Which streams were still pumping at finalization. A bare boolean cannot
+        # distinguish "the server may still have been talking to us" from "the client
+        # went away while our stdin read was parked", which are different facts.
+        self.pumps_alive_streams: set[str] = set()
         self.finalization_reason = "direct"
         self.finalization_signal: str | None = None
         self.finalized = False
@@ -366,6 +370,7 @@ class SidecarRecorder:
                 "tool_request_count": self._seq,
                 "child_killed": self.child_killed,
                 "pumps_alive": self.pumps_alive,
+                "pumps_alive_streams": sorted(self.pumps_alive_streams),
                 "finalization_reason": self.finalization_reason,
                 "finalization_signal": self.finalization_signal,
                 "evidence_trace_available": self.evidence_active,
@@ -767,10 +772,14 @@ def run_proxy(
         if rem > 0 and t_err is not None:
             t_err.join(timeout=rem)
 
-        pumps_still = any(t is not None and t.is_alive() for t in (t_in, t_out, t_err)) or not all(
-            e.is_set() if e is not None else True for e in (stdin_done, stdout_done, stderr_done)
-        )
-        recorder.pumps_alive = pumps_still
+        for name, thread, done in (
+            ("stdin", t_in, stdin_done),
+            ("stdout", t_out, stdout_done),
+            ("stderr", t_err, stderr_done),
+        ):
+            if (thread is not None and thread.is_alive()) or (done is not None and not done.is_set()):
+                recorder.pumps_alive_streams.add(name)
+        recorder.pumps_alive = bool(recorder.pumps_alive_streams)
         return map_child_returncode(child.returncode)
     except KeyboardInterrupt:
         # Preserve Python's existing SIGINT behaviour: unwind through the
@@ -793,10 +802,11 @@ def run_proxy(
                 pass
         # If pumps are still alive at deadline, note it; meta is still last row
         # (finalized flag drops any further appends from daemon pumps).
-        if t_out is not None or t_err is not None or t_in is not None:
-            still = any(t is not None and t.is_alive() for t in (t_in, t_out, t_err))
-            if still:
-                recorder.pumps_alive = True
+        for name, thread in (("stdin", t_in), ("stdout", t_out), ("stderr", t_err)):
+            if thread is not None and thread.is_alive():
+                recorder.pumps_alive_streams.add(name)
+        if recorder.pumps_alive_streams:
+            recorder.pumps_alive = True
         requested_signal = termination_signal() if termination_signal is not None else None
         if requested_signal is not None:
             _record_signal_finalization(recorder, requested_signal)

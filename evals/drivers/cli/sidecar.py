@@ -36,6 +36,31 @@ class ProxySidecarResult:
         yield self.call_source
 
 
+def _pumps_blocking(meta: dict[str, Any] | None) -> bool:
+    """Whether a still-running pump means the recording may be short.
+
+    Not every live pump is evidence of loss. A CLI that signals its MCP servers on exit
+    leaves the proxy's stdin read parked on a client that will never write again — the
+    trace is complete with respect to everything that client actually sent, and an
+    in-flight request that never got its answer is already counted as an unmatched
+    response. What does imply loss is a live *output* pump, because the server may have
+    been mid-reply when the deadline expired.
+
+    Sidecars written before the proxy recorded per-stream detail carry only the boolean,
+    so they keep the old, stricter reading rather than being reinterpreted after the fact.
+    """
+    if meta is None:
+        return False
+    if not meta.get("pumps_alive"):
+        return False
+    streams = meta.get("pumps_alive_streams")
+    if not isinstance(streams, list):
+        return True
+    if {"stdout", "stderr"} & {str(name) for name in streams}:
+        return True
+    return str(meta.get("finalization_reason") or "") not in ("signal", "child_exit")
+
+
 def _nonnegative_int(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
@@ -231,6 +256,7 @@ def load_proxy_sidecar(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
             "unexpected_seq": 0,
             "invalid_meta_fields": 0,
             "pumps_alive": bool(meta.get("pumps_alive")) if meta is not None else False,
+            "pumps_blocking": _pumps_blocking(meta),
             "last_seq": last_seq,
             "tool_request_count": tool_request_count,
         }
@@ -263,7 +289,7 @@ def load_proxy_sidecar(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
             or segment["torn_line"]
             or segment["skipped_rows"] > 0
             or any((segment.get(key) or 0) > 0 for key in fatal_counts)
-            or segment["pumps_alive"]
+            or segment["pumps_blocking"]
             else "complete"
         )
         session_calls.sort(
@@ -287,6 +313,7 @@ def load_proxy_sidecar(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
     status["proxy_meta_not_final"] = any(segment["proxy_meta_not_final"] for segment in session_statuses)
     status["torn_line"] = any(segment["torn_line"] for segment in session_statuses)
     status["pumps_alive"] = any(segment["pumps_alive"] for segment in session_statuses)
+    status["pumps_blocking"] = any(segment["pumps_blocking"] for segment in session_statuses)
     aggregate_keys = (
         "skipped_rows",
         *counter_keys,
@@ -367,7 +394,7 @@ def _incompleteness_note(status: dict[str, Any]) -> str:
         value = status.get(key)
         if value and not (key == "proxy_meta_count" and value == 1):
             parts.append(f"{key}={int(value)}")
-    if status.get("pumps_alive"):
+    if status.get("pumps_blocking"):
         parts.append("pumps_alive=1")
     return ":".join(parts)
 

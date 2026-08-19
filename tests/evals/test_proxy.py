@@ -11,6 +11,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -22,6 +23,7 @@ from evals.core.evidence import (
 )
 from evals.core.results import AgentRun, TaskResult, agent_run_to_task_result
 from evals.drivers.cli.sidecar import (
+    _pumps_blocking,
     apply_proxy_sidecar,
     ensure_proxy_pythonpath,
     load_proxy_sidecar,
@@ -1961,3 +1963,50 @@ def test_a_response_the_agent_never_received_is_not_authoritative_evidence(tmp_p
     _calls, status = load_proxy_sidecar(tmp_path / "undelivered.jsonl")
     assert status["undelivered_lines"] == 1
     assert status["state"] == "incomplete"
+
+
+# ---------------------------------------------------------------------------
+# Which pump is alive at shutdown decides whether a trace is short or merely
+# interrupted. Claude Code signals its MCP servers on exit, so the proxy's stdin
+# read is parked on a client that will never write again — every claude-cli row
+# was charged to infrastructure for a pump that could not have lost anything.
+# ---------------------------------------------------------------------------
+
+
+def _meta(**kw: Any) -> dict[str, Any]:
+    base = {"pumps_alive": True, "pumps_alive_streams": ["stdin"], "finalization_reason": "signal"}
+    base.update(kw)
+    return base
+
+
+@pytest.mark.parametrize(
+    ("meta", "blocking", "why"),
+    [
+        pytest.param(None, False, "no meta row at all", id="no-meta"),
+        pytest.param(
+            _meta(pumps_alive=False, pumps_alive_streams=[]), False, "nothing was pumping", id="quiet-shutdown"
+        ),
+        # The case that made every claude-cli run an infra error.
+        pytest.param(_meta(), False, "client signalled away; stdin cannot deliver more", id="stdin-parked-on-signal"),
+        pytest.param(
+            _meta(finalization_reason="child_exit"), False, "server gone; same reasoning", id="stdin-on-child-exit"
+        ),
+        # A live stdin pump with no reason for the client to have stopped is still suspect.
+        pytest.param(
+            _meta(finalization_reason="normal_eof"), True, "EOF should have ended the read", id="stdin-after-clean-eof"
+        ),
+        # Output pumps carry the server's replies, so a live one may mean a lost response.
+        pytest.param(_meta(pumps_alive_streams=["stdout"]), True, "server may have been mid-reply", id="stdout-alive"),
+        pytest.param(_meta(pumps_alive_streams=["stderr"]), True, "same for stderr", id="stderr-alive"),
+        pytest.param(
+            _meta(pumps_alive_streams=["stdin", "stdout"]), True, "one bad stream is enough", id="mixed-streams"
+        ),
+        # Sidecars written before per-stream detail keep the old stricter reading rather
+        # than being silently reinterpreted in their favour.
+        pytest.param(
+            {"pumps_alive": True, "finalization_reason": "signal"}, True, "legacy file", id="pre-detail-sidecar"
+        ),
+    ],
+)
+def test_only_a_pump_that_could_have_lost_something_invalidates_the_trace(meta, blocking, why):
+    assert _pumps_blocking(meta) is blocking, why
