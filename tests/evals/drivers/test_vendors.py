@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ from evals.drivers import KNOWN_DRIVERS, get_driver
 from evals.drivers.api.driver import ApiDriver
 from evals.drivers.cli.antigravity import (
     AntigravityCliDriver,
-    prepare_antigravity_fake_home,
+    prepare_antigravity_gemini_dir,
     write_antigravity_mcp_config,
 )
 from evals.drivers.cli.claude import (
@@ -923,16 +924,16 @@ def test_get_driver_api():
     assert isinstance(get_driver("codex-cli"), CodexCliDriver)
 
 
-def _antigravity_driver_writes_mcp_config_under_isolated_home(tmp_path):
+def _antigravity_driver_isolates_via_gemini_dir_not_home(tmp_path):
     seen: dict = {}
 
     def fake_run(cmd, **kwargs):
         seen["cmd"] = cmd
-        env = kwargs.get("env") or {}
-        seen["env"] = env
-        home = env.get("HOME")
-        if home:
-            cfg = Path(home) / ".gemini" / "config" / "mcp_config.json"
+        seen["env"] = kwargs.get("env") or {}
+        flag = next((a for a in cmd if a.startswith("--gemini_dir=")), None)
+        seen["gemini_dir"] = flag
+        if flag:
+            cfg = Path(flag.split("=", 1)[1]) / "config" / "mcp_config.json"
             seen["mcp_cfg"] = json.loads(cfg.read_text()) if cfg.is_file() else None
         return subprocess.CompletedProcess(cmd, 0, stdout='{"result":"hi"}', stderr="")
 
@@ -945,17 +946,29 @@ def _antigravity_driver_writes_mcp_config_under_isolated_home(tmp_path):
         cwd=tmp_path,
     )
     assert seen["cmd"][0] == "agy"
-    assert "-p" in seen["cmd"]
-    assert "--output-format" in seen["cmd"]
-    assert "json" in seen["cmd"]
-    assert "--model" in seen["cmd"] and "gemini-2.5" in seen["cmd"]
+    assert "--output-format=json" in seen["cmd"]
+    assert "--dangerously-skip-permissions" in seen["cmd"]
+    assert "--model=gemini-2.5" in seen["cmd"]
+    # The prompt must be the VALUE of --print: agy parses with Go's flag package, so a
+    # bare "-p" followed by other flags eats the next flag as its prompt and drops the
+    # real one, taking --dangerously-skip-permissions down with it.
+    assert seen["cmd"][-1] == "--print=do it"
+    assert not any(a in ("-p", "--print") for a in seen["cmd"])
     assert "no_turn_cap" in run.notes
+    # The flag carries an absolute path and precedes the -p subcommand flags.
+    assert seen["gemini_dir"] is not None
+    assert Path(seen["gemini_dir"].split("=", 1)[1]).is_absolute()
+    assert seen["cmd"].index(seen["gemini_dir"]) == 1
+    # HOME must stay the real one: agy reads its OAuth token from the macOS login
+    # keychain, which Security resolves under $HOME/Library/Keychains. Overriding it
+    # made the keychain unfindable and every run failed unauthenticated.
+    assert seen["env"].get("HOME") == os.environ.get("HOME")
     assert seen.get("mcp_cfg") is not None
     assert "mcpServers" in seen["mcp_cfg"]
     assert "evals.proxy" in " ".join(seen["mcp_cfg"]["mcpServers"]["plane"]["args"])
 
 
-def _antigravity_fallback_runner_timeout_harvests(tmp_path):
+def _antigravity_timeout_still_harvests_proxy_rows(tmp_path):
     call_row = {
         "tool": "g_tool",
         "args": {},
@@ -975,26 +988,20 @@ def _antigravity_fallback_runner_timeout_harvests(tmp_path):
     }
 
     def fake_run(cmd, **kwargs):
-        run_env = kwargs.get("env") or {}
-        home = run_env.get("HOME")
-        if home:
-            # First attempt includes env= — plant sidecar from dual-written mcp config,
-            # then reject env so the driver retries without it.
-            for rel in (
-                Path(home) / ".gemini" / "config" / "mcp_config.json",
-                Path(home) / ".gemini" / "antigravity-cli" / "mcp_config.json",
-            ):
-                if rel.is_file():
-                    cfg = json.loads(rel.read_text())
-                    args = cfg["mcpServers"]["plane"]["args"]
-                    side = Path(args[args.index("--log") + 1])
-                    side.write_text(
-                        "\n".join(json.dumps(r) for r in (call_row, meta)) + "\n",
-                        encoding="utf-8",
-                    )
-                    break
-            raise TypeError("runner does not accept env=")
-        # Fallback call (no env) times out — outer except must still harvest.
+        # Plant the sidecar the way a real run would have, from whichever of the two
+        # dual-written configs is present, then time out. The rows must still be
+        # harvested: a timed-out agy has usually already made its calls.
+        flag = next(a for a in cmd if a.startswith("--gemini_dir="))
+        gemini_dir = Path(flag.split("=", 1)[1])
+        for rel in (
+            gemini_dir / "config" / "mcp_config.json",
+            gemini_dir / "antigravity-cli" / "mcp_config.json",
+        ):
+            if rel.is_file():
+                args = json.loads(rel.read_text())["mcpServers"]["plane"]["args"]
+                side = Path(args[args.index("--log") + 1])
+                side.write_text("\n".join(json.dumps(r) for r in (call_row, meta)) + "\n", encoding="utf-8")
+                break
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
 
     driver = AntigravityCliDriver(runner=fake_run, use_proxy=True, python_bin=sys.executable)
@@ -1014,8 +1021,8 @@ def _antigravity_fallback_runner_timeout_harvests(tmp_path):
 @pytest.mark.parametrize(
     "case",
     case_params(
-        _antigravity_driver_writes_mcp_config_under_isolated_home,
-        _antigravity_fallback_runner_timeout_harvests,
+        _antigravity_driver_isolates_via_gemini_dir_not_home,
+        _antigravity_timeout_still_harvests_proxy_rows,
     ),
 )
 def test_antigravity_behaviours(case, tmp_path):
@@ -1076,39 +1083,31 @@ def test_opencode_driver_writes_project_config(tmp_path: Path):
     assert "evals.proxy" in " ".join(data["mcp"]["plane"]["command"])
 
 
-def test_prepare_antigravity_fake_home_dual_write_and_auth_only(tmp_path: Path):
+def test_prepare_antigravity_gemini_dir_dual_writes_and_leaves_home_alone(tmp_path: Path):
     real_home = tmp_path / "real"
     cli = real_home / ".gemini" / "antigravity-cli"
     cli.mkdir(parents=True)
-    token_path = cli / "antigravity-oauth-token"
-    token_path.write_text("secret", encoding="utf-8")
-    # Snapshot real home before setup — must be byte-identical after.
+    (cli / "antigravity-oauth-token").write_text("secret", encoding="utf-8")
+    (cli / "mcp_config.json").write_text('{"mcpServers": {"other": {}}}', encoding="utf-8")
     before = {p.relative_to(real_home): p.read_bytes() for p in real_home.rglob("*") if p.is_file()}
 
-    fake = tmp_path / "fake"
-    prepare_antigravity_fake_home(
-        fake,
+    gemini_dir = tmp_path / "isolated" / "gemini"
+    prepare_antigravity_gemini_dir(
+        gemini_dir,
         command="python",
         args=["-m", "evals.proxy", "--log", "s", "--", "x"],
         env={"PLANE_API_KEY": "k"},
-        real_home=real_home,
     )
-    p1 = fake / ".gemini" / "config" / "mcp_config.json"
-    p2 = fake / ".gemini" / "antigravity-cli" / "mcp_config.json"
+    p1 = gemini_dir / "config" / "mcp_config.json"
+    p2 = gemini_dir / "antigravity-cli" / "mcp_config.json"
     assert p1.is_file() and p2.is_file()
-    fake_cli = fake / ".gemini" / "antigravity-cli"
-    assert fake_cli.is_dir() and not fake_cli.is_symlink()
-    # Auth artifact is a plain COPY — never a symlink (no write-through path).
-    token = fake_cli / "antigravity-oauth-token"
-    assert token.is_file() and not token.is_symlink()
-    assert token.read_text(encoding="utf-8") == "secret"
-    # Writing the fake token must not mutate the real one.
-    token.write_text("mutated", encoding="utf-8")
-    assert token_path.read_text(encoding="utf-8") == "secret"
-    # mcp_config is a real file in the fake tree, not inside real home.
-    assert not (cli / "mcp_config.json").exists()
-    data = json.loads(p1.read_text())
-    assert data["mcpServers"]["plane"]["command"] == "python"
-    # Real home byte-for-byte untouched (including oauth token).
+    for path in (p1, p2):
+        data = json.loads(path.read_text())
+        assert data["mcpServers"]["plane"]["command"] == "python"
+        # Only our server — the user's own entries are not carried over.
+        assert list(data["mcpServers"]) == ["plane"]
+    # Nothing is copied out of the real home and nothing written into it: auth comes
+    # from the login keychain, which stays reachable because HOME is never moved.
+    assert not (gemini_dir / "antigravity-cli" / "antigravity-oauth-token").exists()
     after = {p.relative_to(real_home): p.read_bytes() for p in real_home.rglob("*") if p.is_file()}
     assert after == before

@@ -700,14 +700,14 @@ def test_server_cmd_reaches_all_cli_drivers(tmp_path: Path):
                     if cfg.is_file():
                         bag["cfg"] = json.loads(cfg.read_text())
             elif driver_cls is AntigravityCliDriver:
-                env = kwargs.get("env") or {}
-                home = env.get("HOME")
-                if home:
+                flag = next((a for a in cmd if a.startswith("--gemini_dir=")), None)
+                if flag:
+                    gemini_dir = Path(flag.split("=", 1)[1])
                     for rel in (
-                        Path(".gemini") / "config" / "mcp_config.json",
-                        Path(".gemini") / "antigravity-cli" / "mcp_config.json",
+                        Path("config") / "mcp_config.json",
+                        Path("antigravity-cli") / "mcp_config.json",
                     ):
-                        p = Path(home) / rel
+                        p = gemini_dir / rel
                         if p.is_file():
                             bag.setdefault("cfgs", []).append(json.loads(p.read_text()))
             elif driver_cls is CodexCliDriver:
@@ -1013,7 +1013,7 @@ def test_opencode_isolated_environment_effective_mcp_server_list_is_exactly_plan
     [
         pytest.param(ClaudeCliDriver, "claude_bin", id="claude-config"),
         pytest.param(CodexCliDriver, "codex_bin", id="codex-argv"),
-        pytest.param(AntigravityCliDriver, "agy_bin", id="antigravity-home-config"),
+        pytest.param(AntigravityCliDriver, "agy_bin", id="antigravity-gemini-dir-config"),
         pytest.param(OpencodeCliDriver, "opencode_bin", id="opencode-cwd-config"),
     ],
 )
@@ -1042,12 +1042,13 @@ def test_cli_agent_surfaces_never_contain_evidence_truth(
             server = config["mcp_servers"]["plane"]
             proxy_args = [server["command"], *server["args"]]
         elif Driver is AntigravityCliDriver:
-            fake_home = Path(kwargs["env"]["HOME"])
+            flag = next(a for a in cmd if a.startswith("--gemini_dir="))
+            gemini_dir = Path(flag.split("=", 1)[1])
             for rel in (
-                Path(".gemini/config/mcp_config.json"),
-                Path(".gemini/antigravity-cli/mcp_config.json"),
+                Path("config/mcp_config.json"),
+                Path("antigravity-cli/mcp_config.json"),
             ):
-                configs.append(json.loads((fake_home / rel).read_text()))
+                configs.append(json.loads((gemini_dir / rel).read_text()))
             proxy_args = configs[0]["mcpServers"]["plane"]["args"]
         else:
             config_path = Path(kwargs["cwd"]) / "opencode.json"
@@ -1064,7 +1065,8 @@ def test_cli_agent_surfaces_never_contain_evidence_truth(
             assert set(configs[0]["mcp_servers"]) == {"plane"}
         elif Driver is AntigravityCliDriver:
             assert set(configs[0]["mcpServers"]) == {"plane"}
-            assert all(kwargs["env"].get(name) for name in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"))
+            # HOME is intentionally the real one here — see the keychain note on the driver.
+            assert Path(gemini_dir).is_absolute()
         else:
             assert set(configs[0]["mcp"]) == {"plane"}
             assert all(kwargs["env"].get(name) for name in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"))
@@ -1129,8 +1131,8 @@ def test_antigravity_effective_config_exclusivity_is_documented_as_unverifiable(
     driver_doc = AntigravityCliDriver.__doc__ or ""
     design = (REPO / "evals" / "DESIGN.md").read_text(encoding="utf-8")
 
-    assert "1.1.13 has no MCP or effective-config introspection command" in driver_doc
-    assert "explicitly unverifiable" in driver_doc
+    assert "has no MCP or effective-config introspection command" in driver_doc
+    assert "cannot be proven by real-binary readback" in driver_doc
     assert "| Antigravity | **Unverifiable.**" in design
     assert "neither the harness nor this design treats that as observed effective-config exclusivity" in design
     assert 'The Antigravity "unverifiable" regression test is documentation coverage' in design

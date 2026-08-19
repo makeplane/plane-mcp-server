@@ -66,7 +66,7 @@ errors, and observed tool distributions use the same rules as local-server rows.
 | `api` | Owned API + MCP loop | Provider-neutral; tiers resolve for `--provider anthropic` (default) or `openai` |
 | `codex-cli` | OpenAI Codex CLI | `standard` and `fast` resolve to verified GPT-5.6 IDs |
 | `claude-cli` | Claude Code CLI | `standard` resolves to `sonnet`; `fast` resolves to `haiku`; isolated HOME/config/XDG roots and strict MCP config |
-| `antigravity-cli` | Antigravity CLI (`agy`) | Verified against `agy models`; isolated HOME/XDG and generated config, but 1.1.13 has no effective-config readback, so exclusivity is unverifiable |
+| `antigravity-cli` | Antigravity CLI (`agy`) | Verified against `agy models`; isolated via `--gemini_dir` with HOME left real (agy's token lives in the macOS login keychain), but agy has no effective-config readback, so exclusivity is unverifiable |
 | `opencode-cli` | OpenCode | Tiers are intentionally unmapped; pass an explicit ID listed by `opencode models` |
 
 ### Model tiers

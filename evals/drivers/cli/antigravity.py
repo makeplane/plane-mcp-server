@@ -36,51 +36,31 @@ def write_antigravity_mcp_config(
     path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
-def prepare_antigravity_fake_home(
-    fake_home: Path,
+def prepare_antigravity_gemini_dir(
+    gemini_dir: Path,
     *,
     command: str,
     args: list[str],
     env: dict[str, str],
-    real_home: Path | None = None,
 ) -> None:
-    """Build an isolated HOME for agy with MCP config plus copied auth artifacts.
+    """Build an isolated ``--gemini_dir`` tree for agy holding only our MCP server.
 
-    Writes mcp_config.json to both documented paths (~/.gemini/config/ and
-    ~/.gemini/antigravity-cli/) since which one agy reads is unsettled. antigravity-cli is
-    a real directory and the oauth token a plain copy, never symlinks — otherwise a token
-    refresh or a runtime log would write through into the user's real home.
+    Writes mcp_config.json to both paths agy reads under its gemini dir (``config/``
+    and ``antigravity-cli/``) since which one wins is unsettled; agy creates an empty
+    ``config/mcp_config.json`` itself when none is present.
+
+    This replaces an isolated HOME. agy keeps its OAuth token in the macOS login
+    keychain, which Security resolves through ``$HOME/Library/Keychains`` — so
+    overriding HOME made the keychain unfindable ("A keychain cannot be found to store
+    \"antigravity\"") and every run failed unauthenticated. ``--gemini_dir`` moves only
+    agy's own state, leaving HOME real and the credential reachable.
     """
-    real_home = real_home or Path.home()
-    gemini_root = fake_home / ".gemini"
-    gemini_root.mkdir(parents=True, exist_ok=True)
-
-    real_cli = real_home / ".gemini" / "antigravity-cli"
-    fake_cli = gemini_root / "antigravity-cli"
-    # Always a real directory — never symlink the whole tree.
-    if fake_cli.is_symlink() or fake_cli.is_file():
-        fake_cli.unlink()
-    fake_cli.mkdir(parents=True, exist_ok=True)
-
-    # Share auth via plain COPY only — never symlink (in-place token refresh
-    # must not write through into the real home).
-    if real_cli.is_dir():
-        for name in ("antigravity-oauth-token",):
-            src = real_cli / name
-            dst = fake_cli / name
-            if src.is_file() and not dst.exists():
-                try:
-                    dst.write_bytes(src.read_bytes())
-                except OSError:
-                    pass
-
-    # Dual write as real files (not through any symlink).
     for rel in (
-        Path(".gemini") / "config" / "mcp_config.json",
-        Path(".gemini") / "antigravity-cli" / "mcp_config.json",
+        Path("config") / "mcp_config.json",
+        Path("antigravity-cli") / "mcp_config.json",
     ):
         write_antigravity_mcp_config(
-            fake_home / rel,
+            gemini_dir / rel,
             command=command,
             args=args,
             env=env,
@@ -92,12 +72,18 @@ class AntigravityCliDriver(CliDriver):
     """Run tasks via Google Antigravity CLI (``agy``).
 
     Probed 2026-08-12: -p headless, --output-format text|json|stream-json, --model,
-    --dangerously-skip-permissions. MCP only via ~/.gemini/config/mcp_config.json with no
-    CLI flag, hence HOME isolation; no turn-cap flag, so hit_max_turns=False plus a note.
-    Tool calls come from the proxy sidecar, not from parsing agy stdout. Antigravity CLI
-    1.1.13 has no MCP or effective-config introspection command, so its server exclusivity
-    cannot be proven by real-binary readback: it is explicitly unverifiable and supported
-    only by isolated HOME/XDG roots plus inspection of the generated files.
+    --dangerously-skip-permissions. No turn-cap flag, so hit_max_turns=False plus a note.
+    Tool calls come from the proxy sidecar, not from parsing agy stdout.
+
+    MCP config is not a flag, so the config must be planted somewhere agy will read.
+    Re-probed 2026-08-19 on 1.1.15: the undocumented ``--gemini_dir`` relocates agy's
+    whole state tree, which isolates the config without touching HOME. It must be an
+    absolute path — agy logs "must be an absolute path" and silently falls back to the
+    real one otherwise, which would hand the agent the user's own servers.
+
+    Antigravity CLI has no MCP or effective-config introspection command, so server
+    exclusivity still cannot be proven by real-binary readback: it rests on the isolated
+    gemini dir plus inspection of the generated files.
     """
 
     name = "antigravity-cli"
@@ -133,27 +119,24 @@ class AntigravityCliDriver(CliDriver):
         server_command: list[str],
         child_env: dict[str, str],
     ) -> CliLaunch:
-        fake_home = temp_dir / "home"
-        prepare_antigravity_fake_home(
-            fake_home,
+        # Absolute, because agy ignores a relative --gemini_dir and falls back to the
+        # real one; temp_dir is already absolute but resolve() makes that a guarantee
+        # rather than a caller's promise.
+        gemini_dir = (temp_dir / "gemini").resolve()
+        prepare_antigravity_gemini_dir(
+            gemini_dir,
             command=server_command[0],
             args=server_command[1:],
             env=child_env,
         )
-        xdg_roots = {
-            name: temp_dir / name.lower().replace("_home", "")
-            for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
-        }
-        for directory in xdg_roots.values():
-            directory.mkdir(parents=True, exist_ok=True)
-        run_env = {
-            **os.environ,
-            "HOME": str(fake_home),
-            **{name: str(directory) for name, directory in xdg_roots.items()},
-        }
+        run_env = None
         if "PATH" in child_env:
-            run_env["PATH"] = child_env["PATH"]
-        return CliLaunch(cwd=task_cwd, env=run_env)
+            run_env = {**os.environ, "PATH": child_env["PATH"]}
+        return CliLaunch(
+            cwd=task_cwd,
+            config_args=[f"--gemini_dir={gemini_dir}"],
+            env=run_env,
+        )
 
     def build_command(
         self,
@@ -164,34 +147,27 @@ class AntigravityCliDriver(CliDriver):
         system: str | None,
         launch: CliLaunch,
     ) -> list[str]:
-        del max_turns, launch
+        del max_turns
         full_prompt = prompt if not system else f"{system}\n\n{prompt}"
+        # Every string flag takes the ``--flag=value`` form. agy parses with Go's flag
+        # package, where a string flag consumes the next argv entry: written as
+        # ``-p <prompt>`` with other flags after it, ``-p`` ate ``--output-format``, the
+        # real prompt became a stray positional that ended flag parsing, and
+        # --dangerously-skip-permissions never took effect. agy then answered a question
+        # about its own CLI and denied its own tool calls. Keeping value and flag in one
+        # argv entry makes the ordering irrelevant.
         command = [
             self.agy_bin,
-            "-p",
-            "--output-format",
-            "json",
+            # --gemini_dir chooses the state tree agy reads everything else out of.
+            *launch.config_args,
+            "--output-format=json",
             "--dangerously-skip-permissions",
         ]
         if model:
-            command.extend(["--model", model])
-        command.append(full_prompt)
+            command.append(f"--model={model}")
+        # Last, so nothing can be mistaken for its value.
+        command.append(f"--print={full_prompt}")
         return command
-
-    def invoke_cli(
-        self,
-        command: list[str],
-        *,
-        launch: CliLaunch,
-        timeout_s: int,
-    ) -> subprocess.CompletedProcess[str]:
-        try:
-            return super().invoke_cli(command, launch=launch, timeout_s=timeout_s)
-        except TypeError:
-            # Some test runners reject ``env=``; retry without it. A timeout
-            # from this fallback still reaches the template's harvest path.
-            fallback = CliLaunch(cwd=launch.cwd, config_args=launch.config_args)
-            return super().invoke_cli(command, launch=fallback, timeout_s=timeout_s)
 
     def parse_output(
         self,
@@ -220,6 +196,6 @@ class AntigravityCliDriver(CliDriver):
 
 __all__ = [
     "AntigravityCliDriver",
-    "prepare_antigravity_fake_home",
+    "prepare_antigravity_gemini_dir",
     "write_antigravity_mcp_config",
 ]

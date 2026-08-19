@@ -246,11 +246,11 @@ effective-config evidence differs by vendor:
 | Claude | **Readback-supported, not behaviorally proven for the evaluated invocation.** Real `claude mcp list` reads the same isolated `.claude.json` and observes only `plane`. The evaluated `claude -p` receives that file plus `--strict-mcp-config`; exclusion of project/ambient MCP servers rests on the CLI's documented strict-config contract, not a forbidden-server probe of that invocation. HOME, `CLAUDE_CONFIG_DIR`, and all XDG roots are isolated. |
 | Codex | Proven by real `codex mcp list --json` readback under the isolated Codex home. |
 | OpenCode | Proven by real `opencode debug config` readback under isolated HOME/XDG roots and the generated project config. |
-| Antigravity | **Unverifiable.** Antigravity CLI 1.1.13 has no MCP/effective-config introspection command. The harness isolates HOME/XDG roots and inspects generated files, but neither the harness nor this design treats that as observed effective-config exclusivity. |
+| Antigravity | **Unverifiable.** Antigravity CLI has no MCP/effective-config introspection command. The harness relocates agy's whole state tree with the undocumented `--gemini_dir` and inspects generated files, but neither the harness nor this design treats that as observed effective-config exclusivity. HOME is deliberately *not* isolated: agy keeps its OAuth token in the macOS login keychain, which Security resolves under `$HOME/Library/Keychains`, so an isolated HOME made the credential unfindable and every run failed unauthenticated. |
 
 The Antigravity "unverifiable" regression test is documentation coverage: it guards this
-claim, not runtime behavior. Separate behavioral tests cover HOME/XDG isolation and generated
-file placement, but those still cannot observe Antigravity's effective server set.
+claim, not runtime behavior. Separate behavioral tests cover the isolated gemini dir and
+generated file placement, but those still cannot observe Antigravity's effective server set.
 
 Several loop rules are deliberately centralized in `ApiDriver`:
 
