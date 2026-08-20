@@ -224,6 +224,58 @@ def test_a_class_survives_every_hop_from_proxy_to_report(tmp_path):
     assert split_errors(reloaded.calls)["surface"] == 1, "the report did not see it"
 
 
+def test_request_args_are_recorded_only_alongside_a_recorded_result(tmp_path):
+    """A recorded refusal that cannot be attributed to a target answers half a question.
+
+    W7 failed reproducibly with workitem_link.create reporting success while the link was
+    absent, and the two candidate explanations -- wrong target, or a create that does not
+    persist -- were indistinguishable because only args_chars was kept. Args now ride along
+    with a recorded payload, and stay out when payloads are off: the same hop chain as
+    error_class, which is where a field of this kind gets silently dropped.
+    """
+    import json
+
+    from evals.core.results import AgentRun, TaskResult, Usage, agent_run_to_task_result
+    from evals.drivers.cli.sidecar import load_proxy_sidecar
+
+    args = {"action": "create", "workitem_id": "wi-42", "url": "https://example.com/eval/runbook-w7"}
+
+    def row_for(*, with_payload: bool) -> dict:
+        row = {
+            "tool": "workitem_link",
+            "args": args,
+            "is_error": False,
+            "result_chars": 88,
+            "duration_ms": 12,
+            "seq": 1,
+        }
+        if with_payload:
+            row["result_text"] = '{"content":[{"type":"text","text":"link created"}]}'
+        return row
+
+    def roundtrip(*, with_payload: bool) -> TaskResult:
+        sidecar = tmp_path / f"sidecar-{with_payload}.jsonl"
+        sidecar.write_text(json.dumps(row_for(with_payload=with_payload)) + "\n", encoding="utf-8")
+        calls, _status = load_proxy_sidecar(sidecar)
+        assert calls, "the sidecar reader produced no calls"
+        result = agent_run_to_task_result(
+            AgentRun(calls=calls, final_text="done", usage=Usage(), stopped_reason="end_turn")
+        )
+        return TaskResult.from_row(json.loads(json.dumps(result.to_row())))
+
+    recorded = roundtrip(with_payload=True)
+    assert recorded.calls[0].args_json is not None, "args were dropped somewhere in the chain"
+    assert json.loads(recorded.calls[0].args_json) == args
+    # The target is the point: without it the record cannot say which item was linked.
+    assert "wi-42" in recorded.calls[0].args_json
+
+    # Default stays metrics-only. args_chars is still there; the body is not.
+    plain = roundtrip(with_payload=False)
+    assert plain.calls[0].args_json is None, "args leaked into a run that did not ask for payloads"
+    assert plain.calls[0].args_chars > 0
+    assert plain.calls[0].action == "create", "action is kept regardless — it is half the tool choice"
+
+
 def test_a_refusal_the_server_called_a_success_is_still_counted():
     """The server answers a malformed call with a plain result whose text says
     "Error", so the protocol reports success. Roughly 47 per battery arrived that

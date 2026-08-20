@@ -143,8 +143,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--record-result-payloads",
         action="store_true",
         help=(
-            "CLI drivers only: record serialized tool-result text for tokenizer counting "
-            "(off by default; sidecars may contain live workspace data)"
+            "CLI drivers only: record serialized tool-result text for tokenizer counting, and "
+            "the request args beside it so a recorded result can be attributed to its target "
+            "(off by default; sidecars and rows may contain live workspace data)"
         ),
     )
     p.add_argument("--out", type=str, default=None, help="JSONL output path")

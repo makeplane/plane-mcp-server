@@ -109,6 +109,10 @@ class CallRecord:
     raw_tool: str | None = None
     # Which kind of "no" an errored call received; None when the call succeeded.
     error_class: str | None = None
+    # The request body, recorded only under --record-result-payloads. Args are metrics-only
+    # by default (see args_chars); without the request, a recorded refusal can be read but
+    # not attributed to the target it names, which is the question a payload is kept to answer.
+    args_json: str | None = None
     result_tokens_skipped: str | None = None
     # None means the response was not checked; [] means checked with no match.
     observed_sentinels: list[str] | None = None
@@ -276,6 +280,8 @@ class TaskResult:
                 item["result_tokens_skipped"] = call.result_tokens_skipped
             if call.error_class is not None:
                 item["error_class"] = call.error_class
+            if call.args_json is not None:
+                item["args_json"] = call.args_json
             if call.observed_sentinels is not None:
                 item["observed_sentinels"] = list(call.observed_sentinels)
             calls.append(item)
@@ -379,6 +385,7 @@ class TaskResult:
                     ),
                     duration_ms=raw.get("duration_ms"),
                     action=(str(raw["action"]) if raw.get("action") is not None else None),
+                    args_json=(str(raw["args_json"]) if raw.get("args_json") is not None else None),
                     result_tokens_skipped=(
                         str(raw["result_tokens_skipped"]) if raw.get("result_tokens_skipped") is not None else None
                     ),
@@ -588,6 +595,15 @@ def agent_run_to_task_result(
         # tool choice — keep it (args content is otherwise not persisted).
         if isinstance(args, dict) and isinstance(args.get("action"), str):
             rec.action = args["action"]
+        # Under --record-result-payloads the proxy has already put the result body on the row,
+        # so the request that produced it is the other half of the same record. Keyed off
+        # result_text rather than a new flag: that is the signal payload recording is on, and
+        # a recorded response with no recorded request cannot be attributed to a target.
+        if isinstance(c.get("result_text"), str) and isinstance(args, dict) and args:
+            try:
+                rec.args_json = json.dumps(args, default=str, ensure_ascii=False)
+            except Exception:
+                rec.args_json = str(args)
         calls.append(rec)
 
     client_tool_calls: list[CallRecord] = []
