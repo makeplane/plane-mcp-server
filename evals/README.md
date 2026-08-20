@@ -172,6 +172,14 @@ deltas in A/B output and task IDs for investigation. This is a proxy, not a pure
 counter: MCP `is_error` also marks correct expected failures, while a successful call to the
 wrong tool is invisible to it.
 
+Because one count conflates three different things, the same reports break errored calls into
+**surface friction** (a well-formed call the API refused on meaning — the number to act on),
+**navigation** (the schema correcting a malformed call), **answered existence questions** (a
+first absent read, which is an answer rather than an obstacle), plus `other` and
+`unclassified`. A non-zero `unclassified` prints a "split incomplete" line, so zero surface
+friction never stands in for nothing having been classified — including when reading a result
+file recorded before the split existed. See DESIGN.md for the classification rules.
+
 Every result row carries a `battery` fingerprint derived from the selected catalog's task IDs,
 prompts, and catalog revision, plus a `task_fingerprint` over that row's task ID, prompt, and
 fixture names. The battery contains exactly what the agent is asked and no expectation about

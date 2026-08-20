@@ -81,6 +81,25 @@ zero-attempt task has an undefined rate rather than an invented zero rate. `is_e
 MCP-level error flag: it counts all tool-reported failures, including an error that is the
 correct outcome, and cannot detect an agent that successfully calls the wrong tool.
 
+That single count answers three unrelated questions at once, so errored calls are also split by
+the kind of refusal they received, classified in the proxy where the payload still exists and
+stored as a category rather than text:
+
+| reported as | from | means |
+|---|---|---|
+| navigation | `refused` | turned away without acting — a missing field, a stray argument, a value outside an enum. A property of the tool schema; the API was never asked. |
+| surface friction | `rejected` | well formed, and the API refused its meaning. Undocumented preconditions live here. The number to act on. |
+| answered existence question | first `not_found` per tool and action | an absent read is the answer, not an obstacle; asking has no cheaper form. A *repeat* is charged to surface friction, because the first answer did not land. |
+| other | `denied`, `failed` | credentials, plan, or a broken server. Real, but not attributable to tool design. |
+| unclassified | everything else | reported apart from `other` on purpose: a split reading zero surface friction because nothing was classified must not be mistaken for a surface with no friction. Rows written before this field existed land here in full. |
+
+Classification reads HTTP status and the FastMCP/Pydantic validation shape, never this server's
+`ACTIONS` table, so a foreign surface still classifies by status — the same battery has scored
+both a 28-tool and a 177-tool build. Two patterns matching this server's own refusal wording are
+additive. Status outranks wording: a 404 whose body mentions a missing argument is still an
+absent resource, since only a payload with no status at all can be a call that never reached the
+API. The split cannot charge a surface for misleading an agent into a single wrong lookup.
+
 Single-run success headlines use the same sampling unit: each evaluated task contributes
 its repetition success rate, and a deterministic cluster bootstrap resamples whole tasks.
 The pooled repetition rate and its Wilson interval remain visible as a descriptive figure,
