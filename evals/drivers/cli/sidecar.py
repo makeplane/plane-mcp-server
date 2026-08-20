@@ -194,6 +194,11 @@ def load_proxy_sidecar(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
                 "duration_ms": row.get("duration_ms"),
                 "seq": row.get("seq"),
             }
+            if isinstance(row.get("error_class"), str):
+                # The proxy classifies while the payload still exists; this reader is the
+                # only path from the sidecar to a result row, so a key absent here is a
+                # key that never reaches the report.
+                call["error_class"] = row["error_class"]
             if isinstance(row.get("result_text"), str):
                 call["result_text"] = row["result_text"]
             if isinstance(row.get("observed_sentinels"), list):

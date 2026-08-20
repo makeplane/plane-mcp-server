@@ -23,6 +23,7 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+from evals.core.error_class import classify_error
 from evals.core.evidence import (
     configured_evidence_labels,
     normalize_evidence_aggregates,
@@ -352,6 +353,10 @@ class ApiDriver:
                         calls[idx]["result_kind"] = result.kind
                         calls[idx]["is_error"] = result.is_error
                         calls[idx]["duration_ms"] = duration_ms
+                        if result.is_error:
+                            # Same classification the proxy applies to CLI runs, so the
+                            # two driver families produce comparable rows.
+                            calls[idx]["error_class"] = classify_error(result.text)
                         if evidence_active:
                             aggregate_observations = observed_aggregates(
                                 result.text,

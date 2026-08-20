@@ -359,8 +359,15 @@ def test_single_rep_multi_surface_renders_tool_distribution_unavailable():
         "local        schema friction (same successful, trace-intact rows as call deltas): task-mean median errored "
         "calls=0.0 across 1 tasks; task-mean errored-call rate=0.0% across 1 tasks with calls\n"
         "local          errored-call tasks: 0/1 []\n"
+        "local          by kind, of 2 calls: surface friction=0 (0.0%), navigation=0 (0.0%), answered "
+        "existence questions=0 (0.0%), other=0 (0.0%), unclassified=0 (0.0%)\n"
+        "local          surface friction is the number to act on: a well-formed call the API refused on "
+        "meaning \u2014 none in this run\n"
         "local          limitation: is_error is the MCP-level error flag, so this counts tool-reported failures; an "
         "error that is the correct task outcome still contributes, while calling the wrong tool successfully does not\n"
+        "local          limitation: a first not_found is read as the answer to an existence question, since "
+        "asking has no cheaper form; only a repeat on the same tool and action is counted as friction. A "
+        "surface that misleads an agent into one wrong lookup is therefore not charged for it\n"
         "local        RUN COMPLETE: 1/1 rows completed\n"
     )
 

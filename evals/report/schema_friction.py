@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from evals.core.results import TaskResult
+from evals.core.error_class import NOT_FOUND, REFUSED, REJECTED, UNCLASSIFIED
+from evals.core.results import CallRecord, TaskResult
 
 from .load import ResultRow, is_infra_error_row, is_meta_row, read_result
 from .statistics import median
@@ -15,6 +16,49 @@ SCHEMA_FRICTION_LIMITATION = (
     "an error that is the correct task outcome still contributes, while calling the wrong tool "
     "successfully does not"
 )
+
+FRICTION_SPLIT_LIMITATION = (
+    "limitation: a first not_found is read as the answer to an existence question, since asking "
+    "has no cheaper form; only a repeat on the same tool and action is counted as friction. A "
+    "surface that misleads an agent into one wrong lookup is therefore not charged for it"
+)
+
+
+def split_errors(calls: list[CallRecord]) -> dict[str, int]:
+    """Count a row's errored calls by what kind of "no" they received.
+
+    ``not_found`` is split in two. The first absent read of a given tool and action
+    is the answer to an existence question -- there is no cheaper way to ask -- and
+    lands in ``answered``. A second identical one means the first was not understood,
+    so it joins ``surface``.
+    """
+    counts = dict.fromkeys(("navigation", "surface", "answered", "other", "unclassified"), 0)
+    seen_absent: set[tuple[str, str]] = set()
+    for call in calls:
+        if not call.is_error:
+            continue
+        kind = call.error_class or UNCLASSIFIED
+        if kind == REFUSED:
+            counts["navigation"] += 1
+        elif kind == REJECTED:
+            counts["surface"] += 1
+        elif kind == NOT_FOUND:
+            key = (call.tool, call.action or "")
+            if key in seen_absent:
+                counts["surface"] += 1
+            else:
+                seen_absent.add(key)
+                counts["answered"] += 1
+        elif kind == UNCLASSIFIED:
+            # Kept apart from `other`, which holds errors we did classify and chose
+            # not to charge to tool design. A row written before this field existed
+            # lands here in full, and a split reading zero surface friction because
+            # nothing was classified must not read as a surface with no friction.
+            counts["unclassified"] += 1
+        else:
+            # denied/failed: real, but not attributable to tool design.
+            counts["other"] += 1
+    return counts
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +71,11 @@ class TaskSchemaFriction:
     total_calls: int
     median_errored_calls: float
     errored_call_rate: float | None
+    navigation_calls: int = 0
+    surface_calls: int = 0
+    answered_calls: int = 0
+    other_calls: int = 0
+    unclassified_calls: int = 0
 
     @property
     def address(self) -> str:
@@ -42,6 +91,12 @@ class SchemaFrictionMeasurement:
     task_mean_errored_calls: float | None
     task_mean_errored_call_rate: float | None
     rate_task_count: int
+    navigation_calls: int = 0
+    surface_calls: int = 0
+    answered_calls: int = 0
+    other_calls: int = 0
+    unclassified_calls: int = 0
+    total_calls: int = 0
 
     @property
     def task_count(self) -> int:
@@ -75,6 +130,10 @@ def measure_schema_friction(rows: list[ResultRow]) -> SchemaFrictionMeasurement:
         task_rows = by_task[task_id]
         errored_calls = sum(row.errored_calls for row in task_rows)
         total_calls = sum(row.num_calls for row in task_rows)
+        split = {key: 0 for key in ("navigation", "surface", "answered", "other", "unclassified")}
+        for row in task_rows:
+            for key, value in split_errors(row.calls).items():
+                split[key] += value
         tasks[task_id] = TaskSchemaFriction(
             task_id=task_id,
             repetitions=len(task_rows),
@@ -82,6 +141,11 @@ def measure_schema_friction(rows: list[ResultRow]) -> SchemaFrictionMeasurement:
             total_calls=total_calls,
             median_errored_calls=float(median([float(row.errored_calls) for row in task_rows]) or 0.0),
             errored_call_rate=(errored_calls / total_calls if total_calls else None),
+            navigation_calls=split["navigation"],
+            surface_calls=split["surface"],
+            answered_calls=split["answered"],
+            other_calls=split["other"],
+            unclassified_calls=split["unclassified"],
         )
 
     absolute_values = [task.median_errored_calls for task in tasks.values()]
@@ -91,7 +155,44 @@ def measure_schema_friction(rows: list[ResultRow]) -> SchemaFrictionMeasurement:
         task_mean_errored_calls=(sum(absolute_values) / len(absolute_values) if absolute_values else None),
         task_mean_errored_call_rate=(sum(rate_values) / len(rate_values) if rate_values else None),
         rate_task_count=len(rate_values),
+        navigation_calls=sum(task.navigation_calls for task in tasks.values()),
+        surface_calls=sum(task.surface_calls for task in tasks.values()),
+        answered_calls=sum(task.answered_calls for task in tasks.values()),
+        other_calls=sum(task.other_calls for task in tasks.values()),
+        unclassified_calls=sum(task.unclassified_calls for task in tasks.values()),
+        total_calls=sum(task.total_calls for task in tasks.values()),
     )
+
+
+def _split_lines(measurement: SchemaFrictionMeasurement) -> tuple[str, ...]:
+    """The three numbers the single rate used to conflate."""
+    total = measurement.total_calls
+
+    def share(count: int) -> str:
+        return f"{count}" + (f" ({count / total:.1%})" if total else "")
+
+    surface = measurement.surface_calls
+    unclassified = measurement.unclassified_calls
+    lines = [
+        f"  by kind, of {total} calls: "
+        f"surface friction={share(surface)}, "
+        f"navigation={share(measurement.navigation_calls)}, "
+        f"answered existence questions={share(measurement.answered_calls)}, "
+        f"other={share(measurement.other_calls)}, "
+        f"unclassified={share(unclassified)}",
+    ]
+    if unclassified:
+        # Never let "no surface friction" stand in for "nothing was classified".
+        lines.append(
+            f"  split incomplete: {unclassified} errored call(s) carry no class — a run recorded "
+            "before error classes existed, or payloads the classifier does not recognise"
+        )
+    else:
+        lines.append(
+            "  surface friction is the number to act on: a well-formed call the API refused on meaning"
+            + ("" if surface else " — none in this run")
+        )
+    return tuple(lines)
 
 
 def schema_friction_statement(measurement: SchemaFrictionMeasurement) -> str:
@@ -108,6 +209,8 @@ def schema_friction_statement(measurement: SchemaFrictionMeasurement) -> str:
             f"task-mean median errored calls={absolute_text} across {measurement.task_count} tasks; "
             f"task-mean errored-call rate={rate_text} across {measurement.rate_task_count} tasks with calls",
             f"  errored-call tasks: {len(flagged)}/{measurement.task_count}{flagged_text}",
+            *_split_lines(measurement),
             f"  {SCHEMA_FRICTION_LIMITATION}",
+            f"  {FRICTION_SPLIT_LIMITATION}",
         )
     )

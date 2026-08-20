@@ -107,6 +107,8 @@ class CallRecord:
     duration_ms: float | int | None = None
     action: str | None = None
     raw_tool: str | None = None
+    # Which kind of "no" an errored call received; None when the call succeeded.
+    error_class: str | None = None
     result_tokens_skipped: str | None = None
     # None means the response was not checked; [] means checked with no match.
     observed_sentinels: list[str] | None = None
@@ -272,6 +274,8 @@ class TaskResult:
                 item["action"] = call.action
             if call.result_tokens_skipped is not None:
                 item["result_tokens_skipped"] = call.result_tokens_skipped
+            if call.error_class is not None:
+                item["error_class"] = call.error_class
             if call.observed_sentinels is not None:
                 item["observed_sentinels"] = list(call.observed_sentinels)
             calls.append(item)
@@ -364,6 +368,7 @@ class TaskResult:
                     result_chars=int(raw.get("result_chars") or 0),
                     result_kind=str(raw.get("result_kind") or "text"),
                     is_error=bool(raw.get("is_error")),
+                    error_class=(str(raw["error_class"]) if raw.get("error_class") is not None else None),
                     result_tokens_estimated=(
                         bool(raw["result_tokens_estimated"]) if raw.get("result_tokens_estimated") is not None else None
                     ),
@@ -569,6 +574,7 @@ def agent_run_to_task_result(
             result_chars=result_chars,
             result_kind=str(c.get("result_kind") or "text"),
             is_error=bool(c.get("is_error")),
+            error_class=(str(c["error_class"]) if c.get("error_class") is not None else None),
             result_tokens_estimated=bool(estimated),
             result_token_count_method=str(count_method),
             duration_ms=c.get("duration_ms"),

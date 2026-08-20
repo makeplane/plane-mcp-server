@@ -21,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from evals.core.error_class import classify_error
 from evals.core.evidence import (
     EVIDENCE_SENTINELS_ENV,
     consume_evidence_config,
@@ -327,6 +328,10 @@ class SidecarRecorder:
             "duration_ms": duration_ms,
             "seq": pending["seq"],
         }
+        if is_error:
+            # Classified here because this is the last place the payload exists:
+            # rows keep result_chars, not the text. Only the category is stored.
+            row["error_class"] = classify_error(result_text)
         if self.evidence_active:
             # Persist only labels matched from non-enumerable sentinels and
             # target-bound aggregate values the agent already received. The
