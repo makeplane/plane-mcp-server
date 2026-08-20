@@ -73,6 +73,26 @@ _BY_STATUS = {
 }
 
 
+def detect_refusal(payload: str | None) -> str | None:
+    """Return ``REFUSED`` for a refusal that arrived flagged as a *successful* result.
+
+    This server answers a malformed call with a plain result whose text begins
+    "Error: ", so the protocol reports success and a caller counting failures sees
+    none -- about 47 per 35-task battery. Classifying those anyway keeps the metric
+    honest without asking the server to change what every agent receives.
+
+    Deliberately narrow. Only wording this server owns counts, and the stray-argument
+    form must carry both of its halves, so an ordinary tool result that happens to
+    quote one phrase is not miscounted as a refusal.
+    """
+    text = (payload or "").lower()
+    if "requires an action. it takes:" in text:
+        return REFUSED
+    if "does not take:" in text and "it takes:" in text:
+        return REFUSED
+    return None
+
+
 def classify_error(payload: str | None) -> str:
     """Return the category of a failed call from its error payload.
 
@@ -105,6 +125,7 @@ def classify_error(payload: str | None) -> str:
 
 __all__ = [
     "ERROR_CLASSES",
+    "detect_refusal",
     "NAVIGATION_CLASSES",
     "SURFACE_FRICTION_CLASSES",
     "classify_error",

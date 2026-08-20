@@ -32,11 +32,16 @@ def split_errors(calls: list[CallRecord]) -> dict[str, int]:
     lands in ``answered``. A second identical one means the first was not understood,
     so it joins ``surface``.
     """
-    counts = dict.fromkeys(("navigation", "surface", "answered", "other", "unclassified"), 0)
+    counts = dict.fromkeys(("navigation", "surface", "answered", "other", "unclassified", "unflagged"), 0)
     seen_absent: set[tuple[str, str]] = set()
     for call in calls:
-        if not call.is_error:
+        if not call.is_error and call.error_class is None:
             continue
+        if not call.is_error:
+            # A refusal the server reported as a successful result. It is counted here
+            # and named separately, because it is absent from `errored_calls` -- the
+            # protocol-flag total the rest of the report and every earlier run use.
+            counts["unflagged"] += 1
         kind = call.error_class or UNCLASSIFIED
         if kind == REFUSED:
             counts["navigation"] += 1
@@ -76,6 +81,7 @@ class TaskSchemaFriction:
     answered_calls: int = 0
     other_calls: int = 0
     unclassified_calls: int = 0
+    unflagged_refusals: int = 0
 
     @property
     def address(self) -> str:
@@ -96,6 +102,7 @@ class SchemaFrictionMeasurement:
     answered_calls: int = 0
     other_calls: int = 0
     unclassified_calls: int = 0
+    unflagged_refusals: int = 0
     total_calls: int = 0
 
     @property
@@ -130,7 +137,7 @@ def measure_schema_friction(rows: list[ResultRow]) -> SchemaFrictionMeasurement:
         task_rows = by_task[task_id]
         errored_calls = sum(row.errored_calls for row in task_rows)
         total_calls = sum(row.num_calls for row in task_rows)
-        split = {key: 0 for key in ("navigation", "surface", "answered", "other", "unclassified")}
+        split = {key: 0 for key in ("navigation", "surface", "answered", "other", "unclassified", "unflagged")}
         for row in task_rows:
             for key, value in split_errors(row.calls).items():
                 split[key] += value
@@ -146,6 +153,7 @@ def measure_schema_friction(rows: list[ResultRow]) -> SchemaFrictionMeasurement:
             answered_calls=split["answered"],
             other_calls=split["other"],
             unclassified_calls=split["unclassified"],
+            unflagged_refusals=split["unflagged"],
         )
 
     absolute_values = [task.median_errored_calls for task in tasks.values()]
@@ -160,6 +168,7 @@ def measure_schema_friction(rows: list[ResultRow]) -> SchemaFrictionMeasurement:
         answered_calls=sum(task.answered_calls for task in tasks.values()),
         other_calls=sum(task.other_calls for task in tasks.values()),
         unclassified_calls=sum(task.unclassified_calls for task in tasks.values()),
+        unflagged_refusals=sum(task.unflagged_refusals for task in tasks.values()),
         total_calls=sum(task.total_calls for task in tasks.values()),
     )
 
@@ -181,6 +190,11 @@ def _split_lines(measurement: SchemaFrictionMeasurement) -> tuple[str, ...]:
         f"other={share(measurement.other_calls)}, "
         f"unclassified={share(unclassified)}",
     ]
+    if measurement.unflagged_refusals:
+        lines.append(
+            f"  {measurement.unflagged_refusals} refusal(s) arrived flagged as successful results, so they "
+            "are counted above but not in the errored-call total"
+        )
     if unclassified:
         # Never let "no surface friction" stand in for "nothing was classified".
         lines.append(

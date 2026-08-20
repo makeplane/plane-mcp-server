@@ -19,6 +19,7 @@ from evals.core.error_class import (
     REJECTED,
     UNCLASSIFIED,
     classify_error,
+    detect_refusal,
 )
 from evals.core.results import CallRecord
 from evals.report.schema_friction import split_errors
@@ -109,7 +110,14 @@ def test_each_kind_lands_in_its_own_column():
             CallRecord(tool="project", action="list"),  # a success is not counted anywhere
         ]
     )
-    assert counts == {"navigation": 1, "surface": 1, "answered": 0, "other": 1, "unclassified": 0}
+    assert counts == {
+        "navigation": 1,
+        "surface": 1,
+        "answered": 0,
+        "other": 1,
+        "unclassified": 0,
+        "unflagged": 0,
+    }
 
 
 def test_a_first_absent_read_is_an_answer_not_friction():
@@ -205,9 +213,7 @@ def test_a_class_survives_every_hop_from_proxy_to_report(tmp_path):
     calls, _status = load_proxy_sidecar(sidecar)
     assert calls and calls[0].get("error_class") == REJECTED, "the sidecar reader dropped it"
 
-    agent = agent_run_to_task_result(
-        AgentRun(calls=calls, final_text="done", usage=Usage(), stopped_reason="end_turn")
-    )
+    agent = agent_run_to_task_result(AgentRun(calls=calls, final_text="done", usage=Usage(), stopped_reason="end_turn"))
     assert agent.calls[0].error_class == REJECTED, "agent_run_to_task_result dropped it"
 
     serialized = json.loads(json.dumps(agent.to_row()))
@@ -216,3 +222,40 @@ def test_a_class_survives_every_hop_from_proxy_to_report(tmp_path):
     reloaded = TaskResult.from_row(serialized)
     assert reloaded.calls[0].error_class == REJECTED, "reload dropped it"
     assert split_errors(reloaded.calls)["surface"] == 1, "the report did not see it"
+
+
+def test_a_refusal_the_server_called_a_success_is_still_counted():
+    """The server answers a malformed call with a plain result whose text says
+    "Error", so the protocol reports success. Roughly 47 per battery arrived that
+    way and were counted as successes. They are counted here and named apart,
+    because they are absent from the errored-call total every earlier run used.
+    """
+    counts = split_errors(
+        [
+            CallRecord(tool="project", action=None, is_error=False, error_class=REFUSED),
+            CallRecord(tool="project", action="list", is_error=True, error_class=REFUSED),
+        ]
+    )
+    assert counts["navigation"] == 2
+    assert counts["unflagged"] == 1
+
+
+def test_a_plain_successful_call_is_still_not_counted():
+    counts = split_errors([CallRecord(tool="project", action="list")])
+    assert sum(counts.values()) == 0
+
+
+REFUSAL_TEXTS = [
+    ('{"content":[{"type":"text","text":"Error: project requires an action. It takes: list."}]}', REFUSED),
+    ('{"content":[{"type":"text","text":"Error: action \'create\' does not take: points. It takes: name."}]}', REFUSED),
+    # An ordinary result quoting one half of the stray-argument wording is not a refusal.
+    ('{"content":[{"type":"text","text":"the docs say the endpoint does not take: a body"}]}', None),
+    ('{"content":[{"type":"text","text":"[{"id":"abc","name":"Delivery Planning"}]"}]}', None),
+]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"), REFUSAL_TEXTS, ids=["missing-action", "stray-arg", "quotes-one-half", "ordinary-result"]
+)
+def test_only_this_servers_own_refusal_wording_is_detected(payload: str, expected: str | None):
+    assert detect_refusal(payload) == expected
