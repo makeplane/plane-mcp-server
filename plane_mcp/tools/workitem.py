@@ -7,7 +7,6 @@ merging them teaches the model to filter on a field the API rejects.
 
 from __future__ import annotations
 
-from html import escape
 from typing import Annotated, Any, Literal, get_args
 
 from fastmcp import FastMCP
@@ -42,6 +41,7 @@ from plane_mcp.toolkit import (
     one_of,
     opt,
     pql_failure,
+    rich_text,
 )
 
 logger = get_logger(__name__)
@@ -177,15 +177,6 @@ def _scoped_pql(pql: str, project_id: str) -> str:
     return f"({pql}) AND {scope}" if pql else scope
 
 
-def _description_html(description_html: str, description_stripped: str) -> str | None:
-    """Plane recomputes the stripped form server-side, so plain text must be wrapped."""
-    if description_html:
-        return description_html
-    if description_stripped:
-        return "<p>" + escape(description_stripped).replace("\n", "<br/>") + "</p>"
-    return None
-
-
 def register(mcp: FastMCP) -> None:
     @mcp.tool(
         name=NAME,
@@ -268,7 +259,7 @@ def register(mcp: FastMCP) -> None:
                 "labels": coerce_list(labels),
                 "type_id": opt(type_id),
                 "point": opt(point),
-                "description_html": _description_html(description_html, description_stripped),
+                "description_html": rich_text(description_html, description_stripped),
                 "priority": opt(priority),
                 "start_date": opt(start_date),
                 "target_date": opt(target_date),

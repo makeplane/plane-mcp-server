@@ -18,7 +18,7 @@ from plane.models.projects import (
 from plane.models.query_params import ProjectLiteListQueryParams
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, opt, plan_gated
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, opt, plan_gated, rich_text
 
 NAME = "project"
 TITLE = "Projects"
@@ -37,6 +37,7 @@ ACTIONS = (
         ("name", "identifier"),
         (
             "description",
+            "description_html",
             "project_lead",
             "default_assignee",
             "emoji",
@@ -54,6 +55,7 @@ ACTIONS = (
         (
             "name",
             "description",
+            "description_html",
             "identifier",
             "project_lead",
             "default_assignee",
@@ -140,6 +142,7 @@ def register(mcp: FastMCP) -> None:
         name: str = "",
         identifier: str = "",
         description: str = "",
+        description_html: str = "",
         project_lead: str = "",
         default_assignee: str = "",
         emoji: str = "",
@@ -205,6 +208,7 @@ def register(mcp: FastMCP) -> None:
                     name=name,
                     identifier=identifier,
                     description=opt(description),
+                    description_html=rich_text(description_html, description),
                     project_lead=opt(project_lead),
                     default_assignee=opt(default_assignee),
                     emoji=opt(emoji),
@@ -236,6 +240,7 @@ def register(mcp: FastMCP) -> None:
                 data=UpdateProject(
                     name=opt(name),
                     description=opt(description),
+                    description_html=rich_text(description_html, description),
                     identifier=opt(identifier),
                     project_lead=opt(project_lead),
                     default_assignee=opt(default_assignee),
