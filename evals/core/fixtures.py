@@ -6,6 +6,8 @@ packages re-export these names for backward compatibility.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 CUSTOMER_NAME = "Acme Corp"
 CUSTOMER_REQUEST_NAME = "SSO support"
 EVALUATION_CUSTOMER_PROPERTY_NAME = "Eval Industry"
@@ -169,19 +171,40 @@ PROJECT_SUFFIX_WORDS = (
 )
 
 
+def _suffix_word_index(run_prefix: str) -> int:
+    """Map a run prefix onto ``PROJECT_SUFFIX_WORDS``, tolerating non-hex prefixes."""
+    try:
+        return int(str(run_prefix)[:8], 16)
+    except ValueError:
+        return sum(ord(ch) for ch in str(run_prefix))
+
+
 def eval_project_name(run_prefix: str, *, second: bool = False) -> str:
     """Build a seeded project's display name: readable, and never id-shaped.
 
     Deterministic in ``run_prefix`` so the same run always produces the same name, which
     keeps a resumed run and its teardown in agreement.
     """
-    try:
-        index = int(str(run_prefix)[:8], 16)
-    except ValueError:
-        index = sum(ord(ch) for ch in str(run_prefix))
-    word = PROJECT_SUFFIX_WORDS[index % len(PROJECT_SUFFIX_WORDS)]
+    word = PROJECT_SUFFIX_WORDS[_suffix_word_index(run_prefix) % len(PROJECT_SUFFIX_WORDS)]
     title = PROJECT_TITLES[1 if second else 0]
     return f"{EVAL_PROJECT_PREFIX}{title} {word}"
+
+
+def eval_project_name_variants(run_prefix: str, *, second: bool = False) -> Iterator[str]:
+    """Yield the deterministic name, then every other word in order.
+
+    The first name is exactly ``eval_project_name(run_prefix, second=second)``, so a
+    resumed run and its teardown still agree on it. The rest exist only so a leftover
+    project from a crashed run cannot fail a fresh one: Plane rejects a duplicate project
+    name with a 409, and the word pool is small enough that residue makes that collision
+    a matter of when. Walking forward from the deterministic index keeps the fallback
+    order reproducible too.
+    """
+    words = PROJECT_SUFFIX_WORDS
+    start = _suffix_word_index(run_prefix) % len(words)
+    title = PROJECT_TITLES[1 if second else 0]
+    for offset in range(len(words)):
+        yield f"{EVAL_PROJECT_PREFIX}{title} {words[(start + offset) % len(words)]}"
 
 
 __all__ = [
@@ -189,6 +212,7 @@ __all__ = [
     "PROJECT_SUFFIX_WORDS",
     "PROJECT_TITLES",
     "eval_project_name",
+    "eval_project_name_variants",
     "BLOCKING_REFERENCE_ADDRESS",
     "BLOCKING_SOURCE_TITLE",
     "BLOCKING_TARGET_TITLE",

@@ -18,11 +18,13 @@ from evals.core.errors import TaskSkipped
 from evals.core.evidence import TARGET_ENTITY_EVIDENCE
 from evals.seed import (
     R5_TITLE,
-    create_project_with_identifier_retry,
+    create_project_with_collision_retry,
     is_identifier_collision,
+    is_name_collision,
     seed_plan,
     seed_second_project,
 )
+from evals.seed import projects as projects_mod
 from evals.tasks.debias import (
     L3_TAG_VERSION,
     L4_PROP_DISPLAY,
@@ -1346,7 +1348,7 @@ def _create_project_retries_409_then_succeeds(monkeypatch):
     suffixes = iter(["AAAAAAAA", "BBBBBBBB"])
     monkeypatch.setattr(seed_mod.secrets, "token_hex", lambda n: next(suffixes))
 
-    project = create_project_with_identifier_retry(
+    project = create_project_with_collision_retry(
         plane,
         "ws",
         name="EVAL abcd",
@@ -1387,7 +1389,7 @@ def _create_project_raises_after_max_409s(monkeypatch):
     monkeypatch.setattr(seed_mod.secrets, "token_hex", lambda n: next(suffixes))
 
     with pytest.raises(HttpError) as ei:
-        create_project_with_identifier_retry(
+        create_project_with_collision_retry(
             plane,
             "ws",
             name="EVAL x",
@@ -1410,7 +1412,7 @@ def _create_project_non_collision_error_does_not_retry(_monkeypatch):
     plane = MagicMock()
     plane.projects = Fail500()
     with pytest.raises(HttpError) as ei:
-        create_project_with_identifier_retry(
+        create_project_with_collision_retry(
             plane,
             "ws",
             name="EVAL x",
@@ -1426,7 +1428,7 @@ def _identifier_stays_within_plane_limit(_monkeypatch):
             create=lambda **kwargs: SimpleNamespace(id="project", identifier=kwargs["data"].identifier)
         )
     )
-    project = create_project_with_identifier_retry(
+    project = create_project_with_collision_retry(
         plane,
         "ws",
         name="EVAL x",
@@ -1437,13 +1439,122 @@ def _identifier_stays_within_plane_limit(_monkeypatch):
     assert len(project.identifier) <= seed_mod.PLANE_PROJECT_IDENTIFIER_MAX_LENGTH
 
     with pytest.raises(ValueError, match="12-character limit"):
-        create_project_with_identifier_retry(
+        create_project_with_collision_retry(
             plane,
             "ws",
             name="EVAL x",
             identifier_prefix="TOO-LONG",
             initial_suffix="12345678",
         )
+
+
+# The observed payload, verbatim: this is what failed L3 in the 177-tool arm on 2026-08-19.
+_NAME_TAKEN = "Conflict: name: The project name is already taken"
+
+
+def test_name_and_identifier_collisions_are_told_apart():
+    """Both are 409s carrying the same collision wording; only the named field separates them."""
+    assert is_name_collision(HttpError(_NAME_TAKEN, 409)) is True
+    assert is_identifier_collision(HttpError(_NAME_TAKEN, 409)) is False
+
+    assert is_name_collision(HttpError("identifier already taken", 409)) is False
+    assert is_identifier_collision(HttpError("identifier already taken", 409)) is True
+
+    # A body naming both fields is treated as the identifier case: retrying a suffix is cheap
+    # and is what this did before names could be retried at all.
+    both = HttpError("name already taken; identifier already taken", 409)
+    assert is_name_collision(both) is False
+    assert is_identifier_collision(both) is True
+
+    # Collision language is still required, and the status still gates it.
+    assert is_name_collision(HttpError("name is required", 400)) is False
+    assert is_name_collision(HttpError(_NAME_TAKEN, 500)) is False
+
+
+def _create_project_advances_name_on_name_collision(monkeypatch):
+    seen: list[tuple[str, str]] = []
+
+    class FakeProjects:
+        def create(self, *, workspace_slug, data):
+            seen.append((data.name, data.identifier))
+            if data.name == "EVAL Delivery Planning Plover":
+                raise HttpError(_NAME_TAKEN, 409)
+            # SimpleNamespace, not MagicMock: `name` is reserved on a Mock constructor.
+            return SimpleNamespace(id="proj-ok", name=data.name, identifier=data.identifier)
+
+    plane = MagicMock()
+    plane.projects = FakeProjects()
+
+    def _fail_token_hex(_n):
+        raise AssertionError("a name collision must not regenerate the identifier suffix")
+
+    monkeypatch.setattr(seed_mod.secrets, "token_hex", _fail_token_hex)
+
+    project = create_project_with_collision_retry(
+        plane,
+        "ws",
+        name="EVAL Delivery Planning Plover",
+        identifier_prefix="EV",
+        initial_suffix="DEADBEEF",
+        name_variants=iter(["EVAL Delivery Planning Godwit"]),
+    )
+    assert project.name == "EVAL Delivery Planning Godwit"
+    # Two attempts, same identifier: the suffix was never the problem.
+    assert seen == [
+        ("EVAL Delivery Planning Plover", "EVDEADBEEF"),
+        ("EVAL Delivery Planning Godwit", "EVDEADBEEF"),
+    ]
+
+
+def _create_project_name_collision_raises_without_variants(monkeypatch):
+    attempts: list[str] = []
+
+    class FakeProjects:
+        def create(self, *, workspace_slug, data):
+            attempts.append(data.name)
+            raise HttpError(_NAME_TAKEN, 409)
+
+    plane = MagicMock()
+    plane.projects = FakeProjects()
+    monkeypatch.setattr(seed_mod.secrets, "token_hex", lambda n: "AAAAAAAA")
+
+    with pytest.raises(HttpError) as ei:
+        create_project_with_collision_retry(
+            plane,
+            "ws",
+            name="EVAL x",
+            identifier_prefix="EV",
+            initial_suffix="00000000",
+        )
+    assert ei.value.status_code == 409
+    # Raised on the first refusal rather than spending the budget on a fine identifier.
+    assert attempts == ["EVAL x"]
+
+
+def _create_project_exhausts_name_variants(monkeypatch):
+    attempts: list[str] = []
+
+    class FakeProjects:
+        def create(self, *, workspace_slug, data):
+            attempts.append(data.name)
+            raise HttpError(_NAME_TAKEN, 409)
+
+    plane = MagicMock()
+    plane.projects = FakeProjects()
+    monkeypatch.setattr(seed_mod.secrets, "token_hex", lambda n: "AAAAAAAA")
+
+    with pytest.raises(HttpError):
+        create_project_with_collision_retry(
+            plane,
+            "ws",
+            name="EVAL a",
+            identifier_prefix="EV",
+            initial_suffix="00000000",
+            name_variants=iter(["EVAL b", "EVAL c"]),
+        )
+    # Stops when variants run out, well inside the attempt budget.
+    assert attempts == ["EVAL a", "EVAL b", "EVAL c"]
+    assert len(attempts) < projects_mod.PROJECT_CREATE_ATTEMPT_LIMIT
 
 
 @pytest.mark.parametrize(
@@ -1453,6 +1564,9 @@ def _identifier_stays_within_plane_limit(_monkeypatch):
         _create_project_raises_after_max_409s,
         _create_project_non_collision_error_does_not_retry,
         _identifier_stays_within_plane_limit,
+        _create_project_advances_name_on_name_collision,
+        _create_project_name_collision_raises_without_variants,
+        _create_project_exhausts_name_variants,
     ),
 )
 def test_create_behaviours(case, monkeypatch):
@@ -1465,6 +1579,27 @@ def test_identifier_collision_requires_status_and_language():
     # Validation-shaped: mentions identifier but not collision language → no retry
     assert is_identifier_collision(HttpError("identifier is required", 400)) is False
     assert is_identifier_collision(HttpError("identifier already taken", 500)) is False
+
+
+def test_project_name_variants_start_deterministic_and_cover_the_pool():
+    from evals.core.fixtures import (
+        PROJECT_SUFFIX_WORDS,
+        eval_project_name,
+        eval_project_name_variants,
+    )
+
+    for second in (False, True):
+        variants = list(eval_project_name_variants("3c128f21", second=second))
+        # First name unchanged, so a resumed run and its teardown still agree on it.
+        assert variants[0] == eval_project_name("3c128f21", second=second)
+        assert len(variants) == len(PROJECT_SUFFIX_WORDS)
+        assert len(set(variants)) == len(variants)
+
+    # Reproducible, and the two titles never collide with each other.
+    assert list(eval_project_name_variants("3c128f21")) == list(eval_project_name_variants("3c128f21"))
+    assert not set(eval_project_name_variants("3c128f21")) & set(eval_project_name_variants("3c128f21", second=True))
+    # Non-hex prefixes fall back to a character sum rather than raising.
+    assert len(list(eval_project_name_variants("not-hex-at-all"))) == len(PROJECT_SUFFIX_WORDS)
 
 
 def _cleanup_dry_run_never_calls_delete(monkeypatch, capsys, _yes):
@@ -1570,25 +1705,68 @@ def _cleanup_sentinel_mode(monkeypatch, capsys, yes):
     args = ["--sentinels", "--yes"] if yes else ["--sentinels"]
     assert cleanup_mod.main(args) == 0
     output = capsys.readouterr().out
-    for fixture_name in ("Acme Corp", "eval-rc1", "Eval Industry", "Incident", "Severity"):
+    # Bug is a fixture name too, so a leftover Bug type is now a deletion target rather than
+    # only the type whose Severity property is removed.
+    for fixture_name in ("Acme Corp", "eval-rc1", "Eval Industry", "Bug", "Incident", "Severity"):
         assert fixture_name in output
     assert "Other Corp" not in output
     assert "Region" not in output
+    # Reported so a zero match count cannot imply a clean workspace, but not deleted.
+    assert "Epic" in output
+    assert "did not create" in output
     if yes:
         assert set(delete_calls) == {
             ("customer", "customer-eval"),
             ("customer", "customer-short"),
             ("release_tag", "tag-eval"),
             ("customer_property", "property-eval"),
+            ("work_item_type", "type-bug"),
             ("work_item_type", "type-incident"),
             ("work_item_property", "severity-eval"),
         }
+        assert ("work_item_type", "type-epic") not in set(delete_calls)
         assert "deleted sentinel" in output
         assert "would delete sentinel" not in output
     else:
         assert delete_calls == []
-        assert output.count("would delete sentinel") == 6
+        assert output.count("would delete sentinel") == 7
         assert "dry-run" in output
+
+
+def _cleanup_unowned_types_deleted_only_when_asked(monkeypatch, capsys, _yes):
+    delete_calls: list[tuple[str, str]] = []
+    plane = SimpleNamespace(
+        customers=SimpleNamespace(
+            list=lambda **kw: _Page([]),
+            properties=SimpleNamespace(list=lambda **kw: _Page([])),
+        ),
+        releases=SimpleNamespace(tags=SimpleNamespace(list=lambda **kw: _Page([]))),
+        workspace_work_item_types=SimpleNamespace(
+            list=lambda **kw: [
+                SimpleNamespace(id="type-task-a", name="Task"),
+                SimpleNamespace(id="type-task-b", name="Task"),
+            ],
+            properties=SimpleNamespace(list=lambda **kw: []),
+            delete=lambda **kw: delete_calls.append(("work_item_type", kw["type_id"])),
+        ),
+        workspace_work_item_properties=SimpleNamespace(list=lambda **kw: []),
+    )
+    monkeypatch.setattr("evals.seed.make_plane_client", lambda: (plane, "test-ws"))
+
+    # No fixture-named types: without --unowned this reports nothing to delete, but must still
+    # surface the two it will not touch. This is the exact shape that read as clean before.
+    assert cleanup_mod.main(["--sentinels", "--yes"]) == 0
+    output = capsys.readouterr().out
+    assert "sentinel_matches=0" in output
+    assert "nothing to delete" in output
+    assert output.count("'Task'") == 2
+    assert delete_calls == []
+
+    assert cleanup_mod.main(["--sentinels", "--unowned", "--yes"]) == 0
+    assert set(delete_calls) == {("work_item_type", "type-task-a"), ("work_item_type", "type-task-b")}
+
+    # --unowned is meaningless for the project cleaner and must not be silently ignored.
+    assert cleanup_mod.main(["--unowned"]) == 2
 
 
 @pytest.mark.parametrize(
@@ -1598,6 +1776,7 @@ def _cleanup_sentinel_mode(monkeypatch, capsys, yes):
         pytest.param(_cleanup_yes_deletes, None, id="project-delete"),
         pytest.param(_cleanup_sentinel_mode, False, id="sentinel-dry-run"),
         pytest.param(_cleanup_sentinel_mode, True, id="sentinel-delete"),
+        pytest.param(_cleanup_unowned_types_deleted_only_when_asked, None, id="sentinel-unowned"),
     ],
 )
 def test_cleanup_behaviours(case, yes, monkeypatch, capsys):

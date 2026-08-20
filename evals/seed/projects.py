@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Iterator
 from typing import Any
 
 from plane import PlaneClient
@@ -12,7 +13,7 @@ from plane.models.work_items import CreateWorkItem
 from plane.models.workspaces import WorkspaceFeature
 
 from evals.core.evidence import set_target_count_evidence, set_target_evidence, set_target_grouped_count_evidence
-from evals.core.fixtures import eval_project_name
+from evals.core.fixtures import eval_project_name_variants
 
 from .gates import is_plan_gate
 from .identities import record_seeded_entity
@@ -35,12 +36,8 @@ SECOND_PROJECT_BUG_TITLES = (
 )
 
 
-def is_identifier_collision(exc: BaseException) -> bool:
-    """True when project create failed because the identifier is already taken.
-
-    Requires HTTP 400/409 *and* collision language (already/exists/taken). A bare
-    ``identifier`` mention (validation shape errors) must not trigger retry.
-    """
+def _is_collision(exc: BaseException) -> bool:
+    """True for an HTTP 400/409 whose body reads as a uniqueness conflict."""
     if not isinstance(exc, HttpError):
         return False
     if exc.status_code not in (400, 409):
@@ -49,19 +46,50 @@ def is_identifier_collision(exc: BaseException) -> bool:
     return any(keyword in blob for keyword in ("already", "exists", "taken"))
 
 
-def create_project_with_identifier_retry(
+def is_name_collision(exc: BaseException) -> bool:
+    """True when project create failed because the project *name* is already taken.
+
+    Plane answers both conflicts with the same 409 and the same collision wording --
+    ``name: The project name is already taken`` against
+    ``identifier: ...`` -- so the named field is the only thing separating them. A body
+    mentioning the identifier is treated as an identifier collision, because retrying a
+    fresh suffix is cheap and was the behaviour before names could be retried at all.
+    """
+    if not _is_collision(exc):
+        return False
+    blob = f"{exc} {exc.response!s}".lower()
+    return "name" in blob and "identifier" not in blob
+
+
+def is_identifier_collision(exc: BaseException) -> bool:
+    """True when project create failed because the identifier is already taken.
+
+    Requires HTTP 400/409 *and* collision language (already/exists/taken). A bare
+    ``identifier`` mention (validation shape errors) must not trigger retry.
+    """
+    return _is_collision(exc) and not is_name_collision(exc)
+
+
+def create_project_with_collision_retry(
     plane: PlaneClient,
     workspace_slug: str,
     *,
     name: str,
     identifier_prefix: str,
     initial_suffix: str,
+    name_variants: Iterator[str] | None = None,
 ) -> Any:
-    """Create a project, regenerating the identifier suffix on soft-delete collisions.
+    """Create a project, retrying past both kinds of uniqueness conflict.
 
-    Plane soft-deletes reserve identifiers; a 409 (or identifier-in-message error)
-    triggers a new random 8-char hex suffix. At most eight attempts are made,
-    then the last collision error is raised again.
+    Plane soft-deletes reserve identifiers, so an identifier collision draws a new random
+    8-char hex suffix. A *name* collision means a project of that name already exists --
+    residue from a crashed run, since teardown deletes by recorded id -- and the suffix was
+    never the problem, so it advances to the next name from ``name_variants`` instead.
+    Without ``name_variants`` a name collision raises immediately rather than burning the
+    budget regenerating an identifier that was already fine.
+
+    Both kinds share the ``PROJECT_CREATE_ATTEMPT_LIMIT`` budget, so this survives up to
+    seven collisions of either kind in one create; past that the last error is re-raised.
     """
     if len(identifier_prefix) + PROJECT_IDENTIFIER_SUFFIX_LENGTH > PLANE_PROJECT_IDENTIFIER_MAX_LENGTH:
         raise ValueError(
@@ -73,9 +101,7 @@ def create_project_with_identifier_retry(
     if len(suffix) < PROJECT_IDENTIFIER_SUFFIX_LENGTH:
         suffix = (suffix + secrets.token_hex(4).upper())[:PROJECT_IDENTIFIER_SUFFIX_LENGTH]
     last_exc: BaseException | None = None
-    for attempt in range(PROJECT_CREATE_ATTEMPT_LIMIT):
-        if attempt > 0:
-            suffix = secrets.token_hex(4).upper()  # 8 hex chars / 32 bits
+    for _attempt in range(PROJECT_CREATE_ATTEMPT_LIMIT):
         identifier = f"{identifier_prefix}{suffix}"
         try:
             return plane.projects.create(
@@ -83,13 +109,21 @@ def create_project_with_identifier_retry(
                 data=CreateProject(name=name, identifier=identifier),
             )
         except Exception as exc:
+            if is_name_collision(exc):
+                next_name = next(name_variants, None) if name_variants is not None else None
+                if next_name is None:
+                    raise
+                name = next_name
+                last_exc = exc
+                continue
             if is_identifier_collision(exc):
+                suffix = secrets.token_hex(4).upper()  # 8 hex chars / 32 bits
                 last_exc = exc
                 continue
             raise
     if last_exc is None:
         raise RuntimeError(
-            f"project create failed after {PROJECT_CREATE_ATTEMPT_LIMIT} identifier retries "
+            f"project create failed after {PROJECT_CREATE_ATTEMPT_LIMIT} attempts "
             f"(prefix={identifier_prefix!r}) with no captured exception"
         )
     raise last_exc
@@ -205,17 +239,20 @@ def seed_second_project(plane: PlaneClient, workspace_slug: str, context: dict[s
     from .item_types import seed_item_type
 
     run_prefix = context["run8"]
-    name = eval_project_name(run_prefix, second=True)
-    project = create_project_with_identifier_retry(
+    variants = eval_project_name_variants(run_prefix, second=True)
+    name = next(variants)
+    project = create_project_with_collision_retry(
         plane,
         workspace_slug,
         name=name,
         identifier_prefix="EB",
         initial_suffix=run_prefix.upper(),
+        name_variants=variants,
     )
     context["second_project_id"] = project.id
     record_seeded_entity(context, "project", project.id)
-    context["second_project_name"] = name
+    # The created name, not the requested one: a name collision advances to a variant.
+    context["second_project_name"] = getattr(project, "name", None) or name
     context["second_project_identifier"] = getattr(project, "identifier", None)
     enable_project_features(plane, workspace_slug, project.id)
 

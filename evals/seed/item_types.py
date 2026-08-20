@@ -12,6 +12,9 @@ from .identities import record_seeded_entity
 
 BUG_TYPE_NAME = "Bug"
 INCIDENT_TYPE_NAME = "Incident"
+# Every workspace-level work item type name this harness creates. Cleanup deletes these and
+# reports anything else it finds, because the harness runs against an instance it does not own.
+FIXTURE_WORK_ITEM_TYPE_NAMES = (BUG_TYPE_NAME, INCIDENT_TYPE_NAME)
 SEVERITY_PROPERTY_NAME = "Severity"
 
 

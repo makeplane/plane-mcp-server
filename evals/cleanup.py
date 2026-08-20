@@ -18,7 +18,7 @@ from evals.seed.customers import (
 )
 from evals.seed.item_types import (
     BUG_TYPE_NAME,
-    INCIDENT_TYPE_NAME,
+    FIXTURE_WORK_ITEM_TYPE_NAMES,
     is_severity_property,
     is_work_item_type_named,
     list_workspace_properties_for_type,
@@ -113,8 +113,19 @@ def list_sentinel_workspace_artifacts(plane: Any, workspace_slug: str) -> list[d
     if callable(getattr(type_api, "list", None)):
         for row in list_workspace_work_item_types(plane, workspace_slug):
             object_id = getattr(row, "id", None)
-            if object_id is not None and is_work_item_type_named(row, INCIDENT_TYPE_NAME):
-                artifacts.append({"kind": "work_item_type", "id": object_id, "name": INCIDENT_TYPE_NAME})
+            if object_id is None:
+                continue
+            # Every fixture name, not just Incident. Bug used to be reachable only as the type
+            # whose Severity property gets removed, so leftover Bug types were both undeletable
+            # by this tool and counted as "nothing to delete" -- a workspace reported clean while
+            # holding types that skew any task reading the workspace-level list. Duplicates of
+            # one name each match, so a double-seeded type is fully removed.
+            matched = next(
+                (name for name in FIXTURE_WORK_ITEM_TYPE_NAMES if is_work_item_type_named(row, name)),
+                None,
+            )
+            if matched is not None:
+                artifacts.append({"kind": "work_item_type", "id": object_id, "name": matched})
 
     property_api = getattr(plane, "workspace_work_item_properties", None)
     links_api = getattr(type_api, "properties", None)
@@ -125,6 +136,28 @@ def list_sentinel_workspace_artifacts(plane: Any, workspace_slug: str) -> list[d
                 display = getattr(row, "display_name", None) or getattr(row, "name", None) or ""
                 artifacts.append({"kind": "work_item_property", "id": object_id, "name": display.strip()})
     return artifacts
+
+
+def list_unowned_workspace_work_item_types(plane: Any, workspace_slug: str) -> list[dict[str, Any]]:
+    """Return workspace-level work item types this harness never creates.
+
+    Reported rather than deleted by default: a type the harness did not create may be a real
+    workspace's configuration, and this runs against instances it does not own. They still
+    have to be *visible*, because a workspace holding types another workspace lacks skews
+    every task that reads the workspace-level list, and silence there reads as clean.
+    """
+    type_api = getattr(plane, "workspace_work_item_types", None)
+    if not callable(getattr(type_api, "list", None)):
+        return []
+    unowned: list[dict[str, Any]] = []
+    for row in list_workspace_work_item_types(plane, workspace_slug):
+        object_id = getattr(row, "id", None)
+        if object_id is None:
+            continue
+        if any(is_work_item_type_named(row, name) for name in FIXTURE_WORK_ITEM_TYPE_NAMES):
+            continue
+        unowned.append({"kind": "work_item_type", "id": object_id, "name": (getattr(row, "name", "") or "").strip()})
+    return unowned
 
 
 def _sentinel_description(artifact: dict[str, Any]) -> str:
@@ -168,9 +201,18 @@ def delete_sentinel_workspace_artifacts(
     return deleted, failed
 
 
-def _cleanup_sentinels(plane: Any, workspace_slug: str, *, yes: bool) -> int:
+def _cleanup_sentinels(plane: Any, workspace_slug: str, *, yes: bool, unowned: bool = False) -> int:
     artifacts = list_sentinel_workspace_artifacts(plane, workspace_slug)
+    others = list_unowned_workspace_work_item_types(plane, workspace_slug)
+    if unowned:
+        artifacts = artifacts + others
     print(f"workspace={workspace_slug} sentinel_matches={len(artifacts)}")
+    if others and not unowned:
+        # Never let a zero match count imply a clean workspace while these sit here.
+        print(f"note: {len(others)} workspace work item type(s) present that this tool did not create:")
+        for artifact in others:
+            print(f"  {_sentinel_description(artifact)}")
+        print("  add --unowned to delete them too")
     if not artifacts:
         print("nothing to delete")
         return 0
@@ -193,6 +235,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Clean fixed-name workspace sentinels instead of projects",
     )
     p.add_argument(
+        "--unowned",
+        action="store_true",
+        help="With --sentinels, also delete workspace work item types this harness never creates",
+    )
+    p.add_argument(
         "--yes",
         action="store_true",
         help="Actually delete matched objects (default is dry-run list only)",
@@ -208,7 +255,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.sentinels:
-        return _cleanup_sentinels(plane, workspace_slug, yes=args.yes)
+        return _cleanup_sentinels(plane, workspace_slug, yes=args.yes, unowned=args.unowned)
+    if args.unowned:
+        print("error: --unowned only applies with --sentinels", file=sys.stderr)
+        return 2
 
     projects = list_projects_with_prefix(plane, workspace_slug, args.prefix)
     print(f"workspace={workspace_slug} prefix={args.prefix!r} matches={len(projects)}")

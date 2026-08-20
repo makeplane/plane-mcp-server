@@ -8,7 +8,7 @@ from typing import Any
 from plane import PlaneClient
 
 from evals.core.errors import TaskSkipped
-from evals.core.fixtures import eval_project_name
+from evals.core.fixtures import eval_project_name_variants
 
 from .customers import (
     CUSTOMER_NAME,
@@ -33,7 +33,7 @@ from .item_types import (
 from .labels import seed_labels
 from .modules import seed_module
 from .projects import (
-    create_project_with_identifier_retry,
+    create_project_with_collision_retry,
     enable_project_features,
     enable_workspace_features,
     seed_second_project,
@@ -271,7 +271,8 @@ def seed(
     even if a later fixture step raises (F5).
     """
     run_prefix = run_id[:8]
-    project_name = eval_project_name(run_prefix)
+    name_variants = eval_project_name_variants(run_prefix)
+    project_name = next(name_variants)
     workspace_slug = os.environ["EVAL_PLANE_WORKSPACE_SLUG"]
 
     # Reset known keys while preserving object identity for the caller.
@@ -327,17 +328,22 @@ def seed(
     task_collision_categories = collision_categories(needs, task_id)
     check_workspace_fixture_collisions(plane, workspace_slug, task_collision_categories)
 
-    # EV + 8 hex chars; retry with a new suffix on soft-delete identifier collisions.
-    project = create_project_with_identifier_retry(
+    # EV + 8 hex chars; a new suffix on soft-delete identifier collisions, the next name
+    # variant if the name itself is taken by residue from a crashed run.
+    project = create_project_with_collision_retry(
         plane,
         workspace_slug,
         name=project_name,
         identifier_prefix="EV",
         initial_suffix=run_prefix.upper(),
+        name_variants=name_variants,
     )
     ctx["project_id"] = project.id
     record_seeded_entity(ctx, "project", project.id)
     ctx["project_identifier"] = getattr(project, "identifier", None)
+    # The created name, not the requested one: the agent is told this in its preamble, so a
+    # name-collision retry that was not written back would name a project that does not exist.
+    ctx["project_name"] = getattr(project, "name", None) or project_name
 
     # Workspace first, then project. Seeding is per task-rep, so S5 turning workspace
     # customers off must be undone in teardown or a later C1 rep 403s.
