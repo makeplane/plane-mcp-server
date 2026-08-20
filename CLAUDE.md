@@ -55,7 +55,8 @@ Ordered as registered; the earlier one wraps the later:
 |---|---|
 | `PlaneLoggingMiddleware` | structured logging, plus the tool name |
 | `CoerceArguments` | repairs arguments a client encoded as strings, before validation (`coercion.py`) |
-| `ValidateActionArguments` | refuses arguments the chosen action does not accept, from the `ACTIONS` declaration |
+| `ValidateActionArguments` | refuses a call with no `action`, and arguments the chosen action does not accept, from the `ACTIONS` declaration |
+
 
 A dispatch tool's name is not its operation, so `PlaneLoggingMiddleware` adds `resource` and `action` to every `tools/call` record — start, success and error alike, where previously only success and error carried anything. For a retired name both are resolved through the alias table, since it carries no `action` of its own.
 
@@ -67,7 +68,7 @@ A dispatch tool's name is not its operation, so `PlaneLoggingMiddleware` adds `r
 
 `resource` + `action` names one operation however it was reached, and `tool != resource` is exactly the set of calls still arriving on a retired name. `legacy.py` also keeps its per-resolution log line, which predates these fields.
 
-Coercion runs before validation so an argument is judged by the value it repairs to. `ValidateActionArguments` closes a gap a per-tool schema cannot: every action's parameters share one schema, so an argument meant for another action validated cleanly and was then dropped, and the call answered a different question than the one asked. Only arguments carrying a value are judged, and retired names are exempt — they arrive with no `action` and under their own parameter spelling.
+Coercion runs before validation so an argument is judged by the value it repairs to. `ValidateActionArguments` closes a gap a per-tool schema cannot: every action's parameters share one schema, so an argument meant for another action validated cleanly and was then dropped, and the call answered a different question than the one asked. Only arguments carrying a value are judged. It also answers a call that names no `action` at all, because the schema error for that case reports the missing parameter without reporting one permitted value — and an agent probing a tool with empty arguments to learn its interface is asking exactly the question the action list answers. Retired names are exempt from both checks: they are keyed by their own retired name, which the `ACTIONS` table does not carry, so nothing there claims them.
 
 ### Client Context (`client.py`)
 
