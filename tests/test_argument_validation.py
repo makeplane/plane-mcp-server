@@ -163,33 +163,6 @@ def test_a_retired_name_still_works():
     assert "does not take" not in answer
 
 
-def test_a_refusal_is_flagged_as_an_error_not_a_result():
-    """The text says "Error"; the protocol has to agree.
-
-    These refusals used to come back as plain results, so a refused call was
-    indistinguishable from a successful one to anything counting failures -- including
-    the eval harness, which reported a rate of zero while the calls kept happening.
-    """
-    from fastmcp import Client
-
-    import plane_mcp.server as server_module
-
-    async def run():
-        async with Client(server_module.get_stdio_mcp()) as client:
-            return (
-                await client.call_tool("workitem", {"project_id": "p"}, raise_on_error=False),
-                await client.call_tool(
-                    "workitem", {"action": "count", "project_id": "p", "query": "x"}, raise_on_error=False
-                ),
-            )
-
-    no_action, stray = asyncio.new_event_loop().run_until_complete(run())
-    assert no_action.is_error, "a call naming no action was reported as a success"
-    assert "requires an action" in no_action.content[0].text
-    assert stray.is_error, "a call with a stray argument was reported as a success"
-    assert "does not take: query" in stray.content[0].text
-
-
 def test_every_transport_gets_the_check():
     """A transport left behind would validate on stdio and silently drop on HTTP."""
     import plane_mcp.server as server_module

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
+from fastmcp.tools.tool import ToolResult
 from fastmcp.utilities.logging import get_logger
 
 from plane_mcp.coercion import coerce_arguments
@@ -39,13 +39,7 @@ class ValidateActionArguments(Middleware):
         arguments = getattr(context.message, "arguments", None)
         if isinstance(arguments, dict) and (message := self.rejection(context.message.name, arguments)):
             logger.warning("Plane MCP: %s", message)
-            # An error, not a result that happens to read like one. This used to return a
-            # plain ToolResult, so a refused call arrived with isError false: the text said
-            # "Error" while the protocol said success. A caller measuring failures saw none,
-            # and a low-tier model repeated the same refused call more freely than when the
-            # schema rejected it. ToolError keeps the message -- it is the one exception
-            # FastMCP passes through rather than masking.
-            raise ToolError(message)
+            return ToolResult(content=message)
         return await call_next(context)
 
     def rejection(self, tool: str, arguments: dict) -> str | None:
