@@ -7,7 +7,7 @@ work items, cycles, modules, releases, customers and more.
 Built on [FastMCP](https://github.com/jlowin/fastmcp) and the official
 [`plane-sdk`](https://pypi.org/project/plane-sdk/).
 
-- **28 tools**, one per Plane resource, covering 183 operations
+- **30 tools**, one per Plane resource, covering 204 operations
 - **Local or remote** — stdio, streamable HTTP, SSE
 - **OAuth or API key** authentication
 
@@ -98,7 +98,7 @@ HTTP transport instead.
 
 ## Tools
 
-The server advertises 28 tools, one per resource. Each takes an `action`
+The server advertises 30 tools, one per resource. Each takes an `action`
 parameter that selects the operation:
 
 ```python
@@ -179,7 +179,8 @@ Structured JSON. Each tool call logs its name, duration, status and — when
 available — an opaque user id and the workspace slug.
 
 ```bash
-export LOG_USER_INFO=true    # also log the display name (PII); default false
+export LOG_USER_INFO=false    # also log the display name (PII);
+export LOG_PAYLOADS=false    # keep request payloads out of logs; default true
 ```
 
 Only the OAuth and PAT transports carry a display name; stdio is unaffected.

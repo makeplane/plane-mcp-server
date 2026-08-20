@@ -47,6 +47,7 @@ from plane_mcp.toolkit import (
     opt,
     page_params,
     plan_gated,
+    scoped,
     workspace_owns,
 )
 
@@ -319,6 +320,7 @@ def register(mcp: FastMCP) -> None:
         annotations=build_annotations(TITLE, ACTIONS),
     )
     @plan_gated("Work item properties")
+    @scoped("work item properties")
     def workitem_property(
         action: Literal[
             "list",

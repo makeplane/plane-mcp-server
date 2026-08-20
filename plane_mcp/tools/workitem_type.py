@@ -26,6 +26,7 @@ from plane_mcp.toolkit import (
     opt,
     page_params,
     plan_gated,
+    scoped,
     workspace_owns,
     workspace_owns_resource,
 )
@@ -143,6 +144,7 @@ def register(mcp: FastMCP) -> None:
         annotations=build_annotations(TITLE, ACTIONS),
     )
     @plan_gated("Work item types")
+    @scoped("work item types", PROJECT_TYPES_FEATURE)
     def workitem_type(
         action: Literal["list", "retrieve", "resolve", "create", "update", "delete", "import_to_project"],
         project_id: str = "",

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from html import escape
 from typing import Any
 
 
@@ -61,6 +62,15 @@ def one_of(name: str, value: Any, allowed: Sequence[str], hint: str = "") -> str
 def opt(value: Any) -> Any:
     """Normalise a sentinel default ("" / 0) back to None for SDK payloads."""
     return value if value not in ("", 0) else None
+
+
+def rich_text(html: str, plain: str) -> str | None:
+    """The HTML for a rich-text field, promoting plain text when no HTML was given."""
+    if html:
+        return html
+    if plain:
+        return "<p>" + escape(plain).replace("\n", "<br/>") + "</p>"
+    return None
 
 
 def coerce_list(value: Any, *, split: bool = True) -> list[Any] | None:

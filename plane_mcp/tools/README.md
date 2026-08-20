@@ -1,7 +1,6 @@
 # The tool surface
 
-**28 tools**, one per Plane resource, each taking an `action` parameter that
-selects the operation. 183 actions in total.
+**30 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 204 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")
@@ -9,12 +8,9 @@ workitem(action="list", project_id=..., pql='state__group = "started"')
 cycle(action="archive", project_id=..., cycle_id=...)
 ```
 
-A compact catalogue — 28 tools, ~57k characters — loads fully in every MCP client
-and leaves the context budget to the conversation.
+A compact catalogue — 30 tools, ~67k characters — loads fully in every MCP client and leaves the context budget to the conversation.
 
-## The shape of a resource module
-
-One module per resource, five parts, in this order:
+Five parts, in this order:
 
 ```python
 NAME = "label"                       # 1. identity
@@ -27,7 +23,6 @@ ACTIONS = (                          # 2. the declaration -- single source of tr
 )
 
 FOOTER = "color is a hex code such as #EF4444."   # 3. cross-cutting notes
-
 LEGACY = {"list_labels": "list", ...}             # 4. retired name -> action
 
 def register(mcp):                                # 5. dispatch
@@ -40,76 +35,21 @@ def register(mcp):                                # 5. dispatch
         ...
 ```
 
-`ACTIONS` generates the description and the MCP annotations, so documentation
-cannot drift from behaviour. `Action(read=True)` and `Action(destructive=True)`
-become `readOnlyHint` and `destructiveHint`.
-
-Register a new resource by adding the module and one entry in `registry.py`.
+`ACTIONS` generates the description, the MCP annotations *and* argument validation, so documentation cannot drift from behaviour. Add the module, add one entry to `registry.py`, done.
 
 ## Conventions
 
-**Parameters are plain typed defaults** — `= ""`, `= 0`, `= False`. Never
-`X | None = None`: Pydantic renders every optional union as a verbose
-`anyOf`-with-null block. Where `False` or `0` is a *meaningful value* distinct
-from "not supplied" — a visibility of `0`, an intake status of `-2` — use
-`bool | None` or `int | None` and say why in a comment.
-
-**Validate enum-valued parameters.** They are `str` in the schema, so check them
-in the dispatch with `one_of()`. An unrecognised value then returns an error
-naming the permitted set, rather than being dropped from the payload — dropping it
-writes the record without the field and reports success.
-
-**Declare every parameter an action takes, and only those.** The declaration is not
-just documentation: `ValidateActionArguments` checks each call against it, so an
-argument belonging to a different action is refused instead of silently dropped. One
-flat schema per tool cannot catch that — `query` is a real `workitem` parameter, just
-not one `count` has any use for, and a `count` call carrying it validated cleanly and
-then answered a different question. An argument left at its default is ignored, since
-some clients pad a request with every parameter. Retired names are exempt: they arrive
-with no `action` and under their own spelling.
-
-**Guard a plan-gated resource** with `@plan_gated("<feature>")` below `@mcp.tool`, so a
-402 becomes a message naming the feature rather than an error worth retrying. The
-argument is only the fallback label: where the refusal names the feature itself
-("Upgrade your plan to enable Epics"), that wins — one resource can trip several
-gates, and `project` trips five.
-
-**A guard names only what is absent.** Guard order is shared-prefix first: what
-every action needs, then what one action needs. For a guard covering more than
-one parameter use `needs()` rather than a shared condition:
-
-```python
-if error := needs(action, name=name, owned_by=owned_by):   # names owned_by only
-    return error
-
-if not name or not owned_by:                               # blames both
-    return missing(action, "name", "owned_by")
-```
-
-The error string is the model's self-correction channel: naming exactly what is
-absent lets it retry correctly on the next call.
-
-**An action that accepts a `cursor` must return one.** Return `envelope(response)`
-rather than `response.results`, so the caller receives `next_cursor` and can page
-through the full set.
-
-**Match the SDK's `params` type.** Some endpoints take `Mapping[str, Any]`
-(`page_params`), others a Pydantic query-params model (`as_params`) and call
-`.model_dump()` on it. A dict passed to the second kind raises `AttributeError`
-at call time.
-
-**Declare the type you mean; encoding is handled upstream.** A client that sends
-`'["uuid"]'` for an array parameter is repaired by `CoerceArguments` middleware
-before validation, driven by the schema alone. So type a list parameter as a list
-and a number as a number — there is no need to widen it to `str` to survive a
-client that stringifies. `coerce_list` remains for parameters genuinely declared
-`str`, such as `add_ids`, where a comma is a separator.
-
-**The surface spells it `workitem`; `plane-sdk` spells it `work_item`.** Tool
-names, action names and parameters use `workitem`. SDK namespaces, keyword
-arguments and model names keep `work_item`, as do Plane's PQL field names
-(`work_items__release_id`). `test_vocabulary.py` pins the boundary in both
-directions.
+| Rule | Why |
+|---|---|
+| Parameters are plain typed defaults (`= ""`, `= 0`) | `X \| None` renders a verbose `anyOf`-with-null block. Use `bool \| None` only where `False`/`0` is a real value distinct from unset — and say so in a comment |
+| Validate enums with `one_of()` | They are `str` in the schema; an unchecked value is dropped from the payload and the write reports success |
+| Declare every parameter an action takes, and only those | `ValidateActionArguments` checks calls against it. `query` is a real `workitem` parameter but useless to `count` — sent there it used to validate cleanly and answer a different question |
+| Use `needs()` for multi-parameter guards | It names only what is absent. `if not a or not b` blames both, so a caller that supplied `a` is told to send it again |
+| An action accepting `cursor` must return `envelope(response)` | Returning `response.results` lets a caller page in but never page on |
+| Match the SDK's `params` type: `page_params` vs `as_params` | Some endpoints take a `Mapping`, others a Pydantic model they call `.model_dump()` on. The wrong one raises at call time |
+| Declare the type you mean | `CoerceArguments` repairs `'["uuid"]'` before validation, so type a list as a list. `coerce_list` is for parameters genuinely declared `str`, where a comma separates |
+| `@plan_gated("<feature>")` on a plan-gated resource | Turns a 402 into a message naming the feature. The argument is a fallback — where the refusal names the feature, that wins |
+| The surface spells it `workitem`; `plane-sdk` spells it `work_item` | Tool names, actions and parameters use `workitem`; SDK namespaces, kwargs and PQL fields keep `work_item`. `test_vocabulary.py` pins both directions |
 
 ## Layout
 
@@ -118,82 +58,40 @@ directions.
 | `<resource>.py` | one module per resource |
 | `registry.py` | `RESOURCES` in advertised order, plus the alias tables |
 | `legacy.py` | `LegacyNames` — resolves retired tool names |
-| `../../toolkit/` | shared helpers: `spec`, `runtime`, `paging`, `governance`, `transforms` |
+| `../toolkit/` | shared helpers — see [`../toolkit/README.md`](../toolkit/README.md) |
 
-`RESOURCES` is an explicit tuple, not a directory scan. Its order is the
-advertised order and therefore a wire-format guarantee: tool definitions head a
-client's prompt cache, so reordering invalidates live conversations. Append;
-never re-sort. `test_resource_order_is_pinned` holds it to a literal list.
+`RESOURCES` is an explicit tuple, not a directory scan. Its order is the advertised order and therefore a wire-format guarantee: tool definitions head a client's prompt cache, so reordering invalidates live conversations. `test_resource_order_is_pinned` holds it to a literal list.
 
 ## Listing transforms
 
-Two `Transform`s wrap the registered tools. Both implement `list_tools`/`get_tool`
-only, so execution keeps the full schema and results — including
-`structuredContent` — are unchanged.
+Both implement `list_tools`/`get_tool` only, so execution keeps the full schema and results are unchanged.
 
-- **`StripOutputSchemas`** (`toolkit/transforms.py`) drops `outputSchema` from the
-  listing: roughly two thirds of the wire payload, for a field the MCP spec
-  defines as a client-side validation contract and no client forwards to a model.
-- **`LegacyNames`** (`legacy.py`) resolves a retired tool name to its
-  `(tool, action)` pair on lookup, with `action` hidden and pre-filled.
+| Transform | Effect |
+|---|---|
+| `StripOutputSchemas` | Drops `outputSchema` from the listing — roughly two-thirds of the wire payload, for a field no client forwards to a model |
+| `LegacyNames` | Resolves a retired tool name to its `(tool, action)` pair, with `action` hidden and pre-filled |
 
 ## Retired tool names
 
-Before consolidation this server exposed 177 tools, one per API operation. 169 of
-those names still resolve. They are not advertised, so they cost nothing in the
-listing, but a saved prompt or script calling `create_work_item` keeps working —
-including the parameter names it shipped with (`work_item_id`, not `workitem_id`).
-Each resolution is logged, so the set of remaining callers is an observation
-rather than a guess.
+Before consolidation this server exposed 177 tools, one per API operation. **169 still resolve**, unadvertised — so they cost nothing in the listing, but a saved prompt calling `create_work_item` keeps working, including the parameter names it shipped with (`work_item_id`, not `workitem_id`). Every resolution is logged, so the remaining callers are an observation rather than a guess.
 
-`tests/tools/_retired_names.py` is the frozen record of all 177, and the
-conformance suite asserts every one is aliased, declared unmappable, or still
-registered under the same name.
+**7 cannot be mapped.** An alias renames a tool; it cannot reshape one, and these chose between two operations with a parameter (`manage_project_archive(archive=False)`). Each is declared in its module's `LEGACY_UNMAPPED` with the replacement to use.
 
-An alias renames a tool; it cannot reshape one. Seven names chose between two
-operations with a parameter (`manage_project_archive(archive=False)`,
-`manage_release_labels(action="detach")`) and no single `(tool, action)` pair
-reproduces that. Each is declared in its module's `LEGACY_UNMAPPED` with the
-replacement to use, and the conformance suite holds that list to a budget.
+`tests/tools/_retired_names.py` is the frozen record of all 177; the conformance suite asserts every one is aliased, declared unmappable, or still registered.
 
 ## Scope: project vs workspace
 
-Plane governs some resources at the workspace as well as the project — the same
-resource under two SDK namespaces, with different id keyword names. The idiom a
-model sees is uniform: **supply `project_id` for the project's own set, omit it
-for the workspace's.**
+Plane governs some resources at the workspace as well as the project. The idiom a model sees is uniform: **supply `project_id` for the project's own set, omit it for the workspace's.**
 
-Getting it wrong is quiet — the call succeeds against the wrong scope — so each
-resource resolves scope once in a local `_scope_of`, and `test_governance.py`
-pins both namespaces and both id keywords against the live SDK.
+Getting it wrong is quiet — the call succeeds against the wrong scope — so each resource resolves scope once, at the top of its dispatch, and `test_governance.py` pins the namespaces and id keywords against the live SDK. How it resolves is the resource's own business: `workitem_type` returns a tuple, `state` and `workitem_property` a small local `_Scope`, because what differs between their scopes differs.
 
-Each resource resolves scope locally rather than through a shared abstraction,
-because the shapes differ: `workitem_type` is a two-way split, `workitem_property`
-is three-way and also varies the method name. Keep new ones local until a common
-shape is established by more than one caller.
-
-**When the workspace owns the resource outright**, the project-scoped write is
-refused. Two helpers, used together:
-
-- `workspace_owns_resource(client, slug, resource)` reads the workspace flag that
-  governs `resource`, so a caller can take the workspace path instead of provoking a
-  refusal it already knows is coming. There is no single governance flag: work item
-  types carry their own, while everything the governance migration moved (states,
-  labels, workflows, templates, automations) shares `states_owned_by_workspace`. A
-  workspace can own one and not the other, so `GOVERNED_BY` maps each resource to
-  the flag that actually governs it — a newly governed resource adds one row.
-- `workspace_owns(exc, field)` reads the refusal, which is what settles it: the flag
-  is cached and the lockout outlives it being toggled off, so a write can still be
-  refused after the flag reads false. It handles both shapes Plane uses.
-
-`workitem_type resolve` is the worked example: ask who owns types, adopt from the
-workspace catalogue and import if it does, otherwise create in the project — and
-adopt anyway if the project write is refused.
+Where the workspace owns a resource outright, both directions of wrong-scope write are refused. `@scoped("<noun>")` turns either into a message naming the scope that owns it — see [`../toolkit/README.md`](../toolkit/README.md).
 
 ## Tools
 
 | Tool | Actions |
 |---|---|
+| `collection` | `list` · `retrieve` · `create` · `update` · `delete` · `list_pages` · `search_pages` · `add_pages` · `remove_page` · `list_members` · `add_member` · `update_member` · `remove_member` |
 | `customer` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` |
 | `customer_property` | `list` · `retrieve` · `create` · `update` · `delete` · `get_values` · `set_values` |
 | `customer_request` | `list` · `retrieve` · `create` · `update` · `delete` |
@@ -205,13 +103,14 @@ adopt anyway if the project write is refused.
 | `member` | `me` · `list_workspace` · `list_project` · `list_roles` · `retrieve_role` |
 | `milestone` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` |
 | `module` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` · `archive` · `unarchive` |
-| `page` | `list` · `retrieve` · `create` · `list_workitem_pages` · `attach_to_workitem` · `detach_from_workitem` |
+| `page` | `list` · `retrieve` · `create` · `update` · `archive` · `delete` · `set_collection` · `list_workitem_pages` · `attach_to_workitem` · `detach_from_workitem` |
 | `project` | `list` · `retrieve` · `create` · `update` · `delete` · `archive` · `unarchive` · `worklog_summary` · `get_features` · `update_features` |
 | `project_estimate` | `retrieve` · `create` · `update` · `delete` · `link` · `list_points` · `create_points` · `update_point` · `delete_point` |
 | `release` | `list` · `retrieve` · `create` · `update` · `delete` · `get_changelog` · `update_changelog` · `list_workitems` · `manage_workitems` |
 | `release_label` | `list` · `create` · `update` · `delete` · `attach` · `detach` |
 | `release_tag` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `state` | `list` · `retrieve` · `create` · `update` · `delete` |
+| `template` | `list` · `create` · `update` · `delete` |
 | `work_log` | `list` · `create` · `update` · `delete` |
 | `workitem` | `list` · `list_archived` · `retrieve` · `retrieve_by_identifier` · `search` · `count` · `create` · `update` · `delete` · `archive` · `manage_assignee` · `manage_label` |
 | `workitem_activity` | `list` · `retrieve` |
