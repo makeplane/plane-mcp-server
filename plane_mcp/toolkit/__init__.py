@@ -28,6 +28,8 @@ from plane_mcp.toolkit.governance import (
     migration_in_progress,
     plan_gated,
     plan_required,
+    project_owns,
+    scoped,
     workspace_owns,
     workspace_owns_resource,
 )
@@ -42,6 +44,7 @@ from plane_mcp.toolkit.runtime import (
     opt,
     page_params,
     require,
+    rich_text,
 )
 from plane_mcp.toolkit.spec import (
     Action,
@@ -68,11 +71,14 @@ __all__ = [
     "needs",
     "one_of",
     "opt",
+    "rich_text",
     "page_params",
     "plan_gated",
     "plan_required",
+    "project_owns",
     "pql_failure",
     "require",
+    "scoped",
     "workspace_owns",
     "workspace_owns_resource",
     "workitem_page",
