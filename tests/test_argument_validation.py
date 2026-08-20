@@ -71,6 +71,30 @@ def test_action_itself_is_never_stray(rejection):
     assert rejection("workitem", {"action": "count"}) is None
 
 
+def test_a_call_that_chose_no_action_is_told_which_actions_exist(rejection):
+    """The observed failure: three of one weak model's six errored calls omitted
+    `action`, and Pydantic's missing_argument answer names the parameter without
+    naming a single permitted value -- so the turn buys nothing."""
+    message = rejection("project", {"project_id": "p"})
+    assert message and "requires an action" in message
+    for action in action_arguments()["project"]:
+        assert action in message, f"{action} missing from the refusal"
+
+
+def test_every_resource_names_its_actions_when_none_is_chosen(rejection):
+    """A resource left out would answer the one question the caller has with silence."""
+    for tool, actions in action_arguments().items():
+        message = rejection(tool, {})
+        assert message, f"{tool} refused a call with no action without saying why"
+        for action in actions:
+            assert action in message, f"{tool} omitted {action}"
+
+
+def test_a_call_with_no_action_on_an_unknown_tool_is_left_to_the_server(rejection):
+    """The missing-action check must not claim tools this server does not own."""
+    assert rejection("not_a_tool", {}) is None
+
+
 def test_an_unknown_action_is_left_to_the_schema(rejection):
     """The Literal reports the permitted set; a second opinion here would only muddle it."""
     assert rejection("workitem", {"action": "cout", "query": "x"}) is None
@@ -117,6 +141,13 @@ def test_a_stray_argument_never_reaches_plane():
     """The 403 the credentials would earn is the proof a call got through."""
     answer = _call("workitem", {"action": "count", "project_id": "p", "query": "urgent"})
     assert "does not take: query" in answer
+    assert "403" not in answer
+
+
+def test_a_call_with_no_action_never_reaches_plane():
+    """The refusal has to replace the schema error, not arrive after a wasted call."""
+    answer = _call("workitem", {"project_id": "p"})
+    assert "requires an action" in answer
     assert "403" not in answer
 
 
