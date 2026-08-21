@@ -1531,6 +1531,88 @@ def _create_project_name_collision_raises_without_variants(monkeypatch):
     assert attempts == ["EVAL x"]
 
 
+class _ReadTimeout(Exception):
+    """Stands in for requests' ReadTimeout: an error carrying no HTTP status."""
+
+
+def _create_project_adopts_the_project_a_timeout_orphaned(monkeypatch):
+    """A create that times out after the server made the project must not orphan it.
+
+    This is where the leftover projects came from: the client stopped waiting, the id was
+    never returned, so the caller never put it in the teardown context and teardown reported
+    cleanup_error 0 while the project sat in the workspace.
+    """
+    listed: list[str] = []
+
+    class TimeoutThenPresent:
+        def create(self, *, workspace_slug, data):
+            raise _ReadTimeout("HTTPConnectionPool(host='localhost', port=8000): Read timed out.")
+
+        def list(self, *, workspace_slug, params=None):
+            listed.append(workspace_slug)
+            return SimpleNamespace(
+                results=[
+                    SimpleNamespace(id="other", identifier="EVZZZZZZZZ", name="EVAL other"),
+                    SimpleNamespace(id="orphan", identifier="EVDEADBEEF", name="EVAL Delivery Planning Wren"),
+                ],
+                next_page_results=False,
+                next_cursor="100:0:0",
+            )
+
+    plane = MagicMock()
+    plane.projects = TimeoutThenPresent()
+
+    project = create_project_with_collision_retry(
+        plane,
+        "ws",
+        name="EVAL Delivery Planning Wren",
+        identifier_prefix="EV",
+        initial_suffix="DEADBEEF",
+    )
+    # Adopted by identifier, so the caller learns the id and teardown can delete it.
+    assert project.id == "orphan"
+    assert listed == ["ws"]
+
+
+def _create_project_reraises_when_nothing_was_created(monkeypatch):
+    """A timeout where the server created nothing must still fail, not invent a project."""
+
+    class TimeoutAndAbsent:
+        def create(self, *, workspace_slug, data):
+            raise _ReadTimeout("Read timed out.")
+
+        def list(self, *, workspace_slug, params=None):
+            return SimpleNamespace(results=[], next_page_results=False, next_cursor="100:0:0")
+
+    plane = MagicMock()
+    plane.projects = TimeoutAndAbsent()
+    with pytest.raises(_ReadTimeout):
+        create_project_with_collision_retry(
+            plane, "ws", name="EVAL x", identifier_prefix="EV", initial_suffix="00000000"
+        )
+
+
+def _create_project_does_not_adopt_after_an_http_refusal(monkeypatch):
+    """An HTTP error is a known outcome: nothing was created, so do not go looking."""
+    listed: list[str] = []
+
+    class Refuses:
+        def create(self, *, workspace_slug, data):
+            raise HttpError("server error", 500)
+
+        def list(self, *, workspace_slug, params=None):
+            listed.append(workspace_slug)
+            return SimpleNamespace(results=[], next_page_results=False, next_cursor=None)
+
+    plane = MagicMock()
+    plane.projects = Refuses()
+    with pytest.raises(HttpError):
+        create_project_with_collision_retry(
+            plane, "ws", name="EVAL x", identifier_prefix="EV", initial_suffix="00000000"
+        )
+    assert listed == [], "an HTTP refusal must not trigger an adoption lookup"
+
+
 def _create_project_exhausts_name_variants(monkeypatch):
     attempts: list[str] = []
 
@@ -1567,6 +1649,9 @@ def _create_project_exhausts_name_variants(monkeypatch):
         _create_project_advances_name_on_name_collision,
         _create_project_name_collision_raises_without_variants,
         _create_project_exhausts_name_variants,
+        _create_project_adopts_the_project_a_timeout_orphaned,
+        _create_project_reraises_when_nothing_was_created,
+        _create_project_does_not_adopt_after_an_http_refusal,
     ),
 )
 def test_create_behaviours(case, monkeypatch):

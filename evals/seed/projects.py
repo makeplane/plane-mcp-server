@@ -9,6 +9,7 @@ from typing import Any
 from plane import PlaneClient
 from plane.errors.errors import HttpError
 from plane.models.projects import CreateProject, ProjectFeature, UpdateProject
+from plane.models.query_params import PaginatedQueryParams
 from plane.models.work_items import CreateWorkItem
 from plane.models.workspaces import WorkspaceFeature
 
@@ -70,6 +71,28 @@ def is_identifier_collision(exc: BaseException) -> bool:
     return _is_collision(exc) and not is_name_collision(exc)
 
 
+def find_project_by_identifier(plane: PlaneClient, workspace_slug: str, identifier: str) -> Any | None:
+    """Return the project holding this exact identifier, or None.
+
+    Identifiers are unique per workspace, so this settles the one question an ambiguous
+    create leaves open: did the server create it before the client stopped waiting?
+    """
+    cursor = None
+    while True:
+        page = plane.projects.list(
+            workspace_slug=workspace_slug,
+            params=PaginatedQueryParams(per_page=100, cursor=cursor),
+        )
+        results = page.results if hasattr(page, "results") else page
+        for proj in results or []:
+            if (getattr(proj, "identifier", None) or "").strip().upper() == identifier.strip().upper():
+                return proj
+        # The SDK always populates next_cursor, so paging must stop on next_page_results.
+        if not getattr(page, "next_page_results", False):
+            return None
+        cursor = page.next_cursor
+
+
 def create_project_with_collision_retry(
     plane: PlaneClient,
     workspace_slug: str,
@@ -120,6 +143,24 @@ def create_project_with_collision_retry(
                 suffix = secrets.token_hex(4).upper()  # 8 hex chars / 32 bits
                 last_exc = exc
                 continue
+            # An exception carrying no HTTP status means the client never learned the outcome:
+            # the server may well have created the project before the read timed out. That is
+            # how the orphans got there. The id was never returned, so the caller never put it
+            # in the teardown context, so teardown was never asked to delete it -- and reported
+            # cleanup_error 0 truthfully while a project sat in the workspace, skewing every
+            # later workspace-wide task. Adopting the project both removes the orphan and turns
+            # a lost row into a normal one.
+            #
+            # Limited to no-response errors on purpose. A 5xx is also ambiguous in principle,
+            # but the measured failure is a client-side read timeout, and treating every HTTP
+            # error as maybe-created would adopt projects after refusals that created nothing.
+            if not isinstance(exc, HttpError):
+                try:
+                    adopted = find_project_by_identifier(plane, workspace_slug, identifier)
+                except Exception:
+                    adopted = None  # Lookup failed too; report the original failure.
+                if adopted is not None:
+                    return adopted
             raise
     if last_exc is None:
         raise RuntimeError(
