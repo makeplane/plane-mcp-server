@@ -100,6 +100,20 @@ additive. Status outranks wording: a 404 whose body mentions a missing argument 
 absent resource, since only a payload with no status at all can be a call that never reached the
 API. The split cannot charge a surface for misleading an agent into a single wrong lookup.
 
+A refusal the server reports as a **successful** result is classified too, and counted in the
+split while staying out of the errored-call total, which is keyed on the protocol's error flag.
+Reports state that count separately (`N refusal(s) arrived flagged as successful results`) so the
+two never silently merge. Without it the metric was blind to roughly a third of what agents
+actually get told no about: a run measuring 12.8% refusals was really near 28%. Detection is
+deliberately narrow — only wording this server owns, and the stray-argument form must carry both
+halves of its sentence — so a result that merely quotes a refusal is not counted as one.
+
+Recorded payloads carry the **request** as well (`args_json`, under
+`--record-result-payloads`). Args are otherwise metrics-only: a recorded refusal that cannot be
+attributed to the target it names answers half a question. This is what separated an agent
+linking the wrong work item from a create that does not persist, when both fit the same
+symptom.
+
 Single-run success headlines use the same sampling unit: each evaluated task contributes
 its repetition success rate, and a deterministic cluster bootstrap resamples whole tasks.
 The pooled repetition rate and its Wilson interval remain visible as a descriptive figure,

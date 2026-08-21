@@ -180,6 +180,15 @@ first absent read, which is an answer rather than an obstacle), plus `other` and
 friction never stands in for nothing having been classified — including when reading a result
 file recorded before the split existed. See DESIGN.md for the classification rules.
 
+A refusal the server hands back as a *successful* result is counted too, reported on its own
+line (`N refusal(s) arrived flagged as successful results`) because it cannot join a total keyed
+on the protocol's error flag. It is worth watching: one measured surface refused roughly twice
+as often as its errored-call count implied.
+
+`--record-result-payloads` keeps the request args beside each recorded result. Args are
+metrics-only by default (`args_chars`), and a recorded result whose target is unknown cannot say
+*which* item a call acted on — which is exactly the question a failing write raises.
+
 Every result row carries a `battery` fingerprint derived from the selected catalog's task IDs,
 prompts, and catalog revision, plus a `task_fingerprint` over that row's task ID, prompt, and
 fixture names. The battery contains exactly what the agent is asked and no expectation about
