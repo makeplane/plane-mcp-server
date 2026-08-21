@@ -33,6 +33,13 @@ dev = [
 evals = [
     "anthropic>=0.121.0",
 ]
+# The OpenAI API provider is a second vendor's client, so it stays opt-in rather than being
+# imposed on an anthropic-only install. Declared all the same: without it, `--provider openai`
+# is a provider the harness advertises in KNOWN_API_PROVIDERS and cannot run, and a result
+# anyone else has to reproduce should not depend on remembering an undeclared package.
+evals-openai = [
+    "openai>=1.0.0",
+]
 
 [project.scripts]
 plane-mcp-server = "plane_mcp.__main__:main"
