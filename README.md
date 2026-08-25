@@ -145,6 +145,7 @@ unchanged.
 | `PLANE_API_KEY` | stdio | API key |
 | `PLANE_WORKSPACE_SLUG` | stdio | Target workspace |
 | `PLANE_BASE_URL` | optional | Plane API URL (default `https://api.plane.so`) |
+| `PLANE_SSL_VERIFY` | optional | TLS verification for `PLANE_BASE_URL` / `PLANE_INTERNAL_BASE_URL` (default: verify normally). `false`/`0`/`no` disables verification entirely — a warning is logged on every use, since this removes protection against a man-in-the-middle; only use it for a self-hosted instance you control. A path to an existing file is treated as a CA bundle. |
 
 The remote transports carry credentials in the connection — the OAuth flow or the
 PAT headers — and need none of these.
