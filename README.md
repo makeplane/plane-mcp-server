@@ -1,5 +1,20 @@
 # Plane MCP Server
 
+> ⚠️ **This is a fork** of [makeplane/plane-mcp-server](https://github.com/makeplane/plane-mcp-server).
+> For the upstream project's general setup, configuration and tool reference, read the
+> [official README](https://github.com/makeplane/plane-mcp-server#readme) — most of it applies here too.
+>
+> **What's different in this fork (read this before using the Pages tools):**
+> - The `page` tools (Pages API) were re-routed to Plane's **legacy `/api/` route** and authenticate with your
+>   **`PLANE_API_KEY`** sent as the `X-Api-Key` header. The upstream SDK hard-codes `/api/v1`, which returns
+>   **404** for Pages on Plane CE 1.4.2 (Pages live under `plane.app.urls`, not under `/api/v1/`).
+> - **Your Plane CE server needs a patch first.** API keys are rejected on the `/api/` tree unless you add
+>   `APIKeyAuthentication` to DRF's `DEFAULT_AUTHENTICATION_CLASSES` and to the view base classes.
+>   Get the patch + apply / bind-mount instructions here:
+>   **<https://github.com/Vincent-Wu-Haha/plane-ce-pages-apikey-patch>**
+> - The MCP client env vars are the same as upstream: `PLANE_API_KEY`, `PLANE_WORKSPACE_SLUG`, and
+>   (for self-hosted) `PLANE_BASE_URL`. With the server patch applied, those keys now also cover the Pages API.
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server for
 [Plane](https://plane.so). Gives an AI agent tools to read and manage projects,
 work items, cycles, modules, releases, customers and more.
