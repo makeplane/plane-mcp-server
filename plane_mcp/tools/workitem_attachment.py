@@ -42,7 +42,7 @@ ACTIONS = (
         read=True,
     ),
     Action("download_url", ("project_id", "workitem_id", "attachment_id"), read=True),
-    Action("upload_from_url", ("project_id", "workitem_id", "url"), ("name",)),
+    Action("upload_from_url", ("project_id", "workitem_id", "url"), ("name",), open_world=True),
     Action("delete", ("project_id", "workitem_id", "attachment_id"), destructive=True),
 )
 

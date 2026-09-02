@@ -894,7 +894,7 @@ wheels = [
 
 [[package]]
 name = "plane-mcp-server"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "." }
 dependencies = [
     { name = "authlib" },
@@ -920,7 +920,7 @@ requires-dist = [
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1,<2.35.0" },
     { name = "fastmcp", specifier = "==3.2.0" },
     { name = "mcp", specifier = "==1.26.0" },
-    { name = "plane-sdk", directory = "/Users/akhilvamshikonam/Documents/plane-python-sdk" },
+    { name = "plane-sdk", specifier = "==0.2.23" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4,<0.5.0" },
     { name = "pyjwt", specifier = ">=2.12.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -931,20 +931,15 @@ provides-extras = ["dev"]
 [[package]]
 name = "plane-sdk"
 version = "0.2.23"
-source = { directory = "/Users/akhilvamshikonam/Documents/plane-python-sdk" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "requests" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "pydantic", specifier = ">=2.4.0" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "pytest-dependency", marker = "extra == 'dev'" },
-    { name = "requests", specifier = ">=2.31.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/7e/89/c683207e50f641843273de4e19ac88154bdc89c522ec2cdab956201a4d1e/plane_sdk-0.2.23.tar.gz", hash = "sha256:aee2f3da583459b6a513f9200f703fac1942ea65c27dd6f6dd76872677535bd7", size = 102738, upload-time = "2026-08-20T10:35:34.387Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/38/6d7f7292025806b56655e38c6df3156b3a0ecac055d8dc0ef229fe30f1bb/plane_sdk-0.2.23-py3-none-any.whl", hash = "sha256:b2cdb86943f2cee43d066dce0e8af2b9fb955db757c4666b1a269e7c81d381c0", size = 147179, upload-time = "2026-08-20T10:35:33.017Z" },
 ]
-provides-extras = ["dev"]
 
 [[package]]
 name = "platformdirs"

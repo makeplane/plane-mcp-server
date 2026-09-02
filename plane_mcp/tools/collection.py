@@ -65,6 +65,7 @@ ACTIONS = (
         "remove_page",
         ("collection_id", "page_collection_id"),
         note="page_collection_id is the membership id from list_pages, not the page id; the page itself is kept",
+        destructive=True,
     ),
     Action("list_members", ("collection_id",), read=True),
     Action("add_member", ("collection_id", "user_id", "member_access")),
@@ -73,6 +74,7 @@ ACTIONS = (
         "remove_member",
         ("collection_id", "collection_member_id"),
         note="collection_member_id is the membership id from list_members, not the user id",
+        destructive=True,
     ),
 )
 

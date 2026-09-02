@@ -3,12 +3,16 @@
 Selects and verifies the storage backing the OAuth token cache used by the
 HTTP / SSE transports. Priority order (highest first):
 
-1. ``REDIS_PASSWORD`` + ``REDIS_HOST``/``REDIS_PORT`` → Redis with a static password.
-2. ``ELASTICACHE_SECRET_ARN`` + IRSA (``AWS_ROLE_ARN``) or EKS Pod Identity
+1. ``REDIS_URL`` → Redis from a single connection URL. The URL carries host,
+   port, db, credentials and TLS (``rediss://``) in one value; ``REDIS_SSL``
+   is ignored here because the scheme already decides. ``REDIS_PASSWORD``
+   applies only when the URL itself carries no password.
+2. ``REDIS_PASSWORD`` + ``REDIS_HOST``/``REDIS_PORT`` → Redis with a static password.
+3. ``ELASTICACHE_SECRET_ARN`` + IRSA (``AWS_ROLE_ARN``) or EKS Pod Identity
    (``AWS_CONTAINER_CREDENTIALS_FULL_URI``) + host/port → Redis with a rotating
    AUTH token from AWS Secrets Manager.
-3. ``REDIS_HOST`` + ``REDIS_PORT`` → plain Redis (no auth).
-4. None of the above → in-memory store (dev only; tokens lost on restart).
+4. ``REDIS_HOST`` + ``REDIS_PORT`` → plain Redis (no auth).
+5. None of the above → in-memory store (dev only; tokens lost on restart).
 
 Misconfigurations raise ``RuntimeError`` at startup. Reachability is verified
 eagerly with a synchronous PING.
@@ -18,6 +22,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from fastmcp.utilities.logging import get_logger
 from key_value.aio.stores.memory import MemoryStore
@@ -37,6 +42,54 @@ def _redis_ssl_enabled(default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _redact_url(url: str) -> str:
+    """The URL with any password replaced, safe to log."""
+    parsed = urlparse(url)
+    if not parsed.password:
+        return url
+    netloc = f"{parsed.username or ''}:***@{parsed.hostname}" + (f":{parsed.port}" if parsed.port else "")
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
+def _url_password_override(url: str, password: str | None) -> dict[str, str]:
+    """Extra client kwargs for a URL-configured connection.
+
+    The URL's own credentials win; ``REDIS_PASSWORD`` fills in only when the
+    URL carries none. Returned as kwargs rather than a value so an absent
+    override cannot clobber a URL-embedded password with ``None``.
+    """
+    if password and not urlparse(url).password:
+        return {"password": password}
+    return {}
+
+
+def _ping_redis_url(url: str, *, password: str | None = None, timeout_seconds: float = 5.0) -> None:
+    """Verify Redis reachability from a connection URL with a one-shot PING.
+
+    ``redis.Redis.from_url`` honours the scheme (``rediss://`` enables TLS)
+    and any query parameters. Raises ``RuntimeError`` on failure.
+    """
+    import redis  # local: only loaded when Redis is configured
+
+    client = redis.Redis.from_url(
+        url,
+        socket_connect_timeout=timeout_seconds,
+        socket_timeout=timeout_seconds,
+        **_url_password_override(url, password),
+    )
+    try:
+        client.ping()
+    except Exception as exc:
+        raise RuntimeError(f"Redis connection failed during startup PING: {exc}") from exc
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+    logger.info("Redis connection verified (PING succeeded)")
 
 
 def _ping_redis(
@@ -80,12 +133,36 @@ def build_token_store() -> Any:
     See the module docstring for the selection priority. The returned object
     is handed verbatim to ``PlaneOAuthProvider`` as ``client_storage``.
     """
+    redis_url = os.getenv("REDIS_URL")
     redis_host = os.getenv("REDIS_HOST")
     redis_port = os.getenv("REDIS_PORT")
     password = os.getenv("REDIS_PASSWORD")
     secret_arn = os.getenv("ELASTICACHE_SECRET_ARN")
 
-    # 1. Static-password Redis
+    # 1. Redis by connection URL
+    if redis_url:
+        if secret_arn:
+            logger.warning("Both REDIS_URL and ELASTICACHE_SECRET_ARN set — the URL wins, Secrets Manager ignored.")
+        if redis_host or redis_port:
+            logger.warning("Both REDIS_URL and REDIS_HOST/REDIS_PORT set — the URL wins, host/port ignored.")
+
+        _ping_redis_url(redis_url, password=password)
+
+        # Not RedisStore(url=...): its own URL parser keeps host/port/db but
+        # drops the scheme, silently downgrading rediss:// to plaintext.
+        # redis-py's from_url honours the scheme and query parameters.
+        from redis.asyncio import Redis as AsyncRedis
+
+        async_client = AsyncRedis.from_url(
+            redis_url,
+            decode_responses=True,
+            **_url_password_override(redis_url, password),
+        )
+        store = RedisStore(client=async_client)
+        logger.info("Token store: Redis (url=%s)", _redact_url(redis_url))
+        return store
+
+    # 2. Static-password Redis
     if password:
         if not (redis_host and redis_port):
             raise RuntimeError("REDIS_PASSWORD is set but REDIS_HOST/REDIS_PORT are not — set both to use Redis.")
@@ -107,7 +184,7 @@ def build_token_store() -> Any:
         )
         return store
 
-    # 2. ElastiCache + Secrets Manager
+    # 3. ElastiCache + Secrets Manager
     if secret_arn and _has_aws_credentials():
         if not (redis_host and redis_port):
             raise RuntimeError(
@@ -154,13 +231,15 @@ def build_token_store() -> Any:
             "skipping Secrets Manager auth."
         )
 
-    # 3. Plain Redis
+    # 4. Plain Redis
     if redis_host and redis_port:
         _ping_redis(redis_host, int(redis_port))
         store = RedisStore(host=redis_host, port=int(redis_port))
         logger.info("Token store: Redis (auth=none, host=%s, port=%s)", redis_host, redis_port)
         return store
 
-    # 4. In-memory fallback
-    logger.warning("Token store: in-memory (tokens lost on restart). Set REDIS_HOST and REDIS_PORT for production.")
+    # 5. In-memory fallback
+    logger.warning(
+        "Token store: in-memory (tokens lost on restart). Set REDIS_URL or REDIS_HOST and REDIS_PORT for production."
+    )
     return MemoryStore()

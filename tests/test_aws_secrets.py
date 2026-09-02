@@ -46,6 +46,7 @@ def _reset_state(monkeypatch):
     aws_secrets._SECRET_CACHE.clear()
 
     for k in (
+        "REDIS_URL",
         "REDIS_HOST",
         "REDIS_PORT",
         "REDIS_PASSWORD",
@@ -109,6 +110,7 @@ def _forbid_boto3_secretsmanager(monkeypatch) -> None:
 def no_ping(monkeypatch):
     """Skip the synchronous Redis PING so store-resolution tests need no Redis."""
     monkeypatch.setattr(storage, "_ping_redis", lambda *a, **kw: None)
+    monkeypatch.setattr(storage, "_ping_redis_url", lambda *a, **kw: None)
 
 
 @pytest.fixture
@@ -263,6 +265,65 @@ def test_build_token_store_host_port_only_returns_redis(monkeypatch, no_ping):
     monkeypatch.setenv("REDIS_PORT", "6379")
     _forbid_boto3_secretsmanager(monkeypatch)
     assert isinstance(build_token_store(), RedisStore)
+
+
+def test_build_token_store_url_returns_redis(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    _forbid_boto3_secretsmanager(monkeypatch)
+    assert isinstance(build_token_store(), RedisStore)
+
+
+def test_build_token_store_url_wins_over_host_port(monkeypatch, no_ping, capture_log):
+    caplog = capture_log("fastmcp.plane_mcp.storage")
+    monkeypatch.setenv("REDIS_URL", "redis://url-host:6390/2")
+    monkeypatch.setenv("REDIS_HOST", "other-host")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+
+    store = build_token_store()
+
+    assert isinstance(store, RedisStore)
+    kwargs = store._client.connection_pool.connection_kwargs
+    assert kwargs["host"] == "url-host"
+    assert kwargs["port"] == 6390
+    assert kwargs["db"] == 2
+    assert any("host/port ignored" in rec.message for rec in caplog.records)
+
+
+def test_build_token_store_url_wins_over_arn(monkeypatch, no_ping, capture_log):
+    caplog = capture_log("fastmcp.plane_mcp.storage")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("ELASTICACHE_SECRET_ARN", ARN)
+    monkeypatch.setenv("AWS_ROLE_ARN", "arn:aws:iam::123:role/test")
+    _forbid_boto3_secretsmanager(monkeypatch)
+
+    assert isinstance(build_token_store(), RedisStore)
+    assert any("Secrets Manager ignored" in rec.message for rec in caplog.records)
+
+
+def test_build_token_store_rediss_url_enables_tls(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_URL", "rediss://:pw@localhost:6379/0")
+    store = build_token_store()
+    assert store._client.connection_pool.connection_class.__name__ == "SSLConnection"
+
+
+def test_build_token_store_url_password_env_fills_gap(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("REDIS_PASSWORD", "env-pw")
+    store = build_token_store()
+    assert store._client.connection_pool.connection_kwargs["password"] == "env-pw"
+
+
+def test_build_token_store_url_own_password_beats_env(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_URL", "redis://:url-pw@localhost:6379/0")
+    monkeypatch.setenv("REDIS_PASSWORD", "env-pw")
+    store = build_token_store()
+    assert store._client.connection_pool.connection_kwargs["password"] == "url-pw"
+
+
+def test_redact_url_hides_password():
+    assert storage._redact_url("redis://user:pw@host:6379/0") == "redis://user:***@host:6379/0"
+    assert storage._redact_url("rediss://:pw@host:6380") == "rediss://:***@host:6380"
+    assert storage._redact_url("redis://host:6379/0") == "redis://host:6379/0"
 
 
 def test_build_token_store_password_wins_over_arn(monkeypatch, no_ping, capture_log):

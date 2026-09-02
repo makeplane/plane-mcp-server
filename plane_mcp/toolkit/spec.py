@@ -26,6 +26,7 @@ class Action:
     note: str = ""
     read: bool = False
     destructive: bool = False
+    open_world: bool = False
 
     def line(self) -> str:
         """One rendered line of the tool description."""
@@ -58,7 +59,10 @@ def build_annotations(title: str, actions: tuple[Action, ...]) -> ToolAnnotation
         readOnlyHint=all(action.read for action in actions),
         destructiveHint=any(action.destructive for action in actions),
         idempotentHint=False,
-        openWorldHint=True,
+        # Nearly every action acts only on the caller's own Plane workspace
+        # through the authenticated API -- a closed domain. An action reaching
+        # beyond it (fetching a caller-supplied URL, say) declares open_world.
+        openWorldHint=any(action.open_world for action in actions),
     )
 
 
