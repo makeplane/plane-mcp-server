@@ -20,6 +20,11 @@ from typing import Any, get_args, get_origin, get_type_hints
 from plane import PlaneClient
 from pydantic import BaseModel, TypeAdapter
 
+try:  # Python 3.14+ evaluates annotations inside inspect.signature; see _signature_of
+    from annotationlib import Format as _AnnotationFormat
+except ImportError:  # pragma: no cover - Python < 3.13 has no annotationlib
+    _AnnotationFormat = None
+
 types_UnionType = type(int | str)  # `X | Y` annotations are not typing.Union
 
 
@@ -132,12 +137,39 @@ def _validate(method: str, param: inspect.Parameter, annotation: Any, value: Any
         raise TypeError(f"{method}(): argument {param.name}={value!r} does not satisfy {annotation}: {exc}") from exc
 
 
+#: SDK methods whose annotations would not evaluate eagerly. Kept visible rather than
+#: swallowed: a type-check that quietly checks nothing is worse than one that fails.
+UNEVALUATED_ANNOTATIONS: set[str] = set()
+
+
+def _signature_of(path: str, fn: Any) -> inspect.Signature:
+    """Bind-capable signature, even for a method whose annotations will not evaluate.
+
+    Python 3.14 (PEP 649) made annotations lazy, and ``inspect.signature`` evaluates
+    them. plane-sdk declares twelve methods as ``def list(self, ...) -> list[...]``,
+    and under lazy evaluation the class namespace is in scope, so ``list`` resolves to
+    the method being defined rather than the builtin -- subscripting a function raises
+    TypeError. Before 3.14 the annotation was evaluated at ``def`` time, before that
+    name was bound, so this never came up.
+
+    FORWARDREF still resolves what it can (``list[int]`` comes back intact) and leaves
+    the rest as ForwardRefs, so binding *and* type-checking survive the fallback.
+    """
+    try:
+        return inspect.signature(fn)
+    except (TypeError, NameError):
+        if _AnnotationFormat is None:  # pragma: no cover - Python < 3.14 never gets here
+            raise
+        UNEVALUATED_ANNOTATIONS.add(path)
+        return inspect.signature(fn, annotation_format=_AnnotationFormat.FORWARDREF)
+
+
 class _Method:
     def __init__(self, spy: SpyClient, path: str, fn: Any) -> None:
         self._spy = spy
         self._path = path
         self._fn = fn
-        self._signature = inspect.signature(fn)
+        self._signature = _signature_of(path, fn)
         try:
             self._hints = get_type_hints(fn)
         except Exception:
