@@ -41,7 +41,9 @@ from plane_mcp.toolkit import (
     one_of,
     opt,
     pql_failure,
+    resolve_per_page,
     rich_text,
+    sparse_dump,
 )
 
 logger = get_logger(__name__)
@@ -278,7 +280,7 @@ def register(mcp: FastMCP) -> None:
             params = WorkItemQueryParams(
                 pql=opt(pql),
                 order_by=opt(order_by),
-                per_page=opt(per_page),
+                per_page=resolve_per_page(per_page),
                 cursor=opt(cursor),
                 expand=opt(expand),
                 fields=opt(fields),
@@ -333,11 +335,14 @@ def register(mcp: FastMCP) -> None:
                     f"Error: invalid work item identifier {workitem_identifier!r}. "
                     "Expected PROJECT-N, for example ENG-42."
                 )
-            return client.work_items.retrieve_by_identifier(
-                workspace_slug=workspace_slug,
-                project_identifier=head,
-                issue_identifier=int(sequence),
-                params=retrieve_params(),
+            return sparse_dump(
+                client.work_items.retrieve_by_identifier(
+                    workspace_slug=workspace_slug,
+                    project_identifier=head,
+                    issue_identifier=int(sequence),
+                    params=retrieve_params(),
+                ),
+                fields,
             )
 
         if not project_id:
@@ -356,11 +361,14 @@ def register(mcp: FastMCP) -> None:
             return missing(action, "workitem_id")
 
         if action == "retrieve":
-            return client.work_items.retrieve(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                work_item_id=workitem_id,
-                params=retrieve_params(),
+            return sparse_dump(
+                client.work_items.retrieve(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    work_item_id=workitem_id,
+                    params=retrieve_params(),
+                ),
+                fields,
             )
 
         if action == "update":

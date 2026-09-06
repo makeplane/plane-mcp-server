@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+from plane_mcp.pql_reference import PQL_FIELD_DESCRIPTION
 from plane_mcp.toolkit.spec import action_names
 
 PQL_FIELD = re.compile(r"work_items__\w+")
@@ -46,6 +47,13 @@ def test_the_pql_reference_output_says_workitem(registered):
     read = registered["get_pql_reference"].fn
     for detail in ("full", "brief"):
         assert not _residue(json.dumps(read(detail=detail))), detail
+
+
+def test_the_default_pql_reference_is_brief(registered):
+    """The default call must return the brief reference, not full."""
+    read = registered["get_pql_reference"].fn
+    result = read()
+    assert result == {"detail": "brief", "reference": PQL_FIELD_DESCRIPTION}
 
 
 @pytest.mark.parametrize(
