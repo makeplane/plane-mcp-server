@@ -324,6 +324,12 @@ def register(mcp: FastMCP) -> None:
         if action == "search":
             if not query:
                 return missing(action, "query")
+            # Note: search returns WorkItemSearch (issues: list[WorkItemSearchItem]).
+            # Each item is already a lightweight projection (6 fields: id, name, sequence_id,
+            # project__identifier, project_id, workspace__slug) without descriptions or blobs.
+            # Sparse projection is delegated to Plane API via retrieve_params(fields=fields).
+            # Wrapping with sparse_dump would wipe out search results because WorkItemSearch
+            # contains an 'issues' list rather than individual item fields at top level.
             return client.work_items.search(workspace_slug=workspace_slug, query=query, params=retrieve_params())
 
         if action == "retrieve_by_identifier":
