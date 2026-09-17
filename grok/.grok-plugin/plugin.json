@@ -1,0 +1,19 @@
+{
+  "name": "plane",
+  "version": "1.0.0",
+  "description": "Plane project management via the hosted Plane MCP server at mcp.plane.so. Manage projects, work items, cycles, modules, releases and customers, and query work items with PQL. Sign in with a Plane account on first connect.",
+  "author": {
+    "name": "Plane",
+    "url": "https://plane.so"
+  },
+  "homepage": "https://plane.so",
+  "repository": "https://github.com/makeplane/plane-mcp-server",
+  "license": "MIT",
+  "keywords": [
+    "plane",
+    "plane.so",
+    "plane mcp",
+    "plane work item",
+    "plane cycle"
+  ]
+}
