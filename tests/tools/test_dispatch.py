@@ -121,6 +121,8 @@ def test_action_reaches_the_sdk(mod, action, registered, spy):
     """A fully-specified action must produce a real, well-typed SDK call."""
     if (mod.NAME, action.name) in NEEDS_FIXTURE:
         pytest.skip("needs populated remote state; covered by test_attachments.py")
+    if (mod.NAME, action.name) == ("page", "update"):
+        spy.returns["pages._patch"] = {"id": "page"}
     tool = registered[mod.NAME]
     result = tool.fn(**_call_args(mod, action, tool))
 
@@ -320,3 +322,19 @@ def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_m
         if phrase in registered[mod.NAME].description.lower()
     ]
     assert not offenders, f"descriptions predicting a refusal instead of letting the API report it: {offenders}"
+
+
+@pytest.mark.parametrize(
+    ("project_id", "endpoint"),
+    [("p", "acme/projects/p/pages/page"), ("", "acme/pages/page")],
+    ids=["project", "workspace"],
+)
+def test_page_update_uses_patch_transport(project_id, endpoint, registered, spy):
+    """Self-hosted Plane exposes Page updates as PATCH, not the SDK's PUT."""
+    spy.returns["pages._patch"] = {"id": "page", "name": "Renamed"}
+    registered["page"].fn(action="update", project_id=project_id, page_id="page", name="Renamed")
+
+    call = spy.recorder.only()
+    assert call.method == "pages._patch"
+    assert call.kwargs["endpoint"] == endpoint
+    assert call.kwargs["data"] == {"name": "Renamed"}
