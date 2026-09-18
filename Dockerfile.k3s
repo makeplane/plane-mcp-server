@@ -11,12 +11,14 @@
 ARG PYTHON_VERSION=3.11
 ARG UV_VERSION=latest
 
+# ---------- uv (must be declared before builder so it builds first) ---------
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 # ---------- builder ---------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS builder
-ARG UV_VERSION
 
-# uv from official image (multi-arch)
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /usr/local/bin/uv
+# uv from the uv stage built above.
+COPY --from=uv /uv /usr/local/bin/uv
 
 WORKDIR /src
 
