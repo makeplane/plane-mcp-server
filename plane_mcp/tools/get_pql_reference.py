@@ -44,7 +44,7 @@ def register(mcp: FastMCP) -> None:
             openWorldHint=False,
         ),
     )
-    def get_pql_reference(detail: Literal["brief", "full"] = "full") -> dict:
+    def get_pql_reference(detail: Literal["brief", "full"] = "brief") -> dict:
         if detail == "brief":
             return {"detail": "brief", "reference": PQL_FIELD_DESCRIPTION}
         return {"detail": "full", "reference": PQL_FULL_REFERENCE}

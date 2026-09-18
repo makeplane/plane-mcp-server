@@ -16,10 +16,27 @@ from fastmcp.utilities.logging import get_logger
 from plane.errors.errors import HttpError
 from plane.models.query_params import WorkItemQueryParams
 
-from plane_mcp.pql_reference import PQL_FULL_REFERENCE
+from plane_mcp.pql_reference import PQL_FIELD_DESCRIPTION, PQL_FULL_REFERENCE
 from plane_mcp.toolkit.runtime import opt
 
 logger = get_logger(__name__)
+
+
+PER_PAGE_CAP = 100
+DEFAULT_PER_PAGE = 25
+
+
+def resolve_per_page(per_page: int) -> int:
+    """Apply the server-side per_page default and cap."""
+    return min(per_page or DEFAULT_PER_PAGE, PER_PAGE_CAP)
+
+
+def sparse_dump(item: Any, fields: str | None) -> Any:
+    """model_dump(include=...) when `fields` names a fieldset, else the model itself."""
+    if not fields:
+        return item
+    requested = {name.strip() for name in fields.split(",")} - {""}
+    return item.model_dump(include=requested)
 
 
 def dump_results(items: Any, fields: str | None) -> list[Any]:
@@ -96,7 +113,7 @@ def workitem_page(
             params=WorkItemQueryParams(
                 pql=opt(pql),
                 order_by=opt(order_by),
-                per_page=opt(per_page),
+                per_page=resolve_per_page(per_page),
                 cursor=opt(cursor),
                 expand=opt(expand),
                 fields=opt(fields),
@@ -121,8 +138,9 @@ def pql_failure(tool: str, action: str, pql: str, exc: HttpError) -> dict[str, A
     return {
         "error": detail,
         "failed_pql": pql,
-        "pql_reference": PQL_FULL_REFERENCE,
-        "hint": f"The PQL above failed. Fix it using the reference and retry {tool} {action}.",
+        "pql_reference": PQL_FIELD_DESCRIPTION,
+        "hint": f"The PQL above failed. Fix it using the brief reference, or call "
+                f"get_pql_reference(detail='full') for the full syntax, then retry {tool} {action}.",
     }
 
 

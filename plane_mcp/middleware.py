@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Collection
 from typing import Any
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
+from fastmcp.server.middleware.logging import StructuredLoggingMiddleware, default_serializer
 from fastmcp.tools.tool import ToolResult
 from fastmcp.utilities.logging import get_logger
+import logging
 
 from plane_mcp.coercion import coerce_arguments
 from plane_mcp.tools.registry import action_arguments, alias_table
 
 logger = get_logger(__name__)
+
+
+def _byte_size(value: Any) -> int:
+    """Byte size of a value after serialisation."""
+    return len(default_serializer(value).encode("utf-8"))
 
 
 def missing_action_error(tool: str, actions: Collection[str]) -> str:
@@ -117,6 +124,8 @@ class PlaneLoggingMiddleware(StructuredLoggingMiddleware):
     `tool` keeps its previous meaning -- the name the caller used -- so dashboards built
     on it keep counting the same thing. The two additions are additive, and they are on
     the start record as well, which previously carried neither.
+
+    Also records `input_bytes` and `output_bytes` for token-cost telemetry.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -139,11 +148,45 @@ class PlaneLoggingMiddleware(StructuredLoggingMiddleware):
             fields["action"] = action
         return fields
 
-    def _create_before_message(self, context: MiddlewareContext, *args: Any, **kwargs: Any) -> dict:
-        return super()._create_before_message(context, *args, **kwargs) | self._operation(context)
+    async def on_message(self, context: MiddlewareContext, call_next):
+        """Log with byte-size telemetry."""
+        if self.methods and context.method not in self.methods:
+            return await call_next(context)
+        input_bytes = _byte_size(context.message)
+        self._log_message(self._create_before_message(context, input_bytes))
+        start_time = time.perf_counter()
+        try:
+            result = await call_next(context)
+        except Exception as exc:
+            self._log_message(
+                self._create_error_message(context, start_time, input_bytes, exc),
+                logging.ERROR,
+            )
+            raise
+        self._log_message(
+            self._create_after_message(
+                context, start_time, input_bytes, _byte_size(result)
+            )
+        )
+        return result
 
-    def _create_after_message(self, context: MiddlewareContext, start_time: float) -> dict:
-        return super()._create_after_message(context, start_time) | self._operation(context)
+    def _create_before_message(self, context: MiddlewareContext, input_bytes: int) -> dict:
+        return super()._create_before_message(context) | self._operation(context) | {"input_bytes": input_bytes}
 
-    def _create_error_message(self, context: MiddlewareContext, start_time: float, error: Exception) -> dict:
-        return super()._create_error_message(context, start_time, error) | self._operation(context)
+    def _create_after_message(
+        self, context: MiddlewareContext, start_time: float, input_bytes: int, output_bytes: int
+    ) -> dict:
+        return (
+            super()._create_after_message(context, start_time)
+            | self._operation(context)
+            | {"input_bytes": input_bytes, "output_bytes": output_bytes}
+        )
+
+    def _create_error_message(
+        self, context: MiddlewareContext, start_time: float, input_bytes: int, error: Exception
+    ) -> dict:
+        return (
+            super()._create_error_message(context, start_time, error)
+            | self._operation(context)
+            | {"input_bytes": input_bytes}
+        )

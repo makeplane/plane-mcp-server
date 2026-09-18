@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1.7
+# Hardened, multi-stage build for k3s deployment.
+# - Resolves dependencies with uv into an isolated venv (no system Python pollution)
+# - Pins via uv.lock for reproducible builds
+# - Runs as non-root (uid 1001) with read-only root filesystem
+# - HEALTHCHECK against the FastMCP /health endpoint
+#
+# Default transport: `http` (streamable HTTP) — works for both header-http (PAT) and
+# OAuth deployments. Override at runtime via the Deployment's `args` / Helm values.
+
+ARG PYTHON_VERSION=3.11
+ARG UV_VERSION=latest
+
+# ---------- builder ---------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS builder
+ARG UV_VERSION
+
+# uv from official image (multi-arch)
+COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /usr/local/bin/uv
+
+WORKDIR /src
+
+# Copy only the lock + project metadata first to maximise layer cache
+COPY uv.lock pyproject.toml ./
+
+# Install the project and its runtime dependencies into .venv.
+# --frozen ensures uv.lock is respected exactly; --no-dev skips pytest/ruff.
+RUN uv sync --frozen --no-dev --no-install-project \
+ && uv sync --frozen --no-dev
+
+# Copy the package source last (changes more often than the lock)
+COPY plane_mcp ./plane_mcp
+
+# ---------- runtime ---------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_LINK_MODE=copy \
+    FASTMCP_PORT=8211 \
+    PATH="/app/.venv/bin:${PATH}"
+
+# Create a non-root user; home is /app so the venv ownership is clean.
+RUN groupadd --system --gid 1001 plane \
+ && useradd  --system --uid 1001 --gid plane --home /app --shell /sbin/nologin plane \
+ && mkdir -p /app \
+ && chown -R plane:plane /app
+
+WORKDIR /app
+
+# Copy the prebuilt venv and the source from the builder.
+COPY --from=builder --chown=plane:plane /src/.venv   /app/.venv
+COPY --from=builder --chown=plane:plane /src/plane_mcp /app/plane_mcp
+
+USER plane
+
+EXPOSE 8211
+
+# FastMCP exposes /health on the same port. We use a tiny inline Python check
+# to avoid pulling curl into the slim image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["python","-c","import urllib.request,sys; \
+sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8211/health',timeout=3).status==200 else 1)"]
+
+# Default command: streamable HTTP transport on port 8211.
+# Override in the Helm Deployment if you need stdio or SSE.
+CMD ["python", "-m", "plane_mcp", "http"]

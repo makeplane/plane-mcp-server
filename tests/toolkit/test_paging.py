@@ -6,7 +6,17 @@ import pytest
 from plane.errors.errors import HttpError
 from pydantic import BaseModel
 
-from plane_mcp.toolkit.paging import ENVELOPE_FIELDS, dump_results, envelope, pql_failure
+from plane_mcp.pql_reference import PQL_FIELD_DESCRIPTION
+from plane_mcp.toolkit.paging import (
+    DEFAULT_PER_PAGE,
+    ENVELOPE_FIELDS,
+    PER_PAGE_CAP,
+    dump_results,
+    envelope,
+    pql_failure,
+    resolve_per_page,
+    sparse_dump,
+)
 
 
 class Item(BaseModel):
@@ -90,7 +100,7 @@ def test_a_refusal_keyed_on_pql_carries_the_reference():
     failure = _failure({"pql": ["Unknown field 'stat'"]})
     assert failure is not None
     assert failure["failed_pql"] == 'stat = "done"'
-    assert failure["pql_reference"]
+    assert failure["pql_reference"] == PQL_FIELD_DESCRIPTION
     assert "workitem list" in failure["hint"]
 
 
@@ -129,6 +139,49 @@ def test_a_third_wording_would_still_reach_the_caller(body):
 def test_a_400_about_something_else_is_left_to_the_caller(body):
     """Attaching the reference here would blame the filter for a failure it did not cause."""
     assert _failure(body) is None
+
+
+class TestResolvePerPage:
+    """Unit tests for resolve_per_page."""
+
+    def test_zero_uses_default(self):
+        assert resolve_per_page(0) == DEFAULT_PER_PAGE
+
+    def test_small_value_unchanged(self):
+        assert resolve_per_page(7) == 7
+
+    def test_negative_passes_through(self):
+        # The SDK enforces ge=1; negative values are not clamped to default here.
+        assert resolve_per_page(-5) == -5
+
+    def test_over_cap_uses_cap(self):
+        assert resolve_per_page(250) == PER_PAGE_CAP
+
+    def test_exactly_cap(self):
+        assert resolve_per_page(100) == 100
+
+
+class TestSparseDump:
+    """Unit tests for sparse_dump."""
+
+    def test_none_fields_returns_original(self):
+        item = Item(id="1", name="test")
+        assert sparse_dump(item, None) is item
+
+    def test_fields_dumps_only_requested_keys(self):
+        item = Item(id="1", name="test")
+        result = sparse_dump(item, "id,name")
+        assert result == {"id": "1", "name": "test"}
+
+    def test_single_field(self):
+        item = Item(id="1", name="test")
+        result = sparse_dump(item, "id")
+        assert result == {"id": "1"}
+
+    def test_whitespace_in_fields_normalised(self):
+        item = Item(id="1", name="test")
+        result = sparse_dump(item, " id , name ")
+        assert result == {"id": "1", "name": "test"}
 
 
 @pytest.mark.parametrize(
