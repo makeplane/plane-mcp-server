@@ -12,7 +12,9 @@ import uvicorn
 from fastmcp.server.dependencies import get_access_token
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Mount
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
 
 from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
 
@@ -116,6 +118,21 @@ class ServerMode(Enum):
     HTTP = "http"
 
 
+async def health(request: Request) -> JSONResponse:
+    """Liveness and readiness probe endpoint."""
+    return JSONResponse({"status": "ok"})
+
+
+async def liveness(request: Request) -> JSONResponse:
+    """Dedicated liveness probe endpoint."""
+    return JSONResponse({"status": "ok"})
+
+
+async def readiness(request: Request) -> JSONResponse:
+    """Dedicated readiness probe endpoint."""
+    return JSONResponse({"status": "ok"})
+
+
 @asynccontextmanager
 async def combined_lifespan(oauth_app, header_app, sse_app):
     """Combine lifespans from both OAuth and Header MCP apps."""
@@ -169,6 +186,14 @@ def main() -> None:
         # advertised resource URL. base_url already carries the prefix, so these
         # stay at /mcp and /sse to avoid double-prefixing.
 
+        # Health/readiness routes — must come before MCP mounts so probes don't
+        # hit authenticated endpoints and get 401/404.
+        health_routes = [
+            Route("/health", health),
+            Route("/live", liveness),
+            Route("/ready", readiness),
+        ]
+
         # Build routes list dynamically based on what's configured
         routes = [
             # Well-known routes for Header HTTP
@@ -197,7 +222,7 @@ def main() -> None:
                     yield
 
         app = Starlette(
-            routes=routes,
+            routes=health_routes + routes,
             lifespan=dynamic_lifespan,
         )
 
