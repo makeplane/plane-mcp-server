@@ -145,30 +145,60 @@ def main() -> None:
     if server_mode == ServerMode.HTTP:
         prefix = os.getenv("MCP_PATH_PREFIX") or ""
 
-        oauth_mcp = get_oauth_mcp(prefix + "/http")
-        oauth_app = oauth_mcp.http_app(stateless_http=True)
         header_app = get_header_mcp().http_app(stateless_http=True)
 
-        sse_mcp = get_oauth_mcp(prefix)
-        sse_app = sse_mcp.http_app(transport="sse")
+        # Only create OAuth MCP instances if PLANE_OAUTH_PROVIDER_CLIENT_ID is set
+        oauth_mcp = None
+        oauth_app = None
+        oauth_well_known = []
+        if os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_ID"):
+            oauth_mcp = get_oauth_mcp(prefix + "/http")
+            oauth_app = oauth_mcp.http_app(stateless_http=True)
+            oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
+
+        # Only create SSE MCP instance if OAuth is configured
+        sse_mcp = None
+        sse_app = None
+        sse_well_known = []
+        if oauth_mcp:
+            sse_mcp = get_oauth_mcp(prefix)
+            sse_app = sse_mcp.http_app(transport="sse")
+            sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
 
         # mcp_path is appended to the auth provider's base_url to form the
         # advertised resource URL. base_url already carries the prefix, so these
         # stay at /mcp and /sse to avoid double-prefixing.
-        oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
-        sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
+
+        # Build routes list dynamically based on what's configured
+        routes = [
+            # Well-known routes for Header HTTP
+            Mount(prefix + "/http/api-key", app=header_app),
+        ]
+        if oauth_well_known:
+            routes.extend(oauth_well_known)
+        if sse_well_known:
+            routes.extend(sse_well_known)
+        if oauth_app:
+            routes.append(Mount(prefix + "/http", app=oauth_app))
+        if sse_app:
+            routes.append(Mount(prefix or "/", app=sse_app))
+
+        # Build lifespan based on what's running
+        async def dynamic_lifespan(app):
+            async with header_app.lifespan(header_app):
+                if oauth_app:
+                    async with oauth_app.lifespan(oauth_app):
+                        if sse_app:
+                            async with sse_app.lifespan(sse_app):
+                                yield
+                        else:
+                            yield
+                else:
+                    yield
 
         app = Starlette(
-            routes=[
-                # Well-known routes for OAuth and Header HTTP
-                *oauth_well_known,
-                *sse_well_known,
-                # Mount both MCP servers
-                Mount(prefix + "/http/api-key", app=header_app),
-                Mount(prefix + "/http", app=oauth_app),
-                Mount(prefix or "/", app=sse_app),
-            ],
-            lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
+            routes=routes,
+            lifespan=dynamic_lifespan,
         )
 
         app.add_middleware(
