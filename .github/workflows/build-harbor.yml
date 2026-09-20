@@ -47,8 +47,10 @@ jobs:
           raw="${TAG}"
           # Strip leading 'v' for SemVer tags, keep others (dev-main, sha) as-is
           stripped=$(echo "$raw" | sed -E 's/^v([0-9].*)/\1/')
-          echo "resolved=${stripped:-${raw}}" >> "$GITHUB_OUTPUT"
-          echo "Resolved image tag: ${stripped:-${raw}}"
+          base="${stripped:-${raw}}"
+          short_sha=$(printf '%.8s' "${{ github.sha }}")
+          echo "resolved=${base}-${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "Resolved image tag: ${base}-${short_sha}"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
