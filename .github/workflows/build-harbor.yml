@@ -82,8 +82,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           load: false
-          cache-from: type=gha,scope=harbor-${{ steps.scope.outputs.scope }}
-          cache-to:   type=gha,scope=harbor-${{ steps.scope.outputs.scope }},mode=max
+          # Use the Harbor registry as the build cache backend instead of GitHub
+          # Actions Cache (`type=gha`). The GHA cache backend intermittently
+          # returns a 400 HTML error page from Azure, which fails the build at
+          # the "exporting to GitHub Actions Cache" step.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ env.IMAGE }}:buildcache-${{ steps.scope.outputs.scope }}
+          cache-to:   type=registry,ref=${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ env.IMAGE }}:buildcache-${{ steps.scope.outputs.scope }},mode=max
           tags: |
             ${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ env.IMAGE }}:${{ steps.tag.outputs.resolved }}
             ${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ env.IMAGE }}:latest
