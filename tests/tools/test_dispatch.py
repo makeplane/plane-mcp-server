@@ -68,6 +68,7 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
 # Actions whose guard clause legitimately answers without calling the SDK.
 NO_CALL_EXPECTED: set[tuple[str, str]] = {
     ("get_pql_reference", "read"),  # returns static reference text
+    ("workspace", "retrieve"),  # answered from the connection's own credentials
 }
 
 # Actions that need populated remote state or an outbound HTTP fetch to get past
@@ -433,6 +434,7 @@ def test_a_link_update_with_neither_field_is_refused_before_plane_sees_it(regist
     assert result == "Error: action 'update' requires: url or title."
     assert not spy.recorder.calls
 
+
 def _update_sent(spy):
     return spy.recorder.only().kwargs["data"].model_dump(exclude_unset=True)
 
@@ -482,6 +484,18 @@ def test_argument_repair_keeps_the_default_distinct_from_null(sent, arrives, reg
     repaired, _ = coerce_arguments({"target_date": sent}, registered["workitem"].parameters)
 
     assert repaired["target_date"] == arrives
+
+
+def test_retrieving_the_workspace_asks_plane_nothing(registered, spy, monkeypatch):
+    """The binding is in the connection's own credentials, so a request would be waste.
+    `current_workspace` itself is covered in tests/test_client.py."""
+    from plane_mcp.tools import workspace
+
+    bound = {"slug": "acme", "id": "ws-1", "name": "Acme Inc", "connected_via": "oauth"}
+    monkeypatch.setattr(workspace, "current_workspace", lambda: bound)
+
+    assert registered["workspace"].fn(action="retrieve") == bound
+    assert not spy.recorder.calls
 
 
 def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_modules, registered):
