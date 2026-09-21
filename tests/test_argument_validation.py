@@ -98,24 +98,48 @@ def test_every_resource_names_its_actions_when_none_is_chosen(rejection):
     """A resource left out would answer the one question the caller has with silence."""
     for tool, actions in action_arguments().items():
         if len(actions) == 1:
-            continue  # nothing to choose between; see the one-action tests below
+            continue
         message = rejection(tool, {})
         assert message, f"{tool} refused a call with no action without saying why"
         for action in actions:
             assert action in message, f"{tool} omitted {action}"
 
 
-def test_a_one_action_tool_is_not_asked_to_choose(rejection):
-    """`get_pql_reference` has no `action` parameter, so demanding one refused every
-    call to it -- the tool was unreachable through the middleware."""
+def test_a_single_operation_tool_takes_no_action_parameter(rejection):
+    """get_pql_reference is the only single-operation tool: its schema omits
+    action, so demanding one leaves no valid call form. Its arguments are
+    still checked against its only action."""
     assert rejection("get_pql_reference", {}) is None
     assert rejection("get_pql_reference", {"detail": "brief"}) is None
+    message = rejection("get_pql_reference", {"bogus": 1})
+    assert message and "does not take: bogus" in message
 
 
-def test_a_one_action_tool_still_refuses_a_stray_argument(rejection):
-    """Inferring the sole action must not also waive the argument check."""
-    message = rejection("get_pql_reference", {"project_id": "p"})
-    assert message and "does not take: project_id" in message
+def test_a_call_with_no_action_on_an_unknown_tool_is_left_to_the_server(rejection):
+    """The missing-action check must not claim tools this server does not own."""
+    assert rejection("not_a_tool", {}) is None
+
+
+def test_an_unknown_action_is_left_to_the_schema(rejection):
+    """The Literal reports the permitted set; a second opinion here would only muddle it."""
+    assert rejection("workitem", {"action": "cout", "query": "x"}) is None
+
+
+def test_an_unknown_tool_is_left_to_the_server(rejection):
+    assert rejection("not_a_tool", {"action": "count", "query": "x"}) is None
+
+
+def test_a_retired_name_is_not_checked(rejection):
+    """It arrives with no action and under its own parameter spelling."""
+    assert rejection("retrieve_work_item", {"work_item_id": "w"}) is None
+
+
+def test_every_action_of_every_resource_accepts_its_own_declaration(rejection):
+    """Whatever an action declares must pass -- a table that rejects it is inverted."""
+    for tool, actions in action_arguments().items():
+        for action, accepted in actions.items():
+            arguments = {"action": action, **dict.fromkeys(accepted, "x")}
+            assert rejection(tool, arguments) is None, f"{tool} {action} rejected its own parameters"
 
 
 # --- a default the client echoes back is not a choice ------------------------
@@ -152,33 +176,6 @@ def test_no_advertised_parameter_defaults_to_a_value_only_one_action_takes(liste
                 f"{name}.{param} defaults to {prop['default']!r} but {', '.join(refused)} "
                 "would refuse it as a stray argument"
             )
-
-
-def test_a_call_with_no_action_on_an_unknown_tool_is_left_to_the_server(rejection):
-    """The missing-action check must not claim tools this server does not own."""
-    assert rejection("not_a_tool", {}) is None
-
-
-def test_an_unknown_action_is_left_to_the_schema(rejection):
-    """The Literal reports the permitted set; a second opinion here would only muddle it."""
-    assert rejection("workitem", {"action": "cout", "query": "x"}) is None
-
-
-def test_an_unknown_tool_is_left_to_the_server(rejection):
-    assert rejection("not_a_tool", {"action": "count", "query": "x"}) is None
-
-
-def test_a_retired_name_is_not_checked(rejection):
-    """It arrives with no action and under its own parameter spelling."""
-    assert rejection("retrieve_work_item", {"work_item_id": "w"}) is None
-
-
-def test_every_action_of_every_resource_accepts_its_own_declaration(rejection):
-    """Whatever an action declares must pass -- a table that rejects it is inverted."""
-    for tool, actions in action_arguments().items():
-        for action, accepted in actions.items():
-            arguments = {"action": action, **dict.fromkeys(accepted, "x")}
-            assert rejection(tool, arguments) is None, f"{tool} {action} rejected its own parameters"
 
 
 # --- the middleware, through a real server -----------------------------------
