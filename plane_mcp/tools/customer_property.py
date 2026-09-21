@@ -11,11 +11,10 @@ from plane.models.customers import (
     CustomerProperty,
     PaginatedCustomerPropertyResponse,
     PropertySettings,
-    PropertyType,
-    RelationType,
     SetCustomerPropertyValues,
     UpdateCustomerProperty,
 )
+from plane.models.enums import CustomerPropertyType, CustomerRelationType
 from plane.models.work_item_property_configurations import DateAttributeSettings, TextAttributeSettings
 
 from plane_mcp.client import get_plane_client_context
@@ -34,8 +33,8 @@ from plane_mcp.toolkit import (
 NAME = "customer_property"
 TITLE = "Customer properties"
 
-PROPERTY_TYPES = tuple(e.value for e in PropertyType)
-RELATION_TYPES = tuple(e.value for e in RelationType)
+PROPERTY_TYPES = tuple(e.value for e in CustomerPropertyType)
+RELATION_TYPES = tuple(e.value for e in CustomerRelationType)
 TEXT_FORMATS = get_args(TextAttributeSettings.model_fields["display_format"].annotation)
 DATE_FORMATS = get_args(DateAttributeSettings.model_fields["display_format"].annotation)
 
@@ -171,8 +170,8 @@ def register(mcp: FastMCP) -> None:
                     # The API requires `name` but stores a slug of display_name.
                     name=display_name,
                     display_name=display_name,
-                    property_type=PropertyType(property_type),
-                    relation_type=RelationType(relation_type) if relation_type else None,
+                    property_type=CustomerPropertyType(property_type),
+                    relation_type=CustomerRelationType(relation_type) if relation_type else None,
                     description=opt(description),
                     is_required=is_required,
                     default_value=coerce_list(default_value, split=False),
@@ -217,7 +216,7 @@ def register(mcp: FastMCP) -> None:
                 property_id=property_id,
                 data=UpdateCustomerProperty(
                     display_name=opt(display_name),
-                    relation_type=RelationType(relation_type) if relation_type else None,
+                    relation_type=CustomerRelationType(relation_type) if relation_type else None,
                     description=opt(description),
                     is_required=is_required,
                     default_value=coerce_list(default_value, split=False),
