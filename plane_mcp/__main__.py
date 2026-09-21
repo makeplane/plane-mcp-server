@@ -120,7 +120,7 @@ class ServerMode(Enum):
 
 async def health(request: Request) -> JSONResponse:
     """Liveness and readiness probe endpoint."""
-    return JSONResponse({"status": "ok"})
+    return JSONResponse({"plane-mcp-server": "health", "status": "ok"})
 
 
 async def liveness(request: Request) -> JSONResponse:
