@@ -232,7 +232,7 @@ def register(mcp: FastMCP) -> None:
         per_page: int = 0,
         # Tri-state: False publishes a draft, unset leaves the flag alone.
         is_draft: bool | None = None,
-        archive: bool = True,
+        archive: bool | None = None,
     ) -> WorkItem | WorkItemDetail | WorkItemSearch | dict[str, Any] | list[Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
@@ -376,9 +376,10 @@ def register(mcp: FastMCP) -> None:
             return None
 
         if action == "archive":
-            operation = client.work_items.archive if archive else client.work_items.unarchive
+            archiving = archive is not False
+            operation = client.work_items.archive if archiving else client.work_items.unarchive
             operation(workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id)
-            return {"workitem_id": workitem_id, "archived": archive}
+            return {"workitem_id": workitem_id, "archived": archiving}
 
         # manage_assignee / manage_label: read the current set, mutate it, write it back.
         add, remove, field = (

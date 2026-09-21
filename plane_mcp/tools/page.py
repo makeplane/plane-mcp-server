@@ -130,7 +130,7 @@ def register(mcp: FastMCP) -> None:
         access: int | None = None,
         color: str = "",
         is_locked: bool | None = None,
-        archive: bool = True,
+        archive: bool | None = None,
         external_source: str = "",
         external_id: str = "",
         cursor: str = "",
@@ -160,14 +160,15 @@ def register(mcp: FastMCP) -> None:
         if action == "archive":
             if not page_id:
                 return missing(action, "page_id")
+            archiving = archive is not False
             if project_id:
-                mover = client.pages.archive_project_page if archive else client.pages.unarchive_project_page
+                mover = client.pages.archive_project_page if archiving else client.pages.unarchive_project_page
                 mover(workspace_slug=workspace_slug, project_id=project_id, page_id=page_id)
             else:
-                mover = client.pages.archive_workspace_page if archive else client.pages.unarchive_workspace_page
+                mover = client.pages.archive_workspace_page if archiving else client.pages.unarchive_workspace_page
                 mover(workspace_slug=workspace_slug, page_id=page_id)
             # Plane answers nothing, and delete depends on this having happened.
-            return {"page_id": page_id, "archived": archive}
+            return {"page_id": page_id, "archived": archiving}
 
         if action in ("update", "delete"):
             if not page_id:
