@@ -433,6 +433,56 @@ def test_a_link_update_with_neither_field_is_refused_before_plane_sees_it(regist
     assert result == "Error: action 'update' requires: url or title."
     assert not spy.recorder.calls
 
+def _update_sent(spy):
+    return spy.recorder.only().kwargs["data"].model_dump(exclude_unset=True)
+
+
+@pytest.mark.parametrize("field", ["start_date", "target_date"])
+def test_a_date_set_to_null_is_cleared(field, registered, spy):
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", **{field: None})
+
+    assert _update_sent(spy) == {field: None}
+
+
+def test_an_update_sends_only_what_it_was_given(registered, spy):
+    """The regression this guards: every field used to reach the SDK, None when not
+    given, and only `exclude_none` kept that from wiping them. Correct the SDK
+    without this and a rename clears every date and the priority."""
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", name="Renamed")
+
+    assert _update_sent(spy) == {"name": "Renamed"}
+
+
+def test_clearing_one_date_leaves_the_other_alone(registered, spy):
+    registered["workitem"].fn(
+        action="update", project_id="p", workitem_id="w", start_date="2026-01-01", target_date=None
+    )
+
+    assert _update_sent(spy) == {"start_date": "2026-01-01", "target_date": None}
+
+
+def test_a_date_left_at_its_default_is_not_sent(registered, spy):
+    """A client padding from the schema sends "" -- that chose nothing, so it clears nothing."""
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", name="x", target_date="")
+
+    assert "target_date" not in _update_sent(spy)
+
+
+@pytest.mark.parametrize(
+    ("sent", "arrives"),
+    [("", ""), (None, None), ("2026-01-01", "2026-01-01")],
+    ids=["padded-default", "json-null", "date"],
+)
+def test_argument_repair_keeps_the_default_distinct_from_null(sent, arrives, registered):
+    """The repair middleware turns "" into None for a field that is not a string.
+    A date accepts strings, so "" must reach the tool as "" -- or a padded default
+    would arrive as null and clear the date."""
+    from plane_mcp.coercion import coerce_arguments
+
+    repaired, _ = coerce_arguments({"target_date": sent}, registered["workitem"].parameters)
+
+    assert repaired["target_date"] == arrives
+
 
 def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_modules, registered):
     """Naming a failure mode in a description buys a pre-flight probe on every run.
