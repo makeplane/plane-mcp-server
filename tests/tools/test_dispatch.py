@@ -56,6 +56,7 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
     ("intake", "update"): {"status": 1},
     ("workitem_relation", "create"): {"relation_type": "blocked_by"},
     ("workitem_property", "manage_type_properties"): {"attach_ids": "id-1"},
+    ("workitem_property", "set_value"): {"value": "text"},
     ("project_estimate", "create_points"): {"points": '[{"value": "1", "key": 0}]'},
     ("customer", "delete"): {"customer_id": "id-1"},
     ("customer", "manage_workitems"): {"link_ids": "id-1"},
