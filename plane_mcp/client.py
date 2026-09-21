@@ -25,16 +25,22 @@ def _workspace_slug(token: AccessToken | None) -> str:
     return os.getenv("PLANE_WORKSPACE_SLUG", "")
 
 
+def _connected_via(token: AccessToken | None) -> str:
+    """How a connection authenticated: its token's claim, else the environment."""
+    if token:
+        return token.claims.get("auth_method", "oauth")
+    return "environment"
+
+
 def current_workspace() -> dict[str, Any]:
     """The workspace this connection is bound to, as far as its credentials say."""
     token = get_access_token()
-    claims = token.claims if token else {}
-    detail = claims.get("workspace") or {}
+    detail = (token.claims.get("workspace") if token else None) or {}
     return {
         "slug": _workspace_slug(token),
         "id": detail.get("id"),
         "name": detail.get("name"),
-        "connected_via": claims.get("auth_method", "environment"),
+        "connected_via": _connected_via(token),
     }
 
 
@@ -67,7 +73,7 @@ def get_plane_client_context() -> PlaneClientContext:
     workspace_slug = _workspace_slug(stored_access_token)
     if stored_access_token:
         # Determine authentication method to use appropriate PlaneClient constructor
-        auth_method = stored_access_token.claims.get("auth_method", "oauth")
+        auth_method = _connected_via(stored_access_token)
         token = stored_access_token.token
 
         # For API key auth methods, use api_key parameter; for OAuth, use access_token

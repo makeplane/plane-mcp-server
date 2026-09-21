@@ -121,6 +121,7 @@ def test_list_still_falls_back_when_a_scope_is_genuinely_empty(registered, spy):
 
     assert result == []
 
+
 RICH_TEXT_REFUSAL = HttpError("HTTP 400", 400, {"value": ["Rich text value must be an object"]})
 
 

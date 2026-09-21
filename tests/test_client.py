@@ -70,6 +70,18 @@ def test_the_reported_slug_is_the_one_every_tool_acts_on(kind, connected):
     assert current_workspace()["slug"] == get_plane_client_context().workspace_slug
 
 
+def test_a_token_that_names_no_method_is_reported_as_the_one_it_is_built_for(connected, monkeypatch):
+    """`auth_method` had two defaults: the client treated a missing claim as OAuth,
+    and the report called the same connection "environment". Whatever the default,
+    both have to read it the same way, or the report describes a connection the
+    tools are not using. A token is never the environment: that is stdio, with none.
+    """
+    monkeypatch.setattr(client_module, "get_access_token", lambda: _token(workspace_slug="acme"))
+
+    assert current_workspace()["connected_via"] == "oauth"
+    assert get_plane_client_context().client.config.access_token, "built for OAuth, so it carries the token"
+
+
 def test_a_token_without_a_slug_does_not_borrow_the_environments(connected, monkeypatch):
     """A token's claim is authoritative even when empty. Falling back to the
     environment would report -- and act on -- a workspace the token was never
