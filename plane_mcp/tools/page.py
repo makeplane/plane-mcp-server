@@ -130,8 +130,6 @@ def register(mcp: FastMCP) -> None:
         access: int | None = None,
         color: str = "",
         is_locked: bool | None = None,
-        # Unset means archive, False restores. See workitem.archive for why the
-        # default is not `True`.
         archive: bool | None = None,
         external_source: str = "",
         external_id: str = "",

@@ -232,9 +232,6 @@ def register(mcp: FastMCP) -> None:
         per_page: int = 0,
         # Tri-state: False publishes a draft, unset leaves the flag alone.
         is_draft: bool | None = None,
-        # Unset means archive, False unarchives. A `True` default would be echoed
-        # back by clients that pad a call with the schema's defaults, and every
-        # other action would then refuse it as a stray argument.
         archive: bool | None = None,
     ) -> WorkItem | WorkItemDetail | WorkItemSearch | dict[str, Any] | list[Any] | str | None:
         client, workspace_slug = get_plane_client_context()
