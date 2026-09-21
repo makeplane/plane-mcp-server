@@ -50,10 +50,15 @@ class ValidateActionArguments(Middleware):
             # A retired name, or not ours at all. Either way not our business.
             return None
         if "action" not in arguments:
-            # Pydantic names the parameter but not one permitted value, so a caller
-            # that omitted the choice learns nothing it did not already know.
-            return missing_action_error(tool, by_action)
-        action = arguments["action"]
+            if len(by_action) > 1:
+                # Pydantic names the parameter but not one permitted value, so a caller
+                # that omitted the choice learns nothing it did not already know.
+                return missing_action_error(tool, by_action)
+            # A one-action tool offers no choice, and `get_pql_reference` has no
+            # `action` parameter to name -- demanding one refused every call to it.
+            action = next(iter(by_action))
+        else:
+            action = arguments["action"]
         if action not in by_action:
             # A present-but-wrong action is left alone: the Literal already reports
             # the permitted set, and a second opinion here would only muddle it.

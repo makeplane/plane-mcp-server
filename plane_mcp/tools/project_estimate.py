@@ -98,7 +98,9 @@ def register(mcp: FastMCP) -> None:
         value: str = "",
         # Estimate point keys start at 0, so key cannot use the 0 sentinel.
         key: int | None = None,
-        last_used: bool = True,
+        # Unset means true, as the SDK model defaults it. See workitem.archive
+        # for why the advertised default is not `True`.
+        last_used: bool | None = None,
         external_source: str = "",
         external_id: str = "",
     ) -> Estimate | EstimatePoint | list[EstimatePoint] | Project | str | None:
@@ -124,7 +126,7 @@ def register(mcp: FastMCP) -> None:
                     name=name,
                     type=opt(type),
                     description=opt(description),
-                    last_used=last_used,
+                    last_used=last_used is not False,
                     external_id=opt(external_id),
                     external_source=opt(external_source),
                 ),

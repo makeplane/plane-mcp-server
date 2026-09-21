@@ -305,6 +305,24 @@ def test_archiving_a_work_item_confirms_what_it_did(archive, registered, spy):
     assert spy.recorder.only().method == f"work_items.{verb}"
 
 
+@pytest.mark.parametrize(
+    ("tool", "arguments", "method"),
+    [
+        ("workitem", {"project_id": "p", "workitem_id": "w"}, "work_items.archive"),
+        ("page", {"project_id": "p", "page_id": "g"}, "pages.archive_project_page"),
+    ],
+    ids=["workitem", "page"],
+)
+def test_archive_omitted_still_archives(tool, arguments, method, registered, spy):
+    """`archive` used to default to `True` in the signature, which put `default: true`
+    in the advertised schema -- so a client that pads a call with the schema defaults
+    sent `archive` on every other action and each refused it as a stray argument. The
+    default is now unset, and unset has to keep meaning archive."""
+    registered[tool].fn(action="archive", **arguments)
+
+    assert spy.recorder.only().method == method
+
+
 def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_modules, registered):
     """Naming a failure mode in a description buys a pre-flight probe on every run.
 

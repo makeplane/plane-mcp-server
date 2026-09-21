@@ -31,6 +31,19 @@ def rejection():
     return ValidateActionArguments().rejection
 
 
+@pytest.fixture(scope="module")
+def listed_tools():
+    """Tool name -> the input schema the client actually sees."""
+    from fastmcp import FastMCP
+
+    from plane_mcp.tools import register_tools
+
+    mcp = FastMCP("test")
+    register_tools(mcp, legacy_names=False)
+    tools = asyncio.new_event_loop().run_until_complete(mcp.list_tools())
+    return {tool.name: tool.parameters for tool in tools}
+
+
 # --- the rule ----------------------------------------------------------------
 
 
@@ -84,10 +97,61 @@ def test_a_call_that_chose_no_action_is_told_which_actions_exist(rejection):
 def test_every_resource_names_its_actions_when_none_is_chosen(rejection):
     """A resource left out would answer the one question the caller has with silence."""
     for tool, actions in action_arguments().items():
+        if len(actions) == 1:
+            continue  # nothing to choose between; see the one-action tests below
         message = rejection(tool, {})
         assert message, f"{tool} refused a call with no action without saying why"
         for action in actions:
             assert action in message, f"{tool} omitted {action}"
+
+
+def test_a_one_action_tool_is_not_asked_to_choose(rejection):
+    """`get_pql_reference` has no `action` parameter, so demanding one refused every
+    call to it -- the tool was unreachable through the middleware."""
+    assert rejection("get_pql_reference", {}) is None
+    assert rejection("get_pql_reference", {"detail": "brief"}) is None
+
+
+def test_a_one_action_tool_still_refuses_a_stray_argument(rejection):
+    """Inferring the sole action must not also waive the argument check."""
+    message = rejection("get_pql_reference", {"project_id": "p"})
+    assert message and "does not take: project_id" in message
+
+
+# --- a default the client echoes back is not a choice ------------------------
+
+
+def test_a_call_padded_with_the_schema_defaults_is_never_refused(rejection, listed_tools):
+    """Reported by a customer: `workitem.archive` shipped with `default: true`, so a
+    client that fills every parameter from the schema sent it on `list`, `count`,
+    `search` and `retrieve_by_identifier` alike -- and each refused the call. Every
+    action of every tool must survive being padded out with its own advertised
+    defaults, because that padding chose nothing."""
+    for name, schema in listed_tools.items():
+        padding = {
+            param: prop["default"]
+            for param, prop in (schema.get("properties") or {}).items()
+            if param != "action" and "default" in prop
+        }
+        for action in action_arguments()[name]:
+            arguments = {"action": action, **padding} if "action" in schema["properties"] else dict(padding)
+            assert rejection(name, arguments) is None, f"{name}.{action} refused its own defaults"
+
+
+def test_no_advertised_parameter_defaults_to_a_value_only_one_action_takes(listed_tools):
+    """The stray-argument rule reads a falsy value as "not chosen". A parameter whose
+    schema default is truthy is therefore indistinguishable from a deliberate one, so
+    it must be acceptable to every action of its tool."""
+    accepted = action_arguments()
+    for name, schema in listed_tools.items():
+        for param, prop in (schema.get("properties") or {}).items():
+            if param == "action" or not prop.get("default"):
+                continue
+            refused = [a for a, takes in accepted[name].items() if param not in takes]
+            assert not refused, (
+                f"{name}.{param} defaults to {prop['default']!r} but {', '.join(refused)} "
+                "would refuse it as a stray argument"
+            )
 
 
 def test_a_call_with_no_action_on_an_unknown_tool_is_left_to_the_server(rejection):
