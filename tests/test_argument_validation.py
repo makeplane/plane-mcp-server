@@ -84,10 +84,22 @@ def test_a_call_that_chose_no_action_is_told_which_actions_exist(rejection):
 def test_every_resource_names_its_actions_when_none_is_chosen(rejection):
     """A resource left out would answer the one question the caller has with silence."""
     for tool, actions in action_arguments().items():
+        if len(actions) == 1:
+            continue
         message = rejection(tool, {})
         assert message, f"{tool} refused a call with no action without saying why"
         for action in actions:
             assert action in message, f"{tool} omitted {action}"
+
+
+def test_a_single_operation_tool_takes_no_action_parameter(rejection):
+    """get_pql_reference is the only single-operation tool: its schema omits
+    action, so demanding one leaves no valid call form. Its arguments are
+    still checked against its only action."""
+    assert rejection("get_pql_reference", {}) is None
+    assert rejection("get_pql_reference", {"detail": "brief"}) is None
+    message = rejection("get_pql_reference", {"bogus": 1})
+    assert message and "does not take: bogus" in message
 
 
 def test_a_call_with_no_action_on_an_unknown_tool_is_left_to_the_server(rejection):
