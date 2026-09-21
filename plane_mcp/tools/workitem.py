@@ -147,6 +147,8 @@ FOOTER = (
     "resource first if you only have a name.\n"
     "description_stripped is plain text and is wrapped into HTML on save; description_html wins "
     "if both are given.\n"
+    "To clear a field on update: assignees=[] or labels=[], and start_date=null or "
+    "target_date=null. A field you leave out is not changed.\n"
     "fields is a sparse fieldset: use `project`, not project_id, and `description_html`, not "
     "description.\n"
     f"count group_by and sub_group_by accept: {', '.join(GROUP_BY_VALUES)}. These are grouping "
@@ -213,8 +215,8 @@ def register(mcp: FastMCP) -> None:
         description_html: str = "",
         description_stripped: str = "",
         priority: str = "",
-        start_date: str = "",
-        target_date: str = "",
+        start_date: str | None = "",
+        target_date: str | None = "",
         sort_order: float = 0,
         parent: str = "",
         state: str = "",
@@ -253,7 +255,8 @@ def register(mcp: FastMCP) -> None:
             )
 
         def write_payload() -> dict[str, Any]:
-            return {
+            """The fields the caller supplied, and no others."""
+            payload = {
                 "name": opt(name),
                 "assignees": coerce_list(assignees),
                 "labels": coerce_list(labels),
@@ -271,6 +274,9 @@ def register(mcp: FastMCP) -> None:
                 "state": opt(state),
                 "estimate_point": opt(estimate_point),
             }
+            supplied = {field: value for field, value in payload.items() if value is not None}
+            dates = {"start_date": start_date, "target_date": target_date}
+            return supplied | {field: None for field, value in dates.items() if value is None}
 
         if action in ("list", "list_archived"):
             if action == "list_archived" and not project_id:
