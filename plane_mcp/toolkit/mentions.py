@@ -35,7 +35,7 @@ TEXT = object()
 
 
 class _Scan(HTMLParser):
-    """A document as byte spans: mention elements, and the text between all markup. """
+    """A document as byte spans: mention elements, and the text between all markup."""
 
     def __init__(self, html: str) -> None:
         super().__init__(convert_charrefs=False)
@@ -158,7 +158,7 @@ def unmentionable(html: str | None, may_be_mentioned: set[str]) -> list[str]:
 
 
 def project_mention_error(client: Any, workspace_slug: str, project_id: str, html: str | None) -> str | None:
-    """Why `html` cannot be posted to this project, or None when it can. """
+    """Why `html` cannot be posted to this project, or None when it can."""
     if unnamed_mentions(html):
         return (
             f"Error: a <{ELEMENT}> here has no entity_name, so Plane would show a chip and tell "

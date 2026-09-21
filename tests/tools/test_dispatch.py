@@ -45,6 +45,7 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
     ("state", "create"): {"group": "started"},
     ("template", "update"): {"name": "Renamed"},
     ("collection", "update"): {"name": "Renamed"},
+    ("workitem_link", "update"): {"title": "Renamed"},
     ("cycle", "manage_workitems"): {"add_ids": "id-1"},
     ("module", "manage_workitems"): {"add_ids": "id-1"},
     ("milestone", "manage_workitems"): {"add_ids": "id-1"},
@@ -392,6 +393,45 @@ def test_managing_initiative_workitems_with_neither_side_asks_for_one(registered
 
     assert result == "Error: action 'manage_workitems' requires: add_ids or remove_ids."
     assert not _initiative_calls(spy), "the refusal must replace the call, not follow it"
+
+
+# A link's title is the text Plane shows instead of the raw URL. The SDK and the API
+# both took it; only this surface dropped it, so a link could never be labelled.
+
+
+def _link_sent(spy):
+    return spy.recorder.only().kwargs["data"]
+
+
+def test_a_link_is_created_with_the_title_it_was_given(registered, spy):
+    registered["workitem_link"].fn(
+        action="create", project_id="p", workitem_id="w", url="https://example.com/spec", title="Design spec"
+    )
+
+    sent = _link_sent(spy)
+    assert (sent.url, sent.title) == ("https://example.com/spec", "Design spec")
+
+
+def test_a_link_created_without_a_title_sends_none(registered, spy):
+    """Omitted means Plane shows the URL; an empty string would be a title of nothing."""
+    registered["workitem_link"].fn(action="create", project_id="p", workitem_id="w", url="https://example.com")
+
+    assert "title" not in _link_sent(spy).model_dump(exclude_none=True)
+
+
+def test_a_link_can_be_renamed_without_resending_its_url(registered, spy):
+    """Plane patches links partially, so a rename touches the title alone."""
+    registered["workitem_link"].fn(action="update", project_id="p", workitem_id="w", link_id="l", title="Design spec")
+
+    assert _link_sent(spy).model_dump(exclude_none=True) == {"title": "Design spec"}
+
+
+def test_a_link_update_with_neither_field_is_refused_before_plane_sees_it(registered, spy):
+    """It would be an empty patch that reports success and changes nothing."""
+    result = registered["workitem_link"].fn(action="update", project_id="p", workitem_id="w", link_id="l")
+
+    assert result == "Error: action 'update' requires: url or title."
+    assert not spy.recorder.calls
 
 
 def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_modules, registered):
