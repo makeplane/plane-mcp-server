@@ -35,6 +35,7 @@ DEFAULT_ALLOWED_REDIRECT_URIS = [
     "https://chatgpt.com/connector_platform_oauth_redirect",
     # Gemini custom apps (Spark) — the path carries a per-user, per-connector id
     "https://oauth-redirect.googleusercontent.com/r/*",
+    "https://grok.com/connectors-oauth-exchange-code/",
 ]
 
 

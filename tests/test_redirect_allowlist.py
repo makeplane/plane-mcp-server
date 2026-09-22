@@ -36,6 +36,7 @@ CLIENT_REDIRECT_URIS = {
     "gemini-spark": (
         "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-116109532806053202916-mcp_plane_so"
     ),
+    "grok-web": "https://grok.com/connectors-oauth-exchange-code/",
 }
 
 
@@ -54,6 +55,8 @@ LOOKALIKE_URIS = {
     "gemini-parent-domain": "https://googleusercontent.com/r/user_bound_custom-mcp-1",
     "gemini-scheme-downgrade": "http://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-1",
     "gemini-other-path": "https://oauth-redirect.googleusercontent.com/oauth2/callback",
+    "grok-host-suffix": "https://grok.com.evil.com/connectors-oauth-exchange-code/",
+    "grok-other-path": "https://grok.com/anything-else",
     "claude-host-suffix": "https://claude.ai.evil.com/api/mcp/auth_callback",
     "chatgpt-path-suffix": "https://chatgpt.com/connector_platform_oauth_redirect_evil",
     "cursor-unregistered-scheme": "myapp://callback",
