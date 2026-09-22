@@ -120,3 +120,77 @@ def test_list_still_falls_back_when_a_scope_is_genuinely_empty(registered, spy):
     result = registered["workitem_property"].fn(action="list", project_id="proj-1", workitem_type_id="type-1")
 
     assert result == []
+
+
+RICH_TEXT_REFUSAL = HttpError("HTTP 400", 400, {"value": ["Rich text value must be an object"]})
+
+
+def _rich_text(registered, **arguments):
+    return registered["workitem_property"].fn(
+        action="set_value", project_id="p", workitem_id="w", property_id="pr", **arguments
+    )
+
+
+def test_a_rich_text_property_is_created_as_a_relation(registered, spy):
+    registered["workitem_property"].fn(
+        action="create", project_id="p", display_name="Notes", property_type="RELATION", relation_type="RICH_TEXT"
+    )
+
+    data = spy.recorder.calls[-1].kwargs["data"]
+    assert (data.property_type.value, data.relation_type.value) == ("RELATION", "RICH_TEXT")
+
+
+def test_description_html_is_sent_as_the_object_plane_requires(registered, spy):
+    _rich_text(registered, description_html="<p>Notes</p>")
+
+    sent = spy.recorder.only().kwargs["data"].model_dump(exclude_none=True)
+    assert sent == {"value": {"description_html": "<p>Notes</p>"}}
+
+
+def test_value_and_description_html_together_are_refused(registered, spy):
+    result = _rich_text(registered, value="x", description_html="<p>x</p>")
+
+    assert result == "Error: pass value or description_html, not both."
+    assert not spy.recorder.calls
+
+
+def test_a_value_call_with_neither_names_both(registered, spy):
+    result = _rich_text(registered)
+
+    assert result == "Error: action 'set_value' requires: value or description_html."
+
+
+def test_html_sent_as_value_is_turned_toward_description_html(registered, spy):
+    """Plane's "must be an object" invites a nested object in value, which this schema
+    refuses -- so the refusal names the parameter that works instead."""
+    spy.returns["work_item_properties.values.create"] = RICH_TEXT_REFUSAL
+
+    result = _rich_text(registered, value="<p>Notes</p>")
+
+    assert isinstance(result, str) and "description_html" in result
+
+
+def test_an_unrelated_refusal_is_not_mistaken_for_rich_text(registered, spy):
+    spy.returns["work_item_properties.values.create"] = HttpError("HTTP 400", 400, {"value": ["Not a valid option"]})
+
+    with pytest.raises(HttpError):
+        _rich_text(registered, value="opt-x")
+
+
+def test_a_rich_text_value_reads_back_with_its_html(registered, spy):
+    """For rich text, `value` is the stored content's id; the HTML rides beside it."""
+    from plane.models.work_item_properties import WorkItemPropertyValueDetail
+
+    spy.returns["work_item_properties.values.retrieve"] = WorkItemPropertyValueDetail.model_validate(
+        {
+            "id": "v",
+            "property_id": "pr",
+            "issue_id": "w",
+            "value": "desc-1",
+            "value_detail": {"id": "desc-1", "description_html": "<p>Notes</p>", "description_stripped": "Notes"},
+        }
+    )
+
+    result = registered["workitem_property"].fn(action="get_value", project_id="p", workitem_id="w", property_id="pr")
+
+    assert result.value_detail.description_html == "<p>Notes</p>"

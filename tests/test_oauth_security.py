@@ -21,20 +21,11 @@ from starlette.routing import Mount
 from starlette.testclient import TestClient
 
 from plane_mcp.auth import PlaneOAuthProvider
+from plane_mcp.server import get_allowed_client_redirect_uris
 
-# Exact allowed patterns from plane_mcp/server.py
-ALLOWED_REDIRECT_URI_PATTERNS = [
-    "http://localhost:*",
-    "http://localhost:*/*",
-    "http://127.0.0.1:*",
-    "http://127.0.0.1:*/*",
-    "cursor://anysphere.cursor-mcp/oauth/*",
-    "https://www.cursor.com/*",
-    "https://vscode.dev/redirect",
-    "https://insiders.vscode.dev/redirect",
-    "https://antigravity.google/oauth-callback",
-    "https://claude.ai/*",
-]
+# The allowlist the server actually ships. Copying it here let it drift, and a
+# stale copy silently stops testing the patterns in production.
+ALLOWED_REDIRECT_URI_PATTERNS = get_allowed_client_redirect_uris()
 
 
 @pytest.fixture(scope="module")
