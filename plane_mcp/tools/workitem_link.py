@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from plane.models.work_items import CreateWorkItemLink, UpdateWorkItemLink, WorkItemLink
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, page_params
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, opt, page_params
 
 NAME = "workitem_link"
 TITLE = "Work item links"
@@ -16,9 +16,19 @@ TITLE = "Work item links"
 ACTIONS = (
     Action("list", ("project_id", "workitem_id"), ("cursor", "per_page"), read=True),
     Action("retrieve", ("project_id", "workitem_id", "link_id"), read=True),
-    Action("create", ("project_id", "workitem_id", "url")),
-    Action("update", ("project_id", "workitem_id", "link_id", "url")),
+    Action("create", ("project_id", "workitem_id", "url"), ("title",)),
+    Action(
+        "update",
+        ("project_id", "workitem_id", "link_id"),
+        ("url", "title"),
+        note="pass at least one of url or title; only the fields you pass are changed",
+    ),
     Action("delete", ("project_id", "workitem_id", "link_id"), destructive=True),
+)
+
+FOOTER = (
+    "url must be http:// or https://. title is the text Plane shows in place of the URL, "
+    "e.g. title='Design spec' for a long Figma link; without one the URL itself is shown."
 )
 
 LEGACY = {
@@ -33,7 +43,7 @@ LEGACY = {
 def register(mcp: FastMCP) -> None:
     @mcp.tool(
         name=NAME,
-        description=build_description("External links attached to a work item.", ACTIONS),
+        description=build_description("External links attached to a work item.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
     def workitem_link(
@@ -42,6 +52,7 @@ def register(mcp: FastMCP) -> None:
         workitem_id: str = "",
         link_id: str = "",
         url: str = "",
+        title: str = "",
         cursor: str = "",
         per_page: int = 0,
     ) -> WorkItemLink | list[WorkItemLink] | str | None:
@@ -65,7 +76,7 @@ def register(mcp: FastMCP) -> None:
                 workspace_slug=workspace_slug,
                 project_id=project_id,
                 work_item_id=workitem_id,
-                data=CreateWorkItemLink(url=url),
+                data=CreateWorkItemLink(url=url, title=opt(title)),
             )
 
         if not link_id:
@@ -80,14 +91,14 @@ def register(mcp: FastMCP) -> None:
             )
 
         if action == "update":
-            if not url:
-                return missing(action, "url")
+            if not url and not title:
+                return missing(action, "url or title")
             return client.work_items.links.update(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
                 work_item_id=workitem_id,
                 link_id=link_id,
-                data=UpdateWorkItemLink(url=url),
+                data=UpdateWorkItemLink(url=opt(url), title=opt(title)),
             )
 
         client.work_items.links.delete(

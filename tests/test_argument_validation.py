@@ -31,6 +31,19 @@ def rejection():
     return ValidateActionArguments().rejection
 
 
+@pytest.fixture(scope="module")
+def listed_tools():
+    """Tool name -> the input schema the client actually sees."""
+    from fastmcp import FastMCP
+
+    from plane_mcp.tools import register_tools
+
+    mcp = FastMCP("test")
+    register_tools(mcp, legacy_names=False)
+    tools = asyncio.new_event_loop().run_until_complete(mcp.list_tools())
+    return {tool.name: tool.parameters for tool in tools}
+
+
 # --- the rule ----------------------------------------------------------------
 
 
@@ -127,6 +140,42 @@ def test_every_action_of_every_resource_accepts_its_own_declaration(rejection):
         for action, accepted in actions.items():
             arguments = {"action": action, **dict.fromkeys(accepted, "x")}
             assert rejection(tool, arguments) is None, f"{tool} {action} rejected its own parameters"
+
+
+# --- a default the client echoes back is not a choice ------------------------
+
+
+def test_a_call_padded_with_the_schema_defaults_is_never_refused(rejection, listed_tools):
+    """Reported by a customer: `workitem.archive` shipped with `default: true`, so a
+    client that fills every parameter from the schema sent it on `list`, `count`,
+    `search` and `retrieve_by_identifier` alike -- and each refused the call. Every
+    action of every tool must survive being padded out with its own advertised
+    defaults, because that padding chose nothing."""
+    for name, schema in listed_tools.items():
+        padding = {
+            param: prop["default"]
+            for param, prop in (schema.get("properties") or {}).items()
+            if param != "action" and "default" in prop
+        }
+        for action in action_arguments()[name]:
+            arguments = {"action": action, **padding} if "action" in schema["properties"] else dict(padding)
+            assert rejection(name, arguments) is None, f"{name}.{action} refused its own defaults"
+
+
+def test_no_advertised_parameter_defaults_to_a_value_only_one_action_takes(listed_tools):
+    """The stray-argument rule reads a falsy value as "not chosen". A parameter whose
+    schema default is truthy is therefore indistinguishable from a deliberate one, so
+    it must be acceptable to every action of its tool."""
+    accepted = action_arguments()
+    for name, schema in listed_tools.items():
+        for param, prop in (schema.get("properties") or {}).items():
+            if param == "action" or not prop.get("default"):
+                continue
+            refused = [a for a, takes in accepted[name].items() if param not in takes]
+            assert not refused, (
+                f"{name}.{param} defaults to {prop['default']!r} but {', '.join(refused)} "
+                "would refuse it as a stray argument"
+            )
 
 
 # --- the middleware, through a real server -----------------------------------
