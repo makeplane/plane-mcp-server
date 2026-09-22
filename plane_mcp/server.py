@@ -33,6 +33,8 @@ DEFAULT_ALLOWED_REDIRECT_URIS = [
     # ChatGPT connectors — per-connector callback + legacy redirect
     "https://chatgpt.com/connector/oauth/*",
     "https://chatgpt.com/connector_platform_oauth_redirect",
+    # Gemini custom apps (Spark) — the path carries a per-user, per-connector id
+    "https://oauth-redirect.googleusercontent.com/r/*",
 ]
 
 
