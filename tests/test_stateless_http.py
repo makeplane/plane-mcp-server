@@ -11,18 +11,9 @@ from key_value.aio.stores.memory import MemoryStore
 from starlette.testclient import TestClient
 
 from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
+from plane_mcp.server import get_allowed_client_redirect_uris
 
-ALLOWED_REDIRECT_URI_PATTERNS = [
-    "http://localhost:*",
-    "http://localhost:*/*",
-    "http://127.0.0.1:*",
-    "http://127.0.0.1:*/*",
-    "cursor://*",
-    "vscode://*",
-    "vscode-insiders://*",
-    "windsurf://*",
-    "claude://*",
-]
+ALLOWED_REDIRECT_URI_PATTERNS = get_allowed_client_redirect_uris()
 
 
 @pytest.fixture()
