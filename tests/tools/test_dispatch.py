@@ -514,3 +514,14 @@ def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_m
         if phrase in registered[mod.NAME].description.lower()
     ]
     assert not offenders, f"descriptions predicting a refusal instead of letting the API report it: {offenders}"
+
+
+def test_intake_triage_update_uses_base_endpoint(registered, spy):
+    """Triage status updates must use client.intake.update, not update_status (#216).
+
+    On self-hosted instances, .../intake-issues/{id}/status 404s, while the base
+    .../intake-issues/{id}/ endpoint accepts all triage fields and transitions state.
+    """
+    registered["intake"].fn(action="update", project_id="proj-1", workitem_id="wi-1", status=1)
+    assert "intake.update" in spy.recorder.methods
+    assert "intake.update_status" not in spy.recorder.methods
