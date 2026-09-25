@@ -128,14 +128,6 @@ def register(mcp: FastMCP) -> None:
                 source=opt(source),
                 source_email=opt(source_email),
             )
-            # Triage fields go through the status endpoint; source metadata alone does not.
-            if status is not None or snoozed_till or duplicate_to:
-                return client.intake.update_status(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    work_item_id=workitem_id,
-                    data=data,
-                )
             return client.intake.update(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
