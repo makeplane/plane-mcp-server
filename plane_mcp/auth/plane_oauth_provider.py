@@ -378,14 +378,7 @@ class PlaneOAuthProvider(OAuthProxy):
         )
 
     def _decode_list_cookie(self, request: Request, base_name: str) -> list[str]:
-        """Never honour FastMCP's persistent "denied clients" cookie.
-
-        FastMCP remembers a Deny for a year and then answers every later authorize for that
-        client with ``access_denied`` without showing the consent page, so a mis-click locks
-        the user out until they clear cookies. Ignoring the list makes a Deny apply to that
-        attempt only; the consent page is shown again on the next one, including for users
-        who already hold the cookie.
-        """
+        """Ignore FastMCP's year-long denied-clients cookie so a Deny only applies to that attempt."""
         if base_name == _DENIED_CLIENTS_COOKIE:
             return []
         return super()._decode_list_cookie(request, base_name)
