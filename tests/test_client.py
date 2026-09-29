@@ -90,3 +90,19 @@ def test_a_token_without_a_slug_does_not_borrow_the_environments(connected, monk
 
     assert current_workspace()["slug"] == ""
     assert get_plane_client_context().workspace_slug == ""
+
+
+@pytest.mark.parametrize(("setting", "header"), [(None, "X-Api-Key"), ("X-Gravitee-Api-Key", "X-Gravitee-Api-Key")])
+def test_the_key_goes_in_the_header_plane_api_key_header_names(setting, header, connected, monkeypatch):
+    """Behind an API gateway the key Plane reads is injected by the gateway; the
+    caller's key is the gateway's and belongs in the gateway's own header."""
+    if setting:
+        monkeypatch.setenv("PLANE_API_KEY_HEADER", setting)
+    else:
+        monkeypatch.delenv("PLANE_API_KEY_HEADER", raising=False)
+    connected("stdio")
+
+    headers = get_plane_client_context().client.work_items._headers()
+
+    assert headers[header] == "k"
+    assert header == "X-Api-Key" or "X-Api-Key" not in headers
