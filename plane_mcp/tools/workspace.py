@@ -1,19 +1,25 @@
-"""Workspace-level feature flags."""
+"""The connected workspace, and its feature flags."""
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastmcp import FastMCP
 from plane.models.workspaces import WorkspaceFeature
 
-from plane_mcp.client import get_plane_client_context
+from plane_mcp.client import current_workspace, get_plane_client_context
 from plane_mcp.toolkit import Action, build_annotations, build_description
 
 NAME = "workspace"
 TITLE = "Workspace settings"
 
 ACTIONS = (
+    Action(
+        "retrieve",
+        note="the workspace this connection is bound to: slug, id, name and how it connected. "
+        "id and name are known only on an OAuth connection and are null otherwise",
+        read=True,
+    ),
     Action("get_features", note="feature flags for the current workspace", read=True),
     Action(
         "update_features",
@@ -33,11 +39,11 @@ LEGACY = {
 def register(mcp: FastMCP) -> None:
     @mcp.tool(
         name=NAME,
-        description=build_description("Workspace-level feature flags.", ACTIONS, FOOTER),
+        description=build_description("The connected workspace, and its feature flags.", ACTIONS, FOOTER),
         annotations=build_annotations(TITLE, ACTIONS),
     )
     def workspace(
-        action: Literal["get_features", "update_features"],
+        action: Literal["retrieve", "get_features", "update_features"],
         # Tri-state throughout: False disables a feature, unset leaves it alone.
         project_grouping: bool | None = None,
         initiatives: bool | None = None,
@@ -45,7 +51,10 @@ def register(mcp: FastMCP) -> None:
         customers: bool | None = None,
         wiki: bool | None = None,
         pi: bool | None = None,
-    ) -> WorkspaceFeature:
+    ) -> WorkspaceFeature | dict[str, Any]:
+        if action == "retrieve":
+            return current_workspace()
+
         client, workspace_slug = get_plane_client_context()
 
         if action == "get_features":

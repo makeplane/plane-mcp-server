@@ -25,6 +25,7 @@ from plane.models.work_item_properties import (
     PropertySettings,
     PropertyType,
     RelationType,
+    RichTextValue,
     TextAttributeSettings,
     UpdateWorkItemProperty,
     UpdateWorkItemPropertyOption,
@@ -130,9 +131,10 @@ ACTIONS = (
     Action("get_value", ("project_id", "workitem_id", "property_id"), read=True),
     Action(
         "set_value",
-        ("project_id", "workitem_id", "property_id", "value"),
-        ("external_source", "external_id"),
-        note="upsert; for a multi-value property this replaces every existing value",
+        ("project_id", "workitem_id", "property_id"),
+        ("value", "description_html", "external_source", "external_id"),
+        note="upsert; pass value, or description_html for a rich text property; for a "
+        "multi-value property this replaces every existing value",
     ),
     Action("delete_value", ("project_id", "workitem_id", "property_id"), destructive=True),
 )
@@ -156,7 +158,10 @@ FOOTER = (
     "YYYY-MM-DD HH:MM:SS string; DECIMAL as a number; BOOLEAN as true or false; OPTION and "
     "RELATION as an option or record id string, or an array of them when the property is "
     'multi-value. Send the value\'s own type, not a stringified form: "007" stays the text 007, '
-    "whereas 7 is the number."
+    "whereas 7 is the number. "
+    "A rich text property is a RELATION with relation_type RICH_TEXT. Write it with "
+    "description_html (HTML, e.g. '<p>Notes</p>') instead of value; get_value returns the "
+    "content in value_detail.description_html, and its value is only that content's storage id."
 )
 
 LEGACY = {
@@ -239,6 +244,11 @@ def _options(options: str) -> list[CreateWorkItemPropertyOption] | None:
         return [CreateWorkItemPropertyOption(**item) for item in parsed]
     except (TypeError, ValidationError) as exc:
         raise ValueError(f"{OPTIONS_SHAPE}; one entry is unusable ({exc})") from exc
+
+
+def _wants_rich_text(exc: HttpError) -> bool:
+    """Plane's refusal of a rich text property sent `value` instead of description_html."""
+    return exc.status_code == 400 and "Rich text value must be an object" in str(exc.response)
 
 
 def _absent(exc: HttpError) -> bool:
@@ -354,6 +364,7 @@ def register(mcp: FastMCP) -> None:
         options: str = "",
         display_format: str = "",
         value: str | bool | int | float | list[str] = "",
+        description_html: str = "",
         attach_ids: str = "",
         detach_ids: str = "",
         is_required: bool | None = None,
@@ -403,16 +414,27 @@ def register(mcp: FastMCP) -> None:
             if action == "set_value":
                 # Compared against "" rather than tested for falsiness: `False`
                 # and `0` are values a BOOLEAN or DECIMAL property can hold.
-                if value == "":
-                    return missing(action, "value")
-                return values.create(
-                    **target,
-                    data=CreateWorkItemPropertyValue(
-                        value=value,
-                        external_id=opt(external_id),
-                        external_source=opt(external_source),
-                    ),
-                )
+                if value != "" and description_html:
+                    return "Error: pass value or description_html, not both."
+                if value == "" and not description_html:
+                    return missing(action, "value or description_html")
+                # Plane takes a rich text value as an object, not a bare HTML string.
+                try:
+                    return values.create(
+                        **target,
+                        data=CreateWorkItemPropertyValue(
+                            value=RichTextValue(description_html=description_html) if description_html else value,
+                            external_id=opt(external_id),
+                            external_source=opt(external_source),
+                        ),
+                    )
+                except HttpError as exc:
+                    if description_html or not _wants_rich_text(exc):
+                        raise
+                    return (
+                        "Error: this is a rich text property -- send its content as description_html, "
+                        "e.g. description_html='<p>Notes</p>', not as value."
+                    )
             values.delete(**target)
             return None
 

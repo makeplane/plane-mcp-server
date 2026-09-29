@@ -45,15 +45,18 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
     ("state", "create"): {"group": "started"},
     ("template", "update"): {"name": "Renamed"},
     ("collection", "update"): {"name": "Renamed"},
+    ("workitem_link", "update"): {"title": "Renamed"},
     ("cycle", "manage_workitems"): {"add_ids": "id-1"},
     ("module", "manage_workitems"): {"add_ids": "id-1"},
     ("milestone", "manage_workitems"): {"add_ids": "id-1"},
+    ("initiative", "manage_workitems"): {"add_ids": "id-1"},
     ("workitem", "manage_assignee"): {"add_user_id": "id-1"},
     ("workitem", "manage_label"): {"add_label_id": "id-1"},
     ("workitem", "count"): {"pql": "state__group = 'started'"},
     ("intake", "update"): {"status": 1},
     ("workitem_relation", "create"): {"relation_type": "blocked_by"},
     ("workitem_property", "manage_type_properties"): {"attach_ids": "id-1"},
+    ("workitem_property", "set_value"): {"value": "text"},
     ("project_estimate", "create_points"): {"points": '[{"value": "1", "key": 0}]'},
     ("customer", "delete"): {"customer_id": "id-1"},
     ("customer", "manage_workitems"): {"link_ids": "id-1"},
@@ -66,6 +69,7 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
 # Actions whose guard clause legitimately answers without calling the SDK.
 NO_CALL_EXPECTED: set[tuple[str, str]] = {
     ("get_pql_reference", "read"),  # returns static reference text
+    ("workspace", "retrieve"),  # answered from the connection's own credentials
 }
 
 # Actions that need populated remote state or an outbound HTTP fetch to get past
@@ -178,6 +182,7 @@ MEMBERSHIP_MUTATIONS = {
     ("customer", "manage_workitems"),
     ("initiative", "add_projects"),
     ("initiative", "remove_projects"),
+    ("initiative", "manage_workitems"),
     ("milestone", "manage_workitems"),
     ("module", "manage_workitems"),
     ("release", "manage_workitems"),
@@ -303,6 +308,195 @@ def test_archiving_a_work_item_confirms_what_it_did(archive, registered, spy):
     )
     verb = "archive" if archive else "unarchive"
     assert spy.recorder.only().method == f"work_items.{verb}"
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "method"),
+    [
+        ("workitem", {"project_id": "p", "workitem_id": "w"}, "work_items.archive"),
+        ("page", {"project_id": "p", "page_id": "g"}, "pages.archive_project_page"),
+    ],
+    ids=["workitem", "page"],
+)
+def test_archive_omitted_still_archives(tool, arguments, method, registered, spy):
+    """`archive` used to default to `True` in the signature, which put `default: true`
+    in the advertised schema -- so a client that pads a call with the schema defaults
+    sent `archive` on every other action and each refused it as a stray argument. The
+    default is now unset, and unset has to keep meaning archive."""
+    registered[tool].fn(action="archive", **arguments)
+
+    assert spy.recorder.only().method == method
+
+
+# Initiatives roll up work items as well as projects. The two child collections
+# reach different SDK sub-resources, and `manage_workitems` is the only action on
+# this tool that issues two calls, so the order between them is pinned here.
+
+
+class _WorkItemPage:
+    """One page of work items, carrying the full pagination envelope."""
+
+    results = [{"id": "w-1"}]
+    total_count = 1
+    count = 1
+    next_cursor = "c-2"
+    prev_cursor = "c-0"
+    next_page_results = True
+    prev_page_results = False
+
+
+def _initiative_calls(spy):
+    """The SDK calls a dispatch made, minus the workspace feature probe."""
+    return [call for call in spy.recorder.calls if call.method != "workspaces.get_features"]
+
+
+def test_listing_initiative_workitems_pages_through_its_own_sub_resource(registered, spy):
+    spy.__dict__["default"] = _WorkItemPage()
+
+    result = registered["initiative"].fn(action="list_workitems", initiative_id="i-1", cursor="c-1", per_page=5)
+
+    call = _initiative_calls(spy)[-1]
+    assert call.method == "initiatives.work_items.list", (
+        "work items must reach the work_items sub-resource, not projects or the deprecated epics"
+    )
+    assert call.kwargs["initiative_id"] == "i-1"
+    assert call.kwargs["params"] == {"cursor": "c-1", "per_page": 5}
+    assert result["next_cursor"] == "c-2", "a paged action must hand back the cursor it accepted"
+
+
+def test_managing_initiative_workitems_removes_before_it_adds(registered, spy):
+    """Removals first, so one call can swap an id out for another without the add
+    being undone by the remove that follows it."""
+    registered["initiative"].fn(action="manage_workitems", initiative_id="i-1", add_ids="w-new", remove_ids="w-old")
+
+    calls = _initiative_calls(spy)
+    assert [call.method for call in calls] == [
+        "initiatives.work_items.remove",
+        "initiatives.work_items.add",
+    ]
+    assert calls[0].kwargs["work_item_ids"] == ["w-old"]
+    assert calls[1].kwargs["work_item_ids"] == ["w-new"]
+
+
+@pytest.mark.parametrize(
+    ("supplied", "expected"),
+    [("w-1,w-2", ["w-1", "w-2"]), ('["w-1", "w-2"]', ["w-1", "w-2"]), ("w-1", ["w-1"])],
+    ids=["comma", "json", "single"],
+)
+def test_initiative_workitem_ids_take_one_id_or_several(supplied, expected, registered, spy):
+    registered["initiative"].fn(action="manage_workitems", initiative_id="i-1", add_ids=supplied)
+
+    assert _initiative_calls(spy)[-1].kwargs["work_item_ids"] == expected
+
+
+def test_managing_initiative_workitems_with_neither_side_asks_for_one(registered, spy):
+    """A call that names no ids would otherwise reach Plane and change nothing."""
+    result = registered["initiative"].fn(action="manage_workitems", initiative_id="i-1")
+
+    assert result == "Error: action 'manage_workitems' requires: add_ids or remove_ids."
+    assert not _initiative_calls(spy), "the refusal must replace the call, not follow it"
+
+
+# A link's title is the text Plane shows instead of the raw URL. The SDK and the API
+# both took it; only this surface dropped it, so a link could never be labelled.
+
+
+def _link_sent(spy):
+    return spy.recorder.only().kwargs["data"]
+
+
+def test_a_link_is_created_with_the_title_it_was_given(registered, spy):
+    registered["workitem_link"].fn(
+        action="create", project_id="p", workitem_id="w", url="https://example.com/spec", title="Design spec"
+    )
+
+    sent = _link_sent(spy)
+    assert (sent.url, sent.title) == ("https://example.com/spec", "Design spec")
+
+
+def test_a_link_created_without_a_title_sends_none(registered, spy):
+    """Omitted means Plane shows the URL; an empty string would be a title of nothing."""
+    registered["workitem_link"].fn(action="create", project_id="p", workitem_id="w", url="https://example.com")
+
+    assert "title" not in _link_sent(spy).model_dump(exclude_none=True)
+
+
+def test_a_link_can_be_renamed_without_resending_its_url(registered, spy):
+    """Plane patches links partially, so a rename touches the title alone."""
+    registered["workitem_link"].fn(action="update", project_id="p", workitem_id="w", link_id="l", title="Design spec")
+
+    assert _link_sent(spy).model_dump(exclude_none=True) == {"title": "Design spec"}
+
+
+def test_a_link_update_with_neither_field_is_refused_before_plane_sees_it(registered, spy):
+    """It would be an empty patch that reports success and changes nothing."""
+    result = registered["workitem_link"].fn(action="update", project_id="p", workitem_id="w", link_id="l")
+
+    assert result == "Error: action 'update' requires: url or title."
+    assert not spy.recorder.calls
+
+
+def _update_sent(spy):
+    return spy.recorder.only().kwargs["data"].model_dump(exclude_unset=True)
+
+
+@pytest.mark.parametrize("field", ["start_date", "target_date"])
+def test_a_date_set_to_null_is_cleared(field, registered, spy):
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", **{field: None})
+
+    assert _update_sent(spy) == {field: None}
+
+
+def test_an_update_sends_only_what_it_was_given(registered, spy):
+    """The regression this guards: every field used to reach the SDK, None when not
+    given, and only `exclude_none` kept that from wiping them. Correct the SDK
+    without this and a rename clears every date and the priority."""
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", name="Renamed")
+
+    assert _update_sent(spy) == {"name": "Renamed"}
+
+
+def test_clearing_one_date_leaves_the_other_alone(registered, spy):
+    registered["workitem"].fn(
+        action="update", project_id="p", workitem_id="w", start_date="2026-01-01", target_date=None
+    )
+
+    assert _update_sent(spy) == {"start_date": "2026-01-01", "target_date": None}
+
+
+def test_a_date_left_at_its_default_is_not_sent(registered, spy):
+    """A client padding from the schema sends "" -- that chose nothing, so it clears nothing."""
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", name="x", target_date="")
+
+    assert "target_date" not in _update_sent(spy)
+
+
+@pytest.mark.parametrize(
+    ("sent", "arrives"),
+    [("", ""), (None, None), ("2026-01-01", "2026-01-01")],
+    ids=["padded-default", "json-null", "date"],
+)
+def test_argument_repair_keeps_the_default_distinct_from_null(sent, arrives, registered):
+    """The repair middleware turns "" into None for a field that is not a string.
+    A date accepts strings, so "" must reach the tool as "" -- or a padded default
+    would arrive as null and clear the date."""
+    from plane_mcp.coercion import coerce_arguments
+
+    repaired, _ = coerce_arguments({"target_date": sent}, registered["workitem"].parameters)
+
+    assert repaired["target_date"] == arrives
+
+
+def test_retrieving_the_workspace_asks_plane_nothing(registered, spy, monkeypatch):
+    """The binding is in the connection's own credentials, so a request would be waste.
+    `current_workspace` itself is covered in tests/test_client.py."""
+    from plane_mcp.tools import workspace
+
+    bound = {"slug": "acme", "id": "ws-1", "name": "Acme Inc", "connected_via": "oauth"}
+    monkeypatch.setattr(workspace, "current_workspace", lambda: bound)
+
+    assert registered["workspace"].fn(action="retrieve") == bound
+    assert not spy.recorder.calls
 
 
 def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_modules, registered):
