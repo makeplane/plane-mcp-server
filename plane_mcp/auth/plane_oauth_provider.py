@@ -37,6 +37,7 @@ from key_value.aio.protocols import AsyncKeyValue
 from plane.models.users import UserLite
 from pydantic import AnyHttpUrl, BaseModel, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from starlette.requests import Request
 
 logger = get_logger(__name__)
 
@@ -46,6 +47,9 @@ LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
 
 
 DEFAULT_PLANE_BASE_URL = "https://api.plane.so"
+
+# Name FastMCP's consent flow gives the cookie that remembers a Deny (it lives for a year).
+_DENIED_CLIENTS_COOKIE = "MCP_DENIED_CLIENTS"
 
 
 class WorkspaceDetail(BaseModel):
@@ -372,3 +376,9 @@ class PlaneOAuthProvider(OAuthProxy):
             settings.client_id,
             required_scopes_final,
         )
+
+    def _decode_list_cookie(self, request: Request, base_name: str) -> list[str]:
+        """Ignore FastMCP's year-long denied-clients cookie so a Deny only applies to that attempt."""
+        if base_name == _DENIED_CLIENTS_COOKIE:
+            return []
+        return super()._decode_list_cookie(request, base_name)
