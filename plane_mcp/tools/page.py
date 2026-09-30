@@ -180,13 +180,13 @@ def register(mcp: FastMCP) -> None:
                 return None
             if not (name or description_html):
                 return missing(action, "name or description_html")
-            updater = client.pages.update_project_page if project_id else client.pages.update_workspace_page
-            return updater(
-                workspace_slug=workspace_slug,
-                page_id=page_id,
-                **scope,
-                data=UpdatePage(name=opt(name), description_html=opt(description_html)),
+            data = UpdatePage(name=opt(name), description_html=opt(description_html))
+            endpoint = (
+                f"{workspace_slug}/projects/{project_id}/pages/{page_id}"
+                if project_id
+                else f"{workspace_slug}/pages/{page_id}"
             )
+            return Page.model_validate(client.pages._patch(endpoint, data.model_dump(exclude_none=True, mode="json")))
 
         if action == "create":
             if error := needs(action, name=name, description_html=description_html):
