@@ -18,6 +18,8 @@ dependencies = [
     "mcp==1.28.1",
     "PyJWT>=2.13.0",
     "authlib>=1.6.9",
+    # cryptography >=47 emits unsupported ARM64 instructions in Docker's AppleHV VM.
+    "cryptography>=46.0.7,<47.0.0",
     "boto3>=1.34.0",
     # pydocket 0.16.6 (pinned by fastmcp 2.14.4) imports `FakeConnection` from
     # `fakeredis.aioredis`, which was removed in fakeredis 2.35.0.
