@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal, get_args
 
 from fastmcp import FastMCP
+from plane.errors.errors import HttpError
 from plane.models.enums import TimezoneEnum
 from plane.models.projects import (
     CreateProject,
@@ -26,6 +27,21 @@ TITLE = "Projects"
 TIMEZONES = get_args(TimezoneEnum)
 
 DEFAULT_PER_PAGE = 100
+
+# Feature toggles that also live as fields on the project resource itself. A
+# Community Edition instance does not serve /features at all, so these are read
+# and written through the base project endpoints there (#234).
+BASE_PROJECT_FEATURES = {
+    "modules": "module_view",
+    "cycles": "cycle_view",
+    "views": "issue_views_view",
+    "pages": "page_view",
+    "intakes": "intake_view",
+    "work_item_types": "is_issue_type_enabled",
+}
+
+# ProjectFeature spells one toggle differently from this tool's argument.
+TOGGLE_ARGUMENT = {"work_item_types": "workitem_types"}
 
 ACTIONS = (
     Action(
@@ -116,6 +132,51 @@ LEGACY = {
 LEGACY_UNMAPPED = {
     "manage_project_archive": "took archive=bool, which spans two actions: use archive or unarchive",
 }
+
+
+def _no_features_endpoint(exc: HttpError) -> bool:
+    """Only a 404 means the instance lacks /features; anything else is a real failure."""
+    return exc.status_code == 404
+
+
+def _argument(feature: str) -> str:
+    """The name a caller passes for a ProjectFeature field."""
+    return TOGGLE_ARGUMENT.get(feature, feature)
+
+
+def _features_of(project) -> ProjectFeature:
+    """The feature flags carried on a project resource, in /features vocabulary."""
+    return ProjectFeature(**{feature: getattr(project, field) for feature, field in BASE_PROJECT_FEATURES.items()})
+
+
+def _get_features(client, workspace_slug: str, project_id: str) -> ProjectFeature:
+    try:
+        return client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
+    except HttpError as exc:
+        if not _no_features_endpoint(exc):
+            raise
+    return _features_of(client.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id))
+
+
+def _update_features(client, workspace_slug: str, project_id: str, data: ProjectFeature) -> ProjectFeature | str:
+    try:
+        return client.projects.update_features(workspace_slug=workspace_slug, project_id=project_id, data=data)
+    except HttpError as exc:
+        if not _no_features_endpoint(exc):
+            raise
+    wanted = data.model_dump(exclude_none=True)
+    if unsupported := [_argument(feature) for feature in wanted if feature not in BASE_PROJECT_FEATURES]:
+        supported = ", ".join(_argument(feature) for feature in BASE_PROJECT_FEATURES)
+        return (
+            f"Error: this instance has no project features endpoint, and {', '.join(unsupported)} cannot be "
+            f"toggled here. Only {supported} can be set on this instance."
+        )
+    project = client.projects.update(
+        workspace_slug=workspace_slug,
+        project_id=project_id,
+        data=UpdateProject(**{BASE_PROJECT_FEATURES[feature]: value for feature, value in wanted.items()}),
+    )
+    return _features_of(project)
 
 
 def register(mcp: FastMCP) -> None:
@@ -280,12 +341,13 @@ def register(mcp: FastMCP) -> None:
             return client.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
 
         if action == "get_features":
-            return client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
+            return _get_features(client, workspace_slug, project_id)
 
-        return client.projects.update_features(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            data=ProjectFeature(
+        return _update_features(
+            client,
+            workspace_slug,
+            project_id,
+            ProjectFeature(
                 modules=modules,
                 cycles=cycles,
                 views=views,
