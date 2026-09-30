@@ -19,6 +19,7 @@ from plane.models.initiatives import (
     UpdateInitiative,
 )
 from plane.models.projects import PaginatedProjectResponse
+from plane.models.work_items import PaginatedWorkItemResponse
 
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.toolkit import (
@@ -27,6 +28,7 @@ from plane_mcp.toolkit import (
     build_description,
     coerce_list,
     envelope,
+    missing,
     one_of,
     opt,
     page_params,
@@ -49,6 +51,9 @@ _PROJECTS_NEED_NATIVE = (
     "Linking projects to an initiative requires the native initiatives feature; "
     "there is no work-item equivalent. Enable it in workspace settings."
 )
+_WORKITEMS_NEED_NATIVE = (
+    "Linking work items to an initiative requires the native initiatives feature. Enable it in workspace settings."
+)
 
 ACTIONS = (
     Action("list", (), note="returns every initiative; this endpoint does not paginate", read=True),
@@ -69,11 +74,20 @@ ACTIONS = (
         note="returns nothing, read back with list_projects",
         destructive=True,
     ),
+    Action("list_workitems", ("initiative_id",), ("cursor", "per_page"), read=True),
+    Action(
+        "manage_workitems",
+        ("initiative_id",),
+        ("add_ids", "remove_ids"),
+        note="pass at least one of add_ids or remove_ids; each takes one id or several, "
+        "and removals apply first; returns nothing, read back with list_workitems",
+    ),
 )
 
 FOOTER = (
     f"state is one of: {', '.join(STATES)}. Dates are ISO 8601 (YYYY-MM-DD). "
-    "lead is a member id. project_ids takes project UUIDs."
+    "lead is a member id. project_ids takes project UUIDs, add_ids and remove_ids "
+    "work item UUIDs. A work item of any type can be linked to an initiative."
 )
 
 LEGACY = {
@@ -114,6 +128,8 @@ def register(mcp: FastMCP) -> None:
             "list_projects",
             "add_projects",
             "remove_projects",
+            "list_workitems",
+            "manage_workitems",
         ],
         initiative_id: str = "",
         name: str = "",
@@ -123,6 +139,8 @@ def register(mcp: FastMCP) -> None:
         state: str = "",
         lead: str = "",
         project_ids: str = "",
+        add_ids: str = "",
+        remove_ids: str = "",
         cursor: str = "",
         per_page: int = 0,
     ) -> Initiative | list[Initiative] | dict[str, Any] | str | None:
@@ -139,6 +157,8 @@ def register(mcp: FastMCP) -> None:
 
         if action in ("list_projects", "add_projects", "remove_projects"):
             _require_native(client, workspace_slug, _PROJECTS_NEED_NATIVE)
+        elif action in ("list_workitems", "manage_workitems"):
+            _require_native(client, workspace_slug, _WORKITEMS_NEED_NATIVE)
         else:
             _require_native(client, workspace_slug, _WORK_ITEM_FALLBACK)
 
@@ -181,6 +201,28 @@ def register(mcp: FastMCP) -> None:
 
         if action == "delete":
             client.initiatives.delete(workspace_slug=workspace_slug, initiative_id=initiative_id)
+            return None
+
+        if action in ("list_workitems", "manage_workitems"):
+            work_items = client.initiatives.work_items
+
+            if action == "list_workitems":
+                linked_workitems: PaginatedWorkItemResponse = work_items.list(
+                    workspace_slug=workspace_slug,
+                    initiative_id=initiative_id,
+                    params=page_params(cursor, per_page),
+                )
+                return envelope(linked_workitems)
+
+            add = coerce_list(add_ids)
+            remove = coerce_list(remove_ids)
+            if not add and not remove:
+                return missing(action, "add_ids or remove_ids")
+            # Removals first, so one call can swap an id out for another.
+            if remove:
+                work_items.remove(workspace_slug=workspace_slug, initiative_id=initiative_id, work_item_ids=remove)
+            if add:
+                work_items.add(workspace_slug=workspace_slug, initiative_id=initiative_id, work_item_ids=add)
             return None
 
         projects = client.initiatives.projects

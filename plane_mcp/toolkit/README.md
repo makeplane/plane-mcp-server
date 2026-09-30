@@ -6,6 +6,7 @@ Shared building blocks for the tool surface, split by *when* they act. All re-ex
 |---|---|---|
 | `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
 | `runtime.py` | call | `missing`, `needs`, `require`, `one_of`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
+| `mentions.py` | call | `render_mentions`, `tokenize_mentions`, `mention_user_ids`, `project_mention_error` |
 | `paging.py` | response | `envelope`, `dump_results`, `pql_failure`, `workitem_page` |
 | `governance.py` | policy | `workspace_owns_resource`, `workspace_owns`, `scoped`, `plan_gated` |
 | `transforms.py` | listing | `StripOutputSchemas` |

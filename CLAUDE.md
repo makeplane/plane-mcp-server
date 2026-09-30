@@ -81,7 +81,7 @@ Coercion runs before validation so an argument is judged by the value it repairs
 
 ### Tools (`tools/`)
 
-One action-dispatch tool per Plane resource: **30 tools, 204 actions, ~67k chars advertised**. `tools/__init__.py` re-exports `register_tools`, so `server.py` and `__main__.py` see a single entry point.
+One action-dispatch tool per Plane resource: **30 tools, 207 actions, ~67k chars advertised**. `tools/__init__.py` re-exports `register_tools`, so `server.py` and `__main__.py` see a single entry point.
 
 One module per resource, each exporting `NAME`, `ACTIONS`, `LEGACY` and `register(mcp)`. `ACTIONS` is the single source of truth: the tool description and its `ToolAnnotations` are generated from it, and the conformance suite asserts they agree with the function signature. See `tools/README.md` for the full convention.
 
@@ -103,6 +103,7 @@ Shared building blocks for the tool surface, split by *when* they act:
 |---|---|---|
 | `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
 | `runtime.py` | call | `missing`, `needs`, `require`, `one_of`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
+| `mentions.py` | call | `render_mentions`, `tokenize_mentions`, `mention_user_ids`, `project_mention_error` |
 | `paging.py` | response | `envelope`, `dump_results`, `pql_failure`, `workitem_page` |
 | `governance.py` | policy | `workspace_owns_resource`, `GOVERNED_BY`, `workspace_owns`, `migration_in_progress`, `plan_gated` |
 | `transforms.py` | listing | `StripOutputSchemas` |
