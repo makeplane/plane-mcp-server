@@ -899,7 +899,7 @@ wheels = [
 
 [[package]]
 name = "plane-mcp-server"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "authlib" },
@@ -927,7 +927,7 @@ requires-dist = [
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1,<2.35.0" },
     { name = "fastmcp", specifier = "==3.2.0" },
     { name = "mcp", specifier = "==1.28.1" },
-    { name = "plane-sdk", specifier = "==0.2.23" },
+    { name = "plane-sdk", specifier = "==0.3.1" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4,<0.5.0" },
     { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -936,15 +936,16 @@ requires-dist = [
 
 [[package]]
 name = "plane-sdk"
-version = "0.2.23"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "requests" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7e/89/c683207e50f641843273de4e19ac88154bdc89c522ec2cdab956201a4d1e/plane_sdk-0.2.23.tar.gz", hash = "sha256:aee2f3da583459b6a513f9200f703fac1942ea65c27dd6f6dd76872677535bd7", size = 102738 }
+sdist = { url = "https://files.pythonhosted.org/packages/04/dd/d8c276025ba66cc37c719b141f24edeb6bb9319298bd5656c62c980d0dd7/plane_sdk-0.3.1.tar.gz", hash = "sha256:e093f0d6cc83a155cc9e1670d26da14e8f57f4dc33fed9672aa785f70662ec64", size = 232255 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/38/6d7f7292025806b56655e38c6df3156b3a0ecac055d8dc0ef229fe30f1bb/plane_sdk-0.2.23-py3-none-any.whl", hash = "sha256:b2cdb86943f2cee43d066dce0e8af2b9fb955db757c4666b1a269e7c81d381c0", size = 147179 },
+    { url = "https://files.pythonhosted.org/packages/1c/e4/0065760d5bfe2444f7912324f9fb85ed817872ba4f98c4b5572a4039f06a/plane_sdk-0.3.1-py3-none-any.whl", hash = "sha256:c7794876403af6b790fc1d9d594357a02163b353d38eb8c3eb6fcc157256e827", size = 355304 },
 ]
 
 [[package]]
