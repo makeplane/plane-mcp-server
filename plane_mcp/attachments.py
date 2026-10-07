@@ -4,6 +4,7 @@ Network limits, MIME allow-lists, the SSRF guard and the attachment
 normaliser. Kept out of either surface package so neither depends on the other.
 """
 
+import contextlib
 import ipaddress
 import socket
 from typing import Any
@@ -89,11 +90,12 @@ def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     return any(_is_blocked_ip(embedded) for embedded in _embedded_ipv4(ip))
 
 
-def assert_public_url(url: str) -> None:
+def assert_public_url(url: str) -> str:
     """Raise ValueError unless every address the URL resolves to is public.
 
     Checks *all* resolved addresses (not just the first) and decodes IPv6
     transition formats, so ``http://[::ffff:169.254.169.254]/`` is blocked.
+    Returns the first validated IP address as a string.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -107,6 +109,7 @@ def assert_public_url(url: str) -> None:
     except socket.gaierror as exc:
         raise ValueError(f"Could not resolve hostname {hostname!r}: {exc}") from exc
 
+    first_ip = None
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if _is_blocked_ip(ip):
@@ -114,6 +117,29 @@ def assert_public_url(url: str) -> None:
                 f"URL {url!r} resolves to a private/reserved address ({ip}) "
                 "and cannot be fetched for security reasons."
             )
+        if first_ip is None:
+            first_ip = str(ip)
+            
+    if not first_ip:
+        raise ValueError(f"Could not resolve hostname {hostname!r}: No IP addresses found")
+    return first_ip
+
+
+@contextlib.contextmanager
+def _force_resolve(hostname: str, ip: str):
+    """Monkey-patch socket.getaddrinfo to force a hostname to resolve to a specific IP."""
+    orig_getaddrinfo = socket.getaddrinfo
+    
+    def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        if host == hostname:
+            return orig_getaddrinfo(ip, port, family, type, proto, flags)
+        return orig_getaddrinfo(host, port, family, type, proto, flags)
+        
+    socket.getaddrinfo = _patched_getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = orig_getaddrinfo
 
 
 def fetch_public_file(url: str, max_bytes: int) -> tuple[bytes, Any]:
@@ -124,8 +150,18 @@ def fetch_public_file(url: str, max_bytes: int) -> tuple[bytes, Any]:
     cap so an oversized response cannot exhaust memory before a length check.
     """
     for _ in range(MAX_REDIRECTS + 1):
-        assert_public_url(url)
-        response = requests.get(url, timeout=HTTP_TIMEOUT, allow_redirects=False, stream=True)
+        ip = assert_public_url(url)
+        hostname = urlparse(url).hostname
+        
+        with _force_resolve(hostname, ip):
+            response = requests.get(
+                url, 
+                timeout=HTTP_TIMEOUT, 
+                allow_redirects=False, 
+                stream=True,
+                proxies={"http": "", "https": ""}
+            )
+            
         if response.is_redirect or response.is_permanent_redirect:
             location = response.headers.get("Location")
             response.close()
