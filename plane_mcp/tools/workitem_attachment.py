@@ -24,8 +24,8 @@ from plane_mcp.attachments import (
     READABLE_TEXT_TYPES,
     TEXT_READ_LIMIT,
     UPLOAD_SIZE_LIMIT,
-    assert_public_url,
     attachment_to_dict,
+    fetch_public_file,
 )
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs
@@ -126,24 +126,16 @@ def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attach
 
 
 def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url: str, name: str):
-    assert_public_url(url)
+    # fetch_public_file enforces the SSRF guard on every redirect hop and caps
+    # the body size while streaming, so a private target or an oversized/endless
+    # response cannot get through.
     try:
-        response = requests.get(url, timeout=HTTP_TIMEOUT)
-        response.raise_for_status()
+        payload, headers = fetch_public_file(url, UPLOAD_SIZE_LIMIT)
     except requests.RequestException as exc:
         raise ValueError(f"Failed to fetch file from {url!r}: {exc}") from exc
 
-    declared = response.headers.get("Content-Length")
-    payload = response.content
-    size = max(int(declared) if declared else 0, len(payload))
-    if size > UPLOAD_SIZE_LIMIT:
-        raise ValueError(
-            f"File at {url!r} is too large ({size // 1024 // 1024} MB). Maximum allowed "
-            f"size is {UPLOAD_SIZE_LIMIT // 1024 // 1024} MB."
-        )
-
     filename = name or os.path.basename(urlparse(url).path.rstrip("/")) or "attachment"
-    raw_type = response.headers.get("Content-Type", "")
+    raw_type = headers.get("Content-Type", "")
     content_type = raw_type.split(";")[0].strip() if raw_type else ""
     if not content_type or content_type == "application/octet-stream":
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
