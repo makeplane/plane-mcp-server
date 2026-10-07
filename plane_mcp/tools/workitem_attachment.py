@@ -24,8 +24,8 @@ from plane_mcp.attachments import (
     READABLE_TEXT_TYPES,
     TEXT_READ_LIMIT,
     UPLOAD_SIZE_LIMIT,
-    assert_public_url,
     attachment_to_dict,
+    fetch_validated_get,
 )
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs
@@ -126,11 +126,10 @@ def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attach
 
 
 def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url: str, name: str):
-    assert_public_url(url)
     try:
-        response = requests.get(url, timeout=HTTP_TIMEOUT)
+        response = fetch_validated_get(url, max_bytes=UPLOAD_SIZE_LIMIT)
         response.raise_for_status()
-    except requests.RequestException as exc:
+    except ValueError as exc:
         raise ValueError(f"Failed to fetch file from {url!r}: {exc}") from exc
 
     declared = response.headers.get("Content-Length")
