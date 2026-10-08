@@ -13,8 +13,10 @@ needs rather than reaching the network.
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
+from plane.errors.errors import HttpError
 
 from plane_mcp.toolkit.spec import action_names
 
@@ -514,3 +516,61 @@ def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_m
         if phrase in registered[mod.NAME].description.lower()
     ]
     assert not offenders, f"descriptions predicting a refusal instead of letting the API report it: {offenders}"
+
+
+NO_FEATURES_ENDPOINT = HttpError("Page not found.", status_code=404, response={"error": "Page not found."})
+
+
+def _ce_project(**flags):
+    """A project as Community Edition returns it: feature toggles are plain fields."""
+    fields = {
+        "module_view": True,
+        "cycle_view": False,
+        "issue_views_view": True,
+        "page_view": False,
+        "intake_view": True,
+        "is_issue_type_enabled": False,
+    }
+    return SimpleNamespace(**{**fields, **flags})
+
+
+def test_project_get_features_falls_back_to_the_project_on_ce(registered, spy):
+    """CE has no /features; the same toggles are fields on the project (#234)."""
+    spy.returns["projects.get_features"] = NO_FEATURES_ENDPOINT
+    spy.returns["projects.retrieve"] = _ce_project()
+    result = registered["project"].fn(action="get_features", project_id="proj-1")
+    assert spy.recorder.methods == ["projects.get_features", "projects.retrieve"]
+    assert result.model_dump(exclude_none=True) == {
+        "modules": True,
+        "cycles": False,
+        "views": True,
+        "pages": False,
+        "intakes": True,
+        "work_item_types": False,
+    }
+
+
+def test_project_update_features_patches_the_project_on_ce(registered, spy):
+    spy.returns["projects.update_features"] = NO_FEATURES_ENDPOINT
+    spy.returns["projects.update"] = _ce_project(cycle_view=True)
+    result = registered["project"].fn(action="update_features", project_id="proj-1", cycles=True)
+    assert spy.recorder.methods == ["projects.update_features", "projects.update"]
+    sent = spy.recorder.calls[-1].kwargs["data"].model_dump(exclude_none=True)
+    assert sent == {"cycle_view": True}
+    assert result.cycles is True
+
+
+def test_project_update_features_names_toggles_ce_cannot_set(registered, spy):
+    spy.returns["projects.update_features"] = NO_FEATURES_ENDPOINT
+    result = registered["project"].fn(action="update_features", project_id="proj-1", epics=True, modules=True)
+    assert spy.recorder.methods == ["projects.update_features"]
+    assert isinstance(result, str) and result.startswith("Error:") and "epics" in result
+    assert "workitem_types" in result and "work_item_types" not in result
+
+
+def test_project_features_only_fall_back_on_404(registered, spy):
+    """A 403 or 500 is a real failure, not a missing endpoint."""
+    spy.returns["projects.get_features"] = HttpError("Forbidden", status_code=403, response={})
+    with pytest.raises(HttpError):
+        registered["project"].fn(action="get_features", project_id="proj-1")
+    assert spy.recorder.methods == ["projects.get_features"]
