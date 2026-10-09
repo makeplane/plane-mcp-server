@@ -145,6 +145,7 @@ unchanged.
 | `PLANE_API_KEY` | stdio | API key |
 | `PLANE_WORKSPACE_SLUG` | stdio | Target workspace |
 | `PLANE_BASE_URL` | optional | Plane API URL (default `https://api.plane.so`) |
+| `PLANE_API_KEY_HEADER` | optional | Header that carries `PLANE_API_KEY` (default `X-Api-Key`); set it when an API gateway in front of Plane expects its own key header |
 
 The remote transports carry credentials in the connection — the OAuth flow or the
 PAT headers — and need none of these.
