@@ -204,7 +204,7 @@ def _scope_of(client: Any, project_id: str, workitem_type_id: str) -> _Scope:
     properties = client.work_item_properties
     if project_id and workitem_type_id:
         scope = {"project_id": project_id, "type_id": workitem_type_id}
-        return _Scope(properties, "", scope, "workitem_property_id")
+        return _Scope(properties, "", scope, "work_item_property_id")
     if project_id:
         return _Scope(properties, "_project", {"project_id": project_id}, "property_id")
     return _Scope(client.workspace_work_item_properties, "", {}, "property_id")
