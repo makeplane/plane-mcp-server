@@ -26,6 +26,7 @@ from plane_mcp.attachments import (
     READABLE_TEXT_TYPES,
     TEXT_READ_LIMIT,
     UPLOAD_SIZE_LIMIT,
+    UploadSizeLimitError,
     attachment_to_dict,
     fetch_validated_get,
 )
@@ -136,9 +137,9 @@ def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url:
     try:
         response = fetch_validated_get(url, max_bytes=UPLOAD_SIZE_LIMIT)
         response.raise_for_status()
-    except ValueError as exc:
-        if "exceeds" in str(exc):
-            raise ValueError("Source file exceeds the 5 MB upload limit.") from None
+    except UploadSizeLimitError:
+        raise ValueError("Source file exceeds the 5 MB upload limit.") from None
+    except ValueError:
         raise ValueError(
             "Failed to fetch source file. Check URL access, address safety, size, and proxy settings."
         ) from None

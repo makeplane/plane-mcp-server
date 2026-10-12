@@ -583,3 +583,40 @@ def test_url_upload_storage_error_does_not_expose_signed_url(attachment_tool, mo
     with pytest.raises(ValueError, match="uncertain") as error:
         tool(action="upload_from_url", project_id=PROJECT, workitem_id=WORK_ITEM, url="https://example.com/a.png")
     assert secret not in str(error.value)
+
+
+def test_hostname_text_does_not_turn_address_rejection_into_a_size_error(attachment_tool, monkeypatch):
+    tool, spy, _ = attachment_tool
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *a, **k: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80)),
+        ],
+    )
+    with pytest.raises(ValueError) as error:
+        tool(action="upload_from_url", project_id=PROJECT, workitem_id=WORK_ITEM, url="http://exceeds.example/file.png")
+    assert "address safety" in str(error.value)
+    assert "file exceeds" not in str(error.value)
+    assert "exceeds.example" not in str(error.value)
+    assert not spy.recorder.calls
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_size_guard_uses_a_typed_error_without_source_url(declared):
+    from plane_mcp.attachments import UploadSizeLimitError, _read_bounded
+
+    read = Mock(return_value=b"oversized")
+    response = SimpleNamespace(
+        headers={"Content-Length": "10"} if declared else {},
+        read=read,
+        release_conn=Mock(),
+    )
+    with pytest.raises(UploadSizeLimitError, match="exceeds") as error:
+        _read_bounded(response, "https://files.example/exceeds.png?signature=private", 5)
+    assert isinstance(error.value, ValueError)
+    assert "signature" not in str(error.value) and "files.example" not in str(error.value)
+    if declared:
+        read.assert_not_called()
+    else:
+        read.assert_called_once_with(6)
