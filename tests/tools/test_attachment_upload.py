@@ -68,8 +68,14 @@ def test_begin_result_guides_both_upload_clients_and_scoped_completion(lifecycle
     }
     assert "only after" in guide["after_transfer"]["condition"]
     assert "If the bundled plane_mcp.local_upload helper is available" in guide["next_step"]
-    assert "If no suitable client is available, stop and notify" in guide["next_step"]
+    assert "If no suitable client is available, stop" in guide["next_step"]
     assert "uncertain transfer" in guide["failure_handling"][1]
+    assert guide["no_client"]["user_message"] == (
+        "Upload cannot proceed: no suitable local upload client is available. "
+        f"Attachment {ATTACHMENT} is pending. No completion was attempted."
+    )
+    assert guide["direct_upload"]["follow_redirects"] is False
+    assert guide["direct_upload"]["use_environment_credentials"] is False
     assert SECRET not in json.dumps(guide)
     assert len(spy.recorder.calls) == 1
 

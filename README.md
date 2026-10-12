@@ -199,6 +199,11 @@ instructions or pass it to the storage upload client.
    helper command and the direct multipart request for curl or your own script.
    Use the bundled helper when available. Otherwise, use a suitable direct client.
    If neither is available, stop and notify the user. Do not complete the attachment.
+   `instructions.next_step` gives numbered execution steps. The result includes a
+   ready-to-send no-client message. Its direct-upload section includes an executable Python
+   standard-library example. That example uses one HTTPS request, rejects HTTP
+   redirects, and uses no proxy or netrc credentials. Client-specific rules also
+   cover curl, requests, urllib, and Node.js.
    The `after_transfer` section includes the scoped `complete_upload` arguments.
    Use those arguments only after the stated transfer condition is satisfied.
    The result also includes failure, verification, and privacy steps.
