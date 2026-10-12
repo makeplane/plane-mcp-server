@@ -232,7 +232,11 @@ If storage rejects expired instructions (usually HTTP 403), do not complete.
 Delete the pending attachment with `delete`, then begin a new upload.
 If initiation times out, no file transfer was attempted. Plane can still have
 created a pending record. Pending records do not necessarily appear in `list`.
-Retain an attachment ID if one was received. Do not assume an empty list proves
+If Plane returned a valid attachment ID but its instructions were rejected,
+the safe error includes `Pending attachment_id: <UUID>`. Use that ID with the
+same project and work item to delete the pending record before retrying.
+Signed instructions are omitted from the error. If no valid ID was received,
+the error reports uncertain initiation. Do not assume an empty list proves
 that no record was created.
 
 A storage timeout leaves the transfer uncertain. Do not complete based on a timeout.

@@ -188,7 +188,8 @@ def test_real_sdk_preserves_connection_auth_and_endpoint(api_key, access_token):
 def test_malformed_plane_instructions_are_safe(lifecycle, raw):
     tool, spy = lifecycle
     spy.returns["work_items.attachments._post"] = raw
-    with pytest.raises(ValueError, match="uncertain") as error:
+    expected = "Pending attachment_id" if isinstance(raw, dict) and raw.get("asset_id") == ATTACHMENT else "uncertain"
+    with pytest.raises(ValueError, match=expected) as error:
         tool(action="begin_upload", project_id=PROJECT, workitem_id=WORK_ITEM, **METADATA)
     assert SECRET not in str(error.value)
     assert "_patch" not in str(spy.recorder.methods)
@@ -249,7 +250,8 @@ def test_mcp_schema_rejects_wrong_argument_types(lifecycle, argument, value):
 def test_invalid_envelope_is_safe_and_never_completes(lifecycle, raw):
     tool, spy = lifecycle
     spy.returns["work_items.attachments._post"] = raw
-    with pytest.raises(ValueError, match="uncertain") as error:
+    expected = "Pending attachment_id" if isinstance(raw, dict) and raw.get("asset_id") == ATTACHMENT else "uncertain"
+    with pytest.raises(ValueError, match=expected) as error:
         tool(action="begin_upload", project_id=PROJECT, workitem_id=WORK_ITEM, **METADATA)
     assert SECRET not in str(error.value)
     assert spy.recorder.methods == ["work_items.attachments._post"]
@@ -339,3 +341,40 @@ def test_actions_use_current_auth_context_instead_of_environment(connection, act
         else {"X-Api-Key": "environment-key" if connection == "stdio" else "connection-token"}
     )
     assert kwargs["headers"] == {"Content-Type": "application/json", **expected}
+
+
+@pytest.mark.parametrize(
+    "upload_data",
+    [
+        {"url": "http://storage.example/", "fields": {"policy": SECRET}},
+        {"url": UPLOAD["url"], "fields": {}},
+        None,
+    ],
+)
+def test_rejected_instructions_allow_scoped_pending_attachment_cleanup(lifecycle, upload_data):
+    tool, spy = lifecycle
+    spy.returns["work_items.attachments._post"] = {"asset_id": ATTACHMENT, "upload_data": upload_data}
+    with pytest.raises(ValueError, match=f"Pending attachment_id: {ATTACHMENT}") as error:
+        tool(action="begin_upload", project_id=PROJECT, workitem_id=WORK_ITEM, **METADATA)
+    assert SECRET not in str(error.value)
+    assert "storage.example" not in str(error.value)
+    assert "Delete this attachment" in str(error.value)
+    assert error.value.__suppress_context__ is True
+
+    tool(action="delete", project_id=PROJECT, workitem_id=WORK_ITEM, attachment_id=ATTACHMENT)
+    assert spy.recorder.methods == ["work_items.attachments._post", "work_items.attachments.delete"]
+    assert spy.recorder.calls[1].kwargs == {
+        "workspace_slug": "acme",
+        "project_id": PROJECT,
+        "work_item_id": WORK_ITEM,
+        "attachment_id": ATTACHMENT,
+    }
+
+
+def test_invalid_response_id_is_not_exposed_as_a_cleanup_id(lifecycle):
+    tool, spy = lifecycle
+    spy.returns["work_items.attachments._post"] = {"asset_id": SECRET, "upload_data": UPLOAD}
+    with pytest.raises(ValueError, match="uncertain") as error:
+        tool(action="begin_upload", project_id=PROJECT, workitem_id=WORK_ITEM, **METADATA)
+    assert SECRET not in str(error.value)
+    assert "Pending attachment_id" not in str(error.value)

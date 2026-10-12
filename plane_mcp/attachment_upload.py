@@ -83,6 +83,7 @@ def begin_upload(resource, workspace_slug: str, project_id: str, workitem_id: st
     data = WorkItemAttachmentUploadRequest(
         name=metadata["name"], type=metadata["content_type"], size=metadata["size"]
     ).model_dump(exclude_none=True)
+    attachment_id = ""
     try:
         raw = resource._post(path, data)
         attachment_id = str(UUID(raw["asset_id"]))
@@ -91,6 +92,11 @@ def begin_upload(resource, workspace_slug: str, project_id: str, workitem_id: st
     except HttpError as exc:
         raise ValueError(f"Upload initiation failed: HTTP {exc.status_code}. No transfer was confirmed.") from None
     except (requests.RequestException, ValueError, TypeError, KeyError, AttributeError):
+        if attachment_id:
+            raise ValueError(
+                f"Upload instructions are invalid. Pending attachment_id: {attachment_id}. "
+                "Delete this attachment before retrying. No transfer or completion was attempted."
+            ) from None
         raise ValueError(
             "Upload initiation is uncertain. A pending record can remain. No transfer or completion was attempted."
         ) from None
