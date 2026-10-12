@@ -191,9 +191,15 @@ instructions or pass it to the storage upload client.
    ```
 
    The result contains `attachment_id`, `upload_data` (`url` and `fields`),
-   `name`, `content_type`, and `size`. The attachment is pending. The size must
+   `name`, `content_type`, `size`, and `instructions`. The attachment is pending. The size must
    be from 1 byte to 5 MB (5,242,880 bytes). Use a filename without a path.
    Plane also applies its file-type, storage, plan, and permission checks.
+
+   Follow the returned `instructions` during execution. They include the optional
+   helper command and the direct multipart request for curl or your own script.
+   The `after_transfer` section includes the scoped `complete_upload` arguments.
+   Use those arguments only after the stated transfer condition is satisfied.
+   The result also includes failure, verification, and privacy steps.
 
 2. Keep the result object in client memory or save it as a private JSON file.
    Use the result object, not the MCP content wrapper. If you save a file,

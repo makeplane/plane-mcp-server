@@ -106,6 +106,61 @@ def begin_upload(resource, workspace_slug: str, project_id: str, workitem_id: st
         "name": metadata["name"],
         "content_type": metadata["content_type"],
         "size": metadata["size"],
+        "instructions": {
+            "next_step": "Upload the local file to storage. The attachment is pending. Do not complete it yet.",
+            "helper": {
+                "optional": True,
+                "command": "python -m plane_mcp.local_upload /local/path/to/file < upload.json",
+                "input": (
+                    "Use Python from an environment with plane-mcp-server installed. "
+                    "Save this entire result object as UTF-8 JSON in upload.json with mode 0600. "
+                    "Do not save the MCP content wrapper. The helper needs no Plane API key. "
+                    "Exit status 0 and transfer_succeeded=true confirm the storage transfer."
+                ),
+            },
+            "direct_upload": {
+                "clients": "Use curl, your own Python or Node.js script, or another multipart HTTP client.",
+                "method": "POST",
+                "url_from": "upload_data.url",
+                "form_fields_from": "upload_data.fields",
+                "file_part": {"field": "file", "filename_from": "name", "content_type_from": "content_type"},
+                "steps": [
+                    "Read the file on the client. Check that its size equals size. "
+                    f"The size must be from 1 to {UPLOAD_SIZE_LIMIT} bytes. "
+                    "Bound the read to this limit plus one guard byte.",
+                    "Send an HTTPS multipart/form-data POST to upload_data.url. "
+                    "Copy every upload_data.fields entry unchanged into a separate form field.",
+                    "Add the binary file as a separate part named file. "
+                    "Use name as its filename and content_type as its MIME type. "
+                    "Let the HTTP client generate the multipart boundary.",
+                    "Use a fresh HTTP client without Plane API credentials, cookies, or implicit authentication. "
+                    "Disable automatic redirects. Set connection and transfer timeouts.",
+                    "Confirm an HTTP 2xx storage response. A redirect, error response, or timeout is not success.",
+                ],
+            },
+            "after_transfer": {
+                "condition": "Call this only after storage returns HTTP 2xx, or the helper confirms transfer success.",
+                "tool": "workitem_attachment",
+                "arguments": {
+                    "action": "complete_upload",
+                    "project_id": str(UUID(project_id)),
+                    "workitem_id": str(UUID(workitem_id)),
+                    "attachment_id": attachment_id,
+                    "transfer_succeeded": True,
+                },
+            },
+            "failure_handling": [
+                "Do not call complete_upload after a failed or uncertain transfer.",
+                "If storage rejects expired instructions, delete this pending attachment in the same scope. "
+                "Then call begin_upload for new instructions.",
+                "If completion is uncertain, check the same attachment before retrying completion. "
+                "Do not create a duplicate attachment.",
+            ],
+            "verification": "Use list and download_url. Download and compare bytes when integrity matters. "
+            "Completion confirms metadata. It does not prove byte integrity.",
+            "privacy": "Keep the Plane API key in the MCP server. Do not send file paths or bytes to MCP. "
+            "Do not log file bytes, signed URLs, or signed fields. Remove upload.json after use.",
+        },
     }
 
 

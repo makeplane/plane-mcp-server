@@ -10,6 +10,7 @@ import pytest
 import requests
 
 from plane_mcp import local_upload
+from plane_mcp.attachment_upload import begin_upload
 from plane_mcp.attachments import UPLOAD_SIZE_LIMIT
 
 PNG = b"\x89PNG\r\n\x1a\nsynthetic-payload"
@@ -57,6 +58,62 @@ def test_success_sends_bytes_and_all_signed_fields_without_credentials(transfer,
     assert kwargs["allow_redirects"] is False
     assert kwargs["stream"] is True
     assert kwargs["timeout"] == local_upload.HTTP_TIMEOUT
+
+
+@pytest.mark.parametrize("client", ["helper", "direct"])
+def test_begin_result_supports_helper_and_independent_multipart_client(transfer, client):
+    path, old_result, sent = transfer
+    resource = Mock()
+    resource._post.return_value = {"asset_id": ATTACHMENT, "upload_data": old_result["upload_data"]}
+    result = begin_upload(
+        resource,
+        "acme",
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+        name=path.name,
+        content_type="image/png",
+        size=len(PNG),
+    )
+    # A client receives JSON, rather than Python-only values.
+    result = json.loads(json.dumps(result))
+    if client == "helper":
+        assert local_upload.upload_file(path, result)["transfer_succeeded"] is True
+    else:
+        guide = result["instructions"]["direct_upload"]
+
+        def value_at(reference):
+            value = result
+            for key in reference.split("."):
+                value = value[key]
+            return value
+
+        part = guide["file_part"]
+        payload = path.read_bytes()
+        assert len(payload) == result["size"] <= UPLOAD_SIZE_LIMIT
+        with requests.Session() as session:
+            session.trust_env = False
+            response = session.request(
+                guide["method"],
+                value_at(guide["url_from"]),
+                data=value_at(guide["form_fields_from"]),
+                files={part["field"]: (value_at(part["filename_from"]), payload, value_at(part["content_type_from"]))},
+                timeout=(10, 60),
+                allow_redirects=False,
+                stream=True,
+            )
+            assert 200 <= response.status_code < 300
+            response.close()
+    assert len(sent) == 1
+    session, request, kwargs = sent[0]
+    assert PNG in request.body
+    for name, value in result["upload_data"]["fields"].items():
+        assert f'name="{name}"'.encode() in request.body
+        assert value.encode() in request.body
+    assert b'name="file"; filename="shot.png"' in request.body
+    assert b"Content-Type: image/png" in request.body
+    assert session.trust_env is False
+    assert kwargs["allow_redirects"] is False
+    resource._patch.assert_not_called()
 
 
 @pytest.mark.parametrize("status", [302, 400, 401, 403, 500])

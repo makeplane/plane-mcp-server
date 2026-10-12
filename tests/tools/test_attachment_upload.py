@@ -35,10 +35,41 @@ def lifecycle(registered, spy):
 def test_begin_returns_signed_instructions_without_completing(lifecycle):
     tool, spy = lifecycle
     result = tool(action="begin_upload", project_id=PROJECT, workitem_id=WORK_ITEM, **METADATA)
-    assert result == {"attachment_id": ATTACHMENT, "upload_data": UPLOAD, **METADATA}
+    assert {key: value for key, value in result.items() if key != "instructions"} == {
+        "attachment_id": ATTACHMENT,
+        "upload_data": UPLOAD,
+        **METADATA,
+    }
     call = spy.recorder.only()
     assert call.method == "work_items.attachments._post"
     assert call.kwargs == {"endpoint": PATH, "data": {"name": "shot.png", "type": "image/png", "size": 42}}
+
+
+def test_begin_result_guides_both_upload_clients_and_scoped_completion(lifecycle):
+    import json
+
+    tool, spy = lifecycle
+    result = tool(action="begin_upload", project_id=PROJECT, workitem_id=WORK_ITEM, **METADATA)
+    guide = result["instructions"]
+    assert guide["helper"]["optional"] is True
+    assert "python -m plane_mcp.local_upload" in guide["helper"]["command"]
+    assert "entire result object" in guide["helper"]["input"]
+    direct = guide["direct_upload"]
+    assert direct["method"] == "POST"
+    assert direct["url_from"] == "upload_data.url"
+    assert direct["form_fields_from"] == "upload_data.fields"
+    assert direct["file_part"] == {"field": "file", "filename_from": "name", "content_type_from": "content_type"}
+    assert guide["after_transfer"]["arguments"] == {
+        "action": "complete_upload",
+        "project_id": PROJECT,
+        "workitem_id": WORK_ITEM,
+        "attachment_id": ATTACHMENT,
+        "transfer_succeeded": True,
+    }
+    assert "only after" in guide["after_transfer"]["condition"]
+    assert "uncertain transfer" in guide["failure_handling"][0]
+    assert SECRET not in json.dumps(guide)
+    assert len(spy.recorder.calls) == 1
 
 
 def test_complete_uses_scoped_patch_and_accepts_204(lifecycle):
