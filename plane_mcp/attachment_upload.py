@@ -107,7 +107,14 @@ def begin_upload(resource, workspace_slug: str, project_id: str, workitem_id: st
         "content_type": metadata["content_type"],
         "size": metadata["size"],
         "instructions": {
-            "next_step": "Upload the local file to storage. The attachment is pending. Do not complete it yet.",
+            "next_step": (
+                "The attachment is pending. If the bundled plane_mcp.local_upload helper is available, "
+                "use it to upload the local file. Otherwise, use curl, Python, Node.js, or another available "
+                "client that can read the file and send a multipart HTTPS request. "
+                "Follow the direct_upload instructions. If no suitable client is available, stop and notify "
+                "the user that the upload cannot proceed. Call complete_upload only after a successful "
+                "storage transfer. Do not complete after a failed or uncertain transfer."
+            ),
             "helper": {
                 "optional": True,
                 "command": "python -m plane_mcp.local_upload /local/path/to/file < upload.json",
@@ -125,8 +132,8 @@ def begin_upload(resource, workspace_slug: str, project_id: str, workitem_id: st
                 "form_fields_from": "upload_data.fields",
                 "file_part": {"field": "file", "filename_from": "name", "content_type_from": "content_type"},
                 "steps": [
-                    "Read the file on the client. Check that its size equals size. "
-                    f"The size must be from 1 to {UPLOAD_SIZE_LIMIT} bytes. "
+                    "Check the local file size before reading its bytes. "
+                    f"The size must equal the returned size and be from 1 to {UPLOAD_SIZE_LIMIT} bytes. "
                     "Bound the read to this limit plus one guard byte.",
                     "Send an HTTPS multipart/form-data POST to upload_data.url. "
                     "Copy every upload_data.fields entry unchanged into a separate form field.",
@@ -150,7 +157,10 @@ def begin_upload(resource, workspace_slug: str, project_id: str, workitem_id: st
                 },
             },
             "failure_handling": [
-                "Do not call complete_upload after a failed or uncertain transfer.",
+                "If no suitable upload client is available, notify the user. Do not call complete_upload. "
+                "Report the pending attachment ID.",
+                "Do not call complete_upload after a failed or uncertain transfer. "
+                "Notify the user of the failure or uncertainty.",
                 "If storage rejects expired instructions, delete this pending attachment in the same scope. "
                 "Then call begin_upload for new instructions.",
                 "If completion is uncertain, check the same attachment before retrying completion. "

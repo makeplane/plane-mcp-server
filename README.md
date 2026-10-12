@@ -197,6 +197,8 @@ instructions or pass it to the storage upload client.
 
    Follow the returned `instructions` during execution. They include the optional
    helper command and the direct multipart request for curl or your own script.
+   Use the bundled helper when available. Otherwise, use a suitable direct client.
+   If neither is available, stop and notify the user. Do not complete the attachment.
    The `after_transfer` section includes the scoped `complete_upload` arguments.
    Use those arguments only after the stated transfer condition is satisfied.
    The result also includes failure, verification, and privacy steps.

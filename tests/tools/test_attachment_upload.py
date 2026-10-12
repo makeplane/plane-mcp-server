@@ -67,7 +67,9 @@ def test_begin_result_guides_both_upload_clients_and_scoped_completion(lifecycle
         "transfer_succeeded": True,
     }
     assert "only after" in guide["after_transfer"]["condition"]
-    assert "uncertain transfer" in guide["failure_handling"][0]
+    assert "If the bundled plane_mcp.local_upload helper is available" in guide["next_step"]
+    assert "If no suitable client is available, stop and notify" in guide["next_step"]
+    assert "uncertain transfer" in guide["failure_handling"][1]
     assert SECRET not in json.dumps(guide)
     assert len(spy.recorder.calls) == 1
 
