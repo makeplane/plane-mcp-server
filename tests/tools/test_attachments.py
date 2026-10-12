@@ -551,3 +551,35 @@ def test_upload_from_url_preserves_matrix_params_in_the_request_path(attachment_
     )
 
     assert captured_paths == ["/file.png;v=2?sig=x"]
+
+
+def test_read_network_error_does_not_expose_signed_url(attachment_tool, monkeypatch):
+    tool, _, stub = attachment_tool
+    stub("diagram.png", "image/png")
+    secret = "signed-download-secret"
+    monkeypatch.setattr(module.requests, "get", Mock(side_effect=module.requests.Timeout(secret)))
+    with pytest.raises(ValueError) as error:
+        tool(action="read", project_id=PROJECT, workitem_id=WORK_ITEM, attachment_id=ATTACHMENT)
+    assert secret not in str(error.value)
+
+
+def test_download_url_error_does_not_expose_signed_response(attachment_tool):
+    from plane.errors.errors import HttpError
+
+    tool, spy, stub = attachment_tool
+    stub("diagram.png", "image/png")
+    secret = "signed-download-secret"
+    spy.returns["work_items.attachments.get_download_url"] = HttpError(secret, 403, {"signed_url": secret})
+    with pytest.raises(ValueError, match="HTTP 403") as error:
+        tool(action="download_url", project_id=PROJECT, workitem_id=WORK_ITEM, attachment_id=ATTACHMENT)
+    assert secret not in str(error.value)
+
+
+def test_url_upload_storage_error_does_not_expose_signed_url(attachment_tool, monkeypatch):
+    tool, spy, _ = attachment_tool
+    secret = "signed-storage-secret"
+    monkeypatch.setattr(module, "fetch_validated_get", lambda *a, **k: _Response(PNG, {"Content-Type": "image/png"}))
+    spy.returns["work_items.attachments.upload_from_bytes"] = module.requests.Timeout(secret)
+    with pytest.raises(ValueError, match="uncertain") as error:
+        tool(action="upload_from_url", project_id=PROJECT, workitem_id=WORK_ITEM, url="https://example.com/a.png")
+    assert secret not in str(error.value)

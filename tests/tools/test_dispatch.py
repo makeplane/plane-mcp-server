@@ -78,6 +78,8 @@ NEEDS_FIXTURE: set[tuple[str, str]] = {
     ("workitem_attachment", "read"),
     ("workitem_attachment", "download_url"),
     ("workitem_attachment", "upload_from_url"),
+    ("workitem_attachment", "begin_upload"),
+    ("workitem_attachment", "complete_upload"),
 }
 
 

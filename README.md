@@ -7,7 +7,7 @@ work items, cycles, modules, releases, customers and more.
 Built on [FastMCP](https://github.com/jlowin/fastmcp) and the official
 [`plane-sdk`](https://pypi.org/project/plane-sdk/).
 
-- **30 tools**, one per Plane resource, covering 207 operations
+- **30 tools**, one per Plane resource, covering 209 operations
 - **Local or remote** — stdio, streamable HTTP, SSE
 - **OAuth or API key** authentication
 
@@ -135,6 +135,127 @@ Seven names chose between two operations with a parameter
 (`manage_project_archive(archive=False)`), which one tool-and-action pair cannot
 reproduce; calling one tells you its replacement. `get_pql_reference` is
 unchanged.
+
+### Attach a local artifact
+
+Use `begin_upload` and `complete_upload` on `workitem_attachment` to attach a local file.
+The file stays on the client until the local helper sends it directly to Plane
+storage. The MCP server receives metadata. It does not read a local path or
+receive file bytes. Plane Cloud continues to store your project data.
+
+Install and configure this checkout instead of the published `uvx` package:
+
+```bash
+uv sync --python 3.12 --extra dev
+```
+
+```json
+{
+  "mcpServers": {
+    "plane-local": {
+      "command": "/absolute/path/plane-mcp-server/.venv/bin/python",
+      "args": ["-m", "plane_mcp", "stdio"],
+      "env": {
+        "PLANE_API_KEY": "<your-api-key>",
+        "PLANE_WORKSPACE_SLUG": "<your-workspace-slug>",
+        "PLANE_BASE_URL": "https://api.plane.so",
+        "LOG_PAYLOADS": "false"
+      }
+    }
+  }
+}
+```
+
+Use Python 3.12 for this SDK version. The full suite passes on Python 3.12.
+Python 3.14 has SDK annotation failures in other resource operations.
+
+Keep the API key in the server configuration. Do not place it in upload
+instructions or pass it to the storage helper.
+
+1. Get the local file size in bytes. Call the tool with its metadata:
+
+   ```python
+   workitem_attachment(
+       action="begin_upload",
+       project_id="<project-uuid>",
+       workitem_id="<work-item-uuid>",
+       name="screenshot.png",
+       content_type="image/png",
+       size=12345,
+   )
+   ```
+
+   The result contains `attachment_id`, `upload_data` (`url` and `fields`),
+   `name`, `content_type`, and `size`. The attachment is pending. The size must
+   be from 1 byte to 5 MB (5,242,880 bytes). Use a filename without a path.
+   Plane also applies its file-type, storage, plan, and permission checks.
+
+2. Save that result as a private JSON file. Save the result object, not the MCP
+   content wrapper. Use a file with mode `0600`, such as `upload.json`.
+   Treat signed instructions as temporary secrets. Do not commit or log them.
+
+3. Run the helper on the computer that has the screenshot:
+
+   ```bash
+   /absolute/path/plane-mcp-server/.venv/bin/python -m plane_mcp.local_upload \
+     /local/path/screenshot.png < upload.json
+   ```
+
+   The helper reads at most 5 MB plus one guard byte. It checks the file size.
+   It uses an HTTPS multipart POST with all Plane-issued form fields.
+   It disables redirects, netrc authentication, and environment proxies.
+   It sends no Plane API headers and does not read the storage response body. Its output contains only the attachment ID
+   and `transfer_succeeded: true`. A failed transfer exits with status 1.
+
+4. Only after the helper succeeds, call:
+
+   ```python
+   workitem_attachment(
+       action="complete_upload",
+       project_id="<project-uuid>",
+       workitem_id="<work-item-uuid>",
+       attachment_id="<attachment-id-from-begin-upload>",
+       transfer_succeeded=True,
+   )
+   ```
+
+   Completion uses the current MCP authentication and workspace context.
+   Plane checks the project, work item, and attachment scope. The server does
+   not accept a workspace override. Completion returns `completion_confirmed`.
+   The transfer flag is a caller assertion. It is not independent byte validation.
+
+5. Use `list` and `download_url` to check the attachment. Download and compare
+   bytes when integrity matters. Use `read` only when you want the model to
+   receive the image or text. Remove the private instruction file.
+
+If storage rejects expired instructions (usually HTTP 403), do not complete.
+Delete the pending attachment with `delete`, then begin a new upload.
+If initiation times out, no file transfer was attempted. Plane can still have
+created a pending record. Pending records do not necessarily appear in `list`.
+Retain an attachment ID if one was received. Do not assume an empty list proves
+that no record was created.
+
+A storage timeout leaves the transfer uncertain. Do not complete based on a timeout.
+Check storage, or delete the pending attachment and restart the flow.
+
+If completion times out, retain the attachment ID. Check `list` and download
+its content before retrying `complete_upload` for the same ID. Do not begin
+another upload merely because the completion response was lost. Plane's PATCH
+returns 204 without a body. That response or an `is_uploaded` flag does not
+prove that the stored file matches your local bytes.
+
+Attachment call payloads and error details are omitted from structured server
+logs, even when `LOG_PAYLOADS=true`. Do not enable HTTP wire debug logs in the
+helper or write signed results to shared logs.
+
+The lifecycle adapter follows the installed `plane-sdk==0.3.1`
+`upload_from_bytes` implementation and Plane's
+[upload instructions](https://developers.plane.so/api-reference/issue-attachments/upload-file)
+and [completion contract](https://developers.plane.so/api-reference/issue-attachments/complete-upload).
+It uses the SDK resource's authenticated raw POST and PATCH methods because
+public `create` parses the upload envelope as a model, and public `update`
+expects a model after the empty 204 response. Regression tests pin both wire
+contracts. Review the adapter when you update the SDK.
 
 ## Configuration
 

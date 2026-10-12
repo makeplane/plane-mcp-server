@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import mimetypes
 import os
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 import requests
 from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 from plane.errors.errors import HttpError
+from pydantic import Field
 
+from plane_mcp.attachment_upload import begin_upload, complete_upload
 from plane_mcp.attachments import (
     HTTP_TIMEOUT,
     IMAGE_READ_LIMIT,
@@ -44,13 +46,18 @@ ACTIONS = (
     Action("download_url", ("project_id", "workitem_id", "attachment_id"), read=True),
     Action("upload_from_url", ("project_id", "workitem_id", "url"), ("name",), open_world=True),
     Action("delete", ("project_id", "workitem_id", "attachment_id"), destructive=True),
+    Action("begin_upload", ("project_id", "workitem_id", "name", "content_type", "size"), open_world=True),
+    Action("complete_upload", ("project_id", "workitem_id", "attachment_id", "transfer_succeeded")),
 )
 
 FOOTER = (
     f"read supports PNG/JPEG/GIF/WEBP up to {IMAGE_READ_LIMIT // 1024 // 1024} MB and "
     f"TXT/MD/CSV/HTML/XML/YAML/JSON up to {TEXT_READ_LIMIT // 1024 // 1024} MB. "
     "Get attachment_id from the list action. upload_from_url fetches the file server-side, so "
-    "the URL must be reachable without authentication and must not resolve to a private address."
+    "the URL must be reachable without authentication and must not resolve to a private address. "
+    "begin_upload returns signed POST instructions for a local helper, with a 5 MB limit. "
+    "Call complete_upload with transfer_succeeded=true only after storage accepts the file. "
+    "Never send local paths or file bytes to this tool."
 )
 
 LEGACY = {
@@ -69,7 +76,7 @@ def _find(client, workspace_slug: str, project_id: str, workitem_id: str, attach
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
         )
     except HttpError as exc:
-        raise ValueError(f"Failed to fetch attachment metadata: HTTP {exc.status_code} - {exc.response}") from exc
+        raise ValueError(f"Failed to fetch attachment metadata: HTTP {exc.status_code}.") from None
     attachment = next((a for a in attachments if a.id == attachment_id), None)
     if attachment is None:
         raise ValueError(f"Attachment {attachment_id!r} not found on work item {workitem_id!r}")
@@ -85,7 +92,7 @@ def _download_url(client, workspace_slug: str, project_id: str, workitem_id: str
             attachment_id=attachment_id,
         )
     except HttpError as exc:
-        raise ValueError(f"Failed to get download URL: HTTP {exc.status_code} - {exc.response}") from exc
+        raise ValueError(f"Failed to get download URL: HTTP {exc.status_code}.") from None
 
 
 def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str):
@@ -109,8 +116,8 @@ def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attach
     try:
         response = requests.get(url, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
-    except requests.RequestException as exc:
-        raise ValueError(f"Failed to fetch attachment content: {exc}") from exc
+    except requests.RequestException:
+        raise ValueError("Failed to fetch attachment content. Request a new download URL and retry.") from None
 
     payload = response.content
     limit = IMAGE_READ_LIMIT if is_image else TEXT_READ_LIMIT
@@ -130,14 +137,18 @@ def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url:
         response = fetch_validated_get(url, max_bytes=UPLOAD_SIZE_LIMIT)
         response.raise_for_status()
     except ValueError as exc:
-        raise ValueError(f"Failed to fetch file from {url!r}: {exc}") from exc
+        if "exceeds" in str(exc):
+            raise ValueError("Source file exceeds the 5 MB upload limit.") from None
+        raise ValueError(
+            "Failed to fetch source file. Check URL access, address safety, size, and proxy settings."
+        ) from None
 
     declared = response.headers.get("Content-Length")
     payload = response.content
     size = max(int(declared) if declared else 0, len(payload))
     if size > UPLOAD_SIZE_LIMIT:
         raise ValueError(
-            f"File at {url!r} is too large ({size // 1024 // 1024} MB). Maximum allowed "
+            f"Source file is too large ({size // 1024 // 1024} MB). Maximum allowed "
             f"size is {UPLOAD_SIZE_LIMIT // 1024 // 1024} MB."
         )
 
@@ -157,7 +168,9 @@ def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url:
             content_type=content_type,
         )
     except HttpError as exc:
-        raise ValueError(f"Failed to upload attachment: HTTP {exc.status_code} - {exc.response}") from exc
+        raise ValueError(f"Failed to upload attachment: HTTP {exc.status_code}.") from None
+    except requests.RequestException:
+        raise ValueError("Attachment upload is uncertain. Check attachments before retrying.") from None
     return attachment_to_dict(attachment, workspace_slug)
 
 
@@ -168,12 +181,15 @@ def register(mcp: FastMCP) -> None:
         annotations=build_annotations(TITLE, ACTIONS),
     )
     def workitem_attachment(
-        action: Literal["list", "read", "download_url", "upload_from_url", "delete"],
+        action: Literal["list", "read", "download_url", "upload_from_url", "delete", "begin_upload", "complete_upload"],
         project_id: str = "",
         workitem_id: str = "",
         attachment_id: str = "",
         url: str = "",
         name: str = "",
+        content_type: str = "",
+        size: Annotated[int, Field(strict=True)] = 0,
+        transfer_succeeded: Annotated[bool, Field(strict=True)] = False,
     ) -> Image | list[dict[str, Any]] | dict[str, Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
@@ -181,15 +197,40 @@ def register(mcp: FastMCP) -> None:
             return error
 
         if action == "list":
-            attachments = client.work_items.attachments.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
-            )
+            try:
+                attachments = client.work_items.attachments.list(
+                    workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
+                )
+            except HttpError as exc:
+                raise ValueError(f"Failed to list attachments: HTTP {exc.status_code}.") from None
             return [attachment_to_dict(a, workspace_slug) for a in attachments]
 
         if action == "upload_from_url":
             if not url:
                 return missing(action, "url")
             return _upload(client, workspace_slug, project_id, workitem_id, url, name)
+
+        if action == "begin_upload":
+            if error := needs(action, name=name, content_type=content_type, size=size):
+                return error
+            return begin_upload(
+                client.work_items.attachments,
+                workspace_slug,
+                project_id,
+                workitem_id,
+                name=name,
+                content_type=content_type,
+                size=size,
+            )
+
+        if action == "complete_upload":
+            if error := needs(action, attachment_id=attachment_id, transfer_succeeded=transfer_succeeded):
+                return error
+            if transfer_succeeded is not True:
+                raise ValueError("transfer_succeeded must be true after a successful storage transfer.")
+            return complete_upload(
+                client.work_items.attachments, workspace_slug, project_id, workitem_id, attachment_id
+            )
 
         if not attachment_id:
             return missing(action, "attachment_id")
@@ -206,10 +247,13 @@ def register(mcp: FastMCP) -> None:
                 "name": attrs.get("name") or attachment_id,
             }
 
-        client.work_items.attachments.delete(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=workitem_id,
-            attachment_id=attachment_id,
-        )
+        try:
+            client.work_items.attachments.delete(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_id=workitem_id,
+                attachment_id=attachment_id,
+            )
+        except HttpError as exc:
+            raise ValueError(f"Failed to delete attachment: HTTP {exc.status_code}.") from None
         return None
