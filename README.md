@@ -139,9 +139,14 @@ unchanged.
 ### Attach a local artifact
 
 Use `begin_upload` and `complete_upload` on `workitem_attachment` to attach a local file.
-The file stays on the client until the local helper sends it directly to Plane
-storage. The MCP server receives metadata. It does not read a local path or
-receive file bytes. Plane Cloud continues to store your project data.
+The client sends the file directly to Plane storage with signed upload instructions.
+Use curl, a Python or Node.js script, or another multipart HTTP client.
+The bundled helper is optional. The MCP server receives metadata. It does not
+read a local path or receive file bytes. Plane Cloud continues to store your project data.
+
+This flow works with a local or remote MCP server. The client must be able to
+read the file and send HTTP requests. A client with only MCP tool access needs
+a separate file-transfer capability to complete the upload.
 
 Install and configure this checkout instead of the published `uvx` package:
 
@@ -170,7 +175,7 @@ Use Python 3.12 for this SDK version. The full suite passes on Python 3.12.
 Python 3.14 has SDK annotation failures in other resource operations.
 
 Keep the API key in the server configuration. Do not place it in upload
-instructions or pass it to the storage helper.
+instructions or pass it to the storage upload client.
 
 1. Get the local file size in bytes. Call the tool with its metadata:
 
@@ -190,11 +195,15 @@ instructions or pass it to the storage helper.
    be from 1 byte to 5 MB (5,242,880 bytes). Use a filename without a path.
    Plane also applies its file-type, storage, plan, and permission checks.
 
-2. Save that result as a private JSON file. Save the result object, not the MCP
-   content wrapper. Use a file with mode `0600`, such as `upload.json`.
-   Treat signed instructions as temporary secrets. Do not commit or log them.
+2. Keep the result object in client memory or save it as a private JSON file.
+   Use the result object, not the MCP content wrapper. If you save a file,
+   use mode `0600`, such as `upload.json`. Treat signed instructions as temporary
+   secrets. Do not commit or log them.
 
-3. Run the helper on the computer that has the screenshot:
+3. Send the file from the computer that has the screenshot. Follow the
+   [client-side storage request](#client-side-storage-request) below.
+   You can use curl or your own Python or Node.js script. Alternatively,
+   run the optional bundled helper with the private JSON file:
 
    ```bash
    /absolute/path/plane-mcp-server/.venv/bin/python -m plane_mcp.local_upload \
@@ -204,10 +213,11 @@ instructions or pass it to the storage helper.
    The helper reads at most 5 MB plus one guard byte. It checks the file size.
    It uses an HTTPS multipart POST with all Plane-issued form fields.
    It disables redirects, netrc authentication, and environment proxies.
-   It sends no Plane API headers and does not read the storage response body. Its output contains only the attachment ID
-   and `transfer_succeeded: true`. A failed transfer exits with status 1.
+   It sends no Plane API headers and does not read the storage response body.
+   Its output contains only the attachment ID and `transfer_succeeded: true`.
+   A failed transfer exits with status 1.
 
-4. Only after the helper succeeds, call:
+4. Only after storage returns an HTTP 2xx response, call:
 
    ```python
    workitem_attachment(
@@ -227,6 +237,30 @@ instructions or pass it to the storage helper.
 5. Use `list` and `download_url` to check the attachment. Download and compare
    bytes when integrity matters. Use `read` only when you want the model to
    receive the image or text. Remove the private instruction file.
+
+#### Client-side storage request
+
+An agent can implement this request without installing the bundled helper:
+
+1. Check that the actual file size equals the returned `size` and is from
+   1 to 5,242,880 bytes. Bound the local read to this limit plus one guard byte.
+2. Send an HTTPS `POST` to `upload_data.url` with `multipart/form-data`.
+3. Copy every `upload_data.fields` entry unchanged into a form field.
+   Do not select only some fields or calculate replacement signatures.
+4. Add the binary file as a separate form part named `file`.
+   Set its filename to the returned `name` and its MIME type to `content_type`.
+   Let the HTTP client generate the multipart boundary.
+5. Use a fresh HTTP client without Plane API credentials, cookies, or implicit
+   authentication. Disable automatic redirects. Do not log file bytes,
+   signed URLs, or signed fields.
+6. Confirm an HTTP 2xx storage response before calling `complete_upload`.
+   A redirect, error response, or timeout must not produce a success receipt.
+
+For curl, use multipart form options and a file part. A Python script can use
+`requests` with `data` and `files`. A Node.js script can use `FormData` and
+`fetch` with redirects disabled. These clients must follow all steps above.
+The signed URL and form fields provide storage authorization. They contain
+no Plane API key. Keep the API key in the MCP server.
 
 If storage rejects expired instructions (usually HTTP 403), do not complete.
 Delete the pending attachment with `delete`, then begin a new upload.
