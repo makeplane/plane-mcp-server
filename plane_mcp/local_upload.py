@@ -28,7 +28,16 @@ def upload_file(path: Path, instructions: dict) -> dict:
         instructions: Result of the begin_upload action.
 
     Returns:
-        Attachment ID and transfer confirmation for complete_upload.
+        Attachment ID and transfer_succeeded=True after an HTTP 2xx storage
+        response. This function does not call complete_upload.
+
+    Raises:
+        ValueError: Instructions are invalid; the file is unreadable, not
+            regular, the wrong size, or changed during the read; storage
+            rejects the instructions or returns a non-2xx response; or the
+            transfer outcome is uncertain. Do not complete after a failure.
+            Rejected instructions can be expired: delete the pending record
+            and request new instructions. Check storage after uncertainty.
     """
     try:
         name, content_type, size = (instructions[k] for k in ("name", "content_type", "size"))
@@ -83,7 +92,14 @@ def upload_file(path: Path, instructions: dict) -> dict:
 
 
 def main() -> None:
-    """Transfer a file from the local CLI. Print no signed instructions or bytes."""
+    """Transfer the positional file using private begin_upload JSON on stdin.
+
+    Read at most 65,537 text characters and reject inputs over 65,536. Success
+    writes only the attachment ID and transfer confirmation as JSON to stdout.
+    Input and transfer failures write a sanitized message to stderr and exit 1.
+    argparse handles invalid CLI arguments separately. No signed values or
+    file bytes are printed, and this command does not complete the attachment.
+    """
     parser = argparse.ArgumentParser(description="Upload a local file using begin_upload JSON from standard input.")
     parser.add_argument("file", type=Path)
     args = parser.parse_args()

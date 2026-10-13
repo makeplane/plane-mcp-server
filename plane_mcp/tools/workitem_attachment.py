@@ -99,6 +99,11 @@ def _find(client, workspace_slug: str, project_id: str, workitem_id: str, attach
 
 
 def _download_url(client, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str) -> str:
+    """Return a signed download URL using the caller's authenticated scope.
+
+    Keep the URL private. Plane HTTP failures raise ValueError with the status
+    code and omit the response body.
+    """
     try:
         return client.work_items.attachments.get_download_url(
             workspace_slug=workspace_slug,
@@ -111,6 +116,13 @@ def _download_url(client, workspace_slug: str, project_id: str, workitem_id: str
 
 
 def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str):
+    """Return an Image or decoded text after a scoped attachment lookup.
+
+    Supported MIME types and image/text limits come from attachments.py.
+    Unsupported types, oversized content, and HTTP fetch failures raise
+    ValueError. Fetch errors omit signed URLs. This action returns file content
+    to MCP; use download_url when only a local client needs the bytes.
+    """
     attachment = _find(client, workspace_slug, project_id, workitem_id, attachment_id)
     attrs = attachment.attributes or {}
     name = attrs.get("name") or attachment_id
@@ -148,6 +160,13 @@ def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attach
 
 
 def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url: str, name: str):
+    """Fetch a public source URL and return uploaded attachment metadata.
+
+    The server fetch enforces address safety and the upload size limit. The
+    scoped SDK call transfers and completes the attachment. Fetch and Plane
+    HTTP failures raise sanitized ValueError messages. A storage or API request
+    failure can leave the upload uncertain; check attachments before retrying.
+    """
     try:
         response = fetch_validated_get(url, max_bytes=UPLOAD_SIZE_LIMIT)
         response.raise_for_status()
@@ -206,6 +225,35 @@ def register(mcp: FastMCP) -> None:
         size: Annotated[int, Field(strict=True)] = 0,
         transfer_succeeded: Annotated[bool, Field(strict=True)] = False,
     ) -> Image | list[dict[str, Any]] | dict[str, Any] | str | None:
+        """Manage attachments in the current authenticated workspace.
+
+        Args:
+            action: Operation declared in ACTIONS.
+            project_id: Project UUID; required for every action.
+            workitem_id: Work-item UUID in the project; required for every action.
+            attachment_id: Required for read, download_url, delete, and complete_upload.
+            url: Public source URL required by upload_from_url.
+            name: Required filename for begin_upload; optional display name for
+                upload_from_url. begin_upload accepts no path or control characters.
+            content_type: Parameter-free MIME type required by begin_upload.
+            size: Integer byte count from 1 to 5,242,880, required by begin_upload.
+            transfer_succeeded: True only after confirmed storage success;
+                required by complete_upload. This is a caller assertion.
+
+        Returns:
+            list returns attachment metadata dictionaries. read returns an Image
+            or decoded text. download_url returns a sensitive signed URL, ID,
+            and name. upload_from_url returns uploaded attachment metadata.
+            begin_upload returns pending identity, metadata, sensitive signed
+            upload_data, and client instructions. complete_upload returns an ID
+            and completion confirmation, not independent byte verification.
+            delete returns None. Missing required arguments return an error string.
+
+        Raises:
+            ValueError: Metadata, scope, file access, transfer, or a Plane request
+                fails. Lifecycle errors describe pending-record cleanup or
+                checking the same attachment after uncertain completion.
+        """
         client, workspace_slug = get_plane_client_context()
 
         if error := needs(action, project_id=project_id, workitem_id=workitem_id):

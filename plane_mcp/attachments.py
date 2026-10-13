@@ -138,9 +138,11 @@ class FetchedResponse:
 
 
 def _read_bounded(response: Any, url: str, max_bytes: int) -> bytes:
-    """Rejects via ValueError on a declared Content-Length over `max_bytes`
-    without reading the body, else reads at most `max_bytes + 1` bytes and
-    rejects if that still exceeds the limit -- never buffers more.
+    """Read at most max_bytes plus one guard byte.
+
+    Raise UploadSizeLimitError before reading if Content-Length exceeds the
+    limit, or after reading if the actual body exceeds it. The exception is
+    ValueError-compatible. Size errors omit the source URL.
     """
     declared = response.headers.get("Content-Length")
     if declared and declared.isdigit() and int(declared) > max_bytes:

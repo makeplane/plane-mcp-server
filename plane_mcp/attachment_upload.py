@@ -24,7 +24,20 @@ _MIME = re.compile(rf"{_TOKEN}/{_TOKEN}")
 
 
 def validate_metadata(name: str, content_type: str, size: int) -> None:
-    """Check metadata before an API call or a local file read."""
+    """Check metadata before an API call or a local file read.
+
+    Args:
+        name: Nonempty filename, up to 255 UTF-8 bytes. Paths, control
+            characters, and the names . and .. are invalid.
+        content_type: MIME type without parameters, up to 255 characters.
+        size: Integer byte count from 1 to 5,242,880. Booleans are invalid.
+
+    Returns:
+        None when the metadata is valid.
+
+    Raises:
+        ValueError: The supplied metadata violates these limits.
+    """
     if type(size) is not int or not 1 <= size <= UPLOAD_SIZE_LIMIT:
         raise ValueError(f"size must be an integer from 1 to {UPLOAD_SIZE_LIMIT} bytes.")
     try:
@@ -43,7 +56,25 @@ def validate_metadata(name: str, content_type: str, size: int) -> None:
 
 
 def validate_upload_data(upload_data: dict) -> None:
-    """Accept signed HTTPS POST instructions without Plane API credentials."""
+    """Check the structure of signed storage instructions.
+
+    This check does not verify the signature or its expiry.
+
+    Args:
+        upload_data: Dictionary with an HTTPS url and a nonempty fields
+            dictionary of string keys and values. The URL must have a host
+            and no user information, fragment, or zero port. Fields must
+            exclude file, authorization, x-api-key, and x-workspace-slug.
+
+    Returns:
+        None when the instruction structure is valid.
+
+    Raises:
+        ValueError: The URL or form fields violate the storage contract.
+        KeyError: A required dictionary key is missing.
+        TypeError: A supplied value has an unsupported type.
+        AttributeError: An unsupported URL value cannot be parsed.
+    """
     url, fields = upload_data["url"], upload_data["fields"]
     parsed = urlsplit(url)
     if (
@@ -64,6 +95,11 @@ def validate_upload_data(upload_data: dict) -> None:
 
 
 def _path(workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str = "") -> str:
+    """Validate scope components and normalize UUIDs for a relative SDK endpoint.
+
+    An attachment ID selects one record; otherwise the endpoint selects the
+    work item's attachment collection. Invalid scope components raise ValueError.
+    """
     # New operations must not let path components escape their authorized scope.
     if not workspace_slug or any(c in workspace_slug for c in "/\\?#") or workspace_slug in (".", ".."):
         raise ValueError("Invalid workspace context.")
@@ -78,7 +114,28 @@ def _path(workspace_slug: str, project_id: str, workitem_id: str, attachment_id:
 
 
 def begin_upload(resource, workspace_slug: str, project_id: str, workitem_id: str, **metadata) -> dict[str, Any]:
-    """Create a pending attachment. Return Plane's signed POST instructions."""
+    """Create a pending attachment without transferring or completing a file.
+
+    Args:
+        resource: Attachment SDK resource with the current connection's auth.
+        workspace_slug: Workspace from that authenticated connection.
+        project_id: Project UUID within the workspace.
+        workitem_id: Work-item UUID within the project.
+        **metadata: Required name, content_type, and integer size in bytes.
+            validate_metadata checks these before the API request.
+
+    Returns:
+        Dictionary with attachment_id, upload_data, name, content_type, size,
+        and client instructions. upload_data contains temporary signed values;
+        keep it private and do not log it.
+
+    Raises:
+        ValueError: Metadata or scope is invalid, Plane rejects initiation, or
+            initiation is uncertain. A pending record can remain after an
+            uncertain response. If returned instructions are invalid after a
+            valid attachment ID is known, the safe error retains that ID.
+            Delete that pending record in the same scope before retrying.
+    """
     validate_metadata(**metadata)
     path = _path(workspace_slug, project_id, workitem_id)
     data = WorkItemAttachmentUploadRequest(
@@ -112,7 +169,28 @@ def begin_upload(resource, workspace_slug: str, project_id: str, workitem_id: st
 
 
 def complete_upload(resource, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str):
-    """Confirm completion. The caller must first confirm a successful transfer."""
+    """Confirm an attachment after the caller verifies storage transfer success.
+
+    This helper does not enforce transfer evidence. The tool checks the caller's
+    transfer_succeeded assertion before it calls this helper.
+
+    Args:
+        resource: Attachment SDK resource with the current connection's auth.
+        workspace_slug: Workspace from that authenticated connection.
+        project_id: Project UUID within the workspace.
+        workitem_id: Work-item UUID within the project.
+        attachment_id: Pending attachment UUID in this work-item scope.
+
+    Returns:
+        Dictionary with attachment_id and completion_confirmed=True. This
+        confirms the API request, not file integrity. Compare downloaded bytes
+        with the source when independent transfer proof is required.
+
+    Raises:
+        ValueError: Scope is invalid, Plane rejects completion, or completion
+            is uncertain. Check this same attachment before retrying its
+            completion; do not create another record to resolve uncertainty.
+    """
     path = _path(workspace_slug, project_id, workitem_id, attachment_id)
     try:
         resource._patch(path, {"is_uploaded": True})

@@ -123,6 +123,11 @@ class PlaneLoggingMiddleware(StructuredLoggingMiddleware):
     `tool` keeps its previous meaning -- the name the caller used -- so dashboards built
     on it keep counting the same thing. The two additions are additive, and they are on
     the start record as well, which previously carried neither.
+
+    Attachment calls, including legacy aliases, omit start payloads even when
+    payload logging is enabled. Unrecognized attachment actions are omitted
+    because their input can contain signed values. Error records replace
+    attachment exception details with a fixed message to protect signed data.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

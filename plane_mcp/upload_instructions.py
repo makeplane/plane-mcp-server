@@ -84,7 +84,21 @@ except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError, ht
 
 
 def build_upload_instructions(project_id: str, workitem_id: str, attachment_id: str) -> dict:
-    """Put client selection, secret handling, and completion conditions first."""
+    """Build client guidance without transferring or completing a file.
+
+    Args:
+        project_id: Project ID for the conditional completion call.
+        workitem_id: Work-item ID for that call.
+        attachment_id: Pending attachment ID for completion and failure reports.
+            The caller validates these IDs before constructing the guidance.
+
+    Returns:
+        Instruction dictionary with helper usage, direct-client settings and
+        executable example, failure and privacy rules, verification guidance,
+        and scoped after_transfer arguments. Call after_transfer only after
+        confirmed storage success. If no local client exists, stop and send
+        no_client.user_message without transfer or completion.
+    """
     return {
         "next_step": (
             "Follow these steps in order.\n"
