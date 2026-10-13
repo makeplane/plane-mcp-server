@@ -56,7 +56,3 @@ dmypy.json
 
 # Ignore cursor AI rules
 .cursor/rules/codacy.mdc
-
-# Local attachment upload inputs
-plane_api_key.txt
-upload.json
