@@ -123,12 +123,18 @@ class PlaneLoggingMiddleware(StructuredLoggingMiddleware):
     `tool` keeps its previous meaning -- the name the caller used -- so dashboards built
     on it keep counting the same thing. The two additions are additive, and they are on
     the start record as well, which previously carried neither.
+
+    Attachment calls, including legacy aliases, omit start payloads even when
+    payload logging is enabled. Unrecognized attachment actions are omitted
+    because their input can contain signed values. Error records replace
+    attachment exception details with a fixed message to protect signed data.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # Built once; per record this is a dict lookup.
         self._aliases = alias_table()
+        self._attachment_actions = action_arguments()["workitem_attachment"]
 
     def _operation(self, context: MiddlewareContext) -> dict[str, str]:
         """What the caller called, and which operation that is."""
@@ -140,16 +146,32 @@ class PlaneLoggingMiddleware(StructuredLoggingMiddleware):
         else:
             resource = name
             action = (getattr(context.message, "arguments", None) or {}).get("action")
+        if resource == "workitem_attachment" and action not in self._attachment_actions:
+            # An invalid action can itself contain a signed URL. Log only known names.
+            action = None
         fields = {"tool": name, "resource": resource}
         if action:
             fields["action"] = action
         return fields
 
     def _create_before_message(self, context: MiddlewareContext, *args: Any, **kwargs: Any) -> dict:
-        return super()._create_before_message(context, *args, **kwargs) | self._operation(context)
+        operation = self._operation(context)
+        if operation.get("resource") == "workitem_attachment":
+            # Attachment inputs and errors can contain signed URLs or form fields.
+            # Do not serialize their payload, even when LOG_PAYLOADS is enabled.
+            return {
+                "event": context.type + "_start",
+                "method": context.method,
+                "source": context.source,
+                **operation,
+            }
+        return super()._create_before_message(context, *args, **kwargs) | operation
 
     def _create_after_message(self, context: MiddlewareContext, start_time: float) -> dict:
         return super()._create_after_message(context, start_time) | self._operation(context)
 
     def _create_error_message(self, context: MiddlewareContext, start_time: float, error: Exception) -> dict:
-        return super()._create_error_message(context, start_time, error) | self._operation(context)
+        operation = self._operation(context)
+        if operation.get("resource") == "workitem_attachment":
+            error = ValueError("Attachment operation failed. Sensitive error details omitted.")
+        return super()._create_error_message(context, start_time, error) | operation

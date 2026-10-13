@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import mimetypes
 import os
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 import requests
 from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 from plane.errors.errors import HttpError
+from pydantic import Field
 
+from plane_mcp.attachment_upload import begin_upload, complete_upload
 from plane_mcp.attachments import (
     HTTP_TIMEOUT,
     IMAGE_READ_LIMIT,
@@ -24,6 +26,7 @@ from plane_mcp.attachments import (
     READABLE_TEXT_TYPES,
     TEXT_READ_LIMIT,
     UPLOAD_SIZE_LIMIT,
+    UploadSizeLimitError,
     attachment_to_dict,
     fetch_validated_get,
 )
@@ -44,13 +47,32 @@ ACTIONS = (
     Action("download_url", ("project_id", "workitem_id", "attachment_id"), read=True),
     Action("upload_from_url", ("project_id", "workitem_id", "url"), ("name",), open_world=True),
     Action("delete", ("project_id", "workitem_id", "attachment_id"), destructive=True),
+    Action("begin_upload", ("project_id", "workitem_id", "name", "content_type", "size"), open_world=True),
+    Action("complete_upload", ("project_id", "workitem_id", "attachment_id", "transfer_succeeded")),
 )
 
 FOOTER = (
     f"read supports PNG/JPEG/GIF/WEBP up to {IMAGE_READ_LIMIT // 1024 // 1024} MB and "
     f"TXT/MD/CSV/HTML/XML/YAML/JSON up to {TEXT_READ_LIMIT // 1024 // 1024} MB. "
     "Get attachment_id from the list action. upload_from_url fetches the file server-side, so "
-    "the URL must be reachable without authentication and must not resolve to a private address."
+    "the URL must be reachable without authentication and must not resolve to a private address. "
+    "Local files: begin_upload creates a pending attachment and returns attachment_id, upload_data.url, "
+    "upload_data.fields, name, content_type, size, and instructions. Follow the returned instructions for "
+    "helper or direct uploads, failure handling, and the conditional completion call. "
+    "The bundled local_upload helper is optional. "
+    "The client can use curl, Python, Node.js, or any HTTP client that supports multipart uploads. "
+    "Read the file on the client computer. Check that its actual size equals size and is from 1 to "
+    f"{UPLOAD_SIZE_LIMIT} bytes. POST to upload_data.url over HTTPS with multipart/form-data. "
+    "Copy every upload_data.fields entry unchanged into a form field. Add the binary file as a separate "
+    "form part named file, with filename=name and MIME type=content_type. Use a fresh HTTP client without "
+    "Plane API credentials, cookies, or implicit authentication. Do not follow redirects. "
+    "Do not log file bytes, signed URLs, or signed form fields. Call complete_upload with "
+    "transfer_succeeded=true only after an HTTP 2xx storage response. On failure or timeout, do not complete. "
+    "For expired instructions, delete the pending attachment and begin again. If completion is uncertain, "
+    "check the existing attachment before retrying completion for the same ID. Completion is a caller assertion. "
+    "use download_url and compare bytes when integrity matters. The MCP server can be local or remote, "
+    "but the client must be able to read files and send HTTP requests. "
+    "Never send local paths or file bytes to this tool."
 )
 
 LEGACY = {
@@ -69,7 +91,7 @@ def _find(client, workspace_slug: str, project_id: str, workitem_id: str, attach
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
         )
     except HttpError as exc:
-        raise ValueError(f"Failed to fetch attachment metadata: HTTP {exc.status_code} - {exc.response}") from exc
+        raise ValueError(f"Failed to fetch attachment metadata: HTTP {exc.status_code}.") from None
     attachment = next((a for a in attachments if a.id == attachment_id), None)
     if attachment is None:
         raise ValueError(f"Attachment {attachment_id!r} not found on work item {workitem_id!r}")
@@ -77,6 +99,11 @@ def _find(client, workspace_slug: str, project_id: str, workitem_id: str, attach
 
 
 def _download_url(client, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str) -> str:
+    """Return a signed download URL using the caller's authenticated scope.
+
+    Keep the URL private. Plane HTTP failures raise ValueError with the status
+    code and omit the response body.
+    """
     try:
         return client.work_items.attachments.get_download_url(
             workspace_slug=workspace_slug,
@@ -85,10 +112,17 @@ def _download_url(client, workspace_slug: str, project_id: str, workitem_id: str
             attachment_id=attachment_id,
         )
     except HttpError as exc:
-        raise ValueError(f"Failed to get download URL: HTTP {exc.status_code} - {exc.response}") from exc
+        raise ValueError(f"Failed to get download URL: HTTP {exc.status_code}.") from None
 
 
 def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attachment_id: str):
+    """Return an Image or decoded text after a scoped attachment lookup.
+
+    Supported MIME types and image/text limits come from attachments.py.
+    Unsupported types, oversized content, and HTTP fetch failures raise
+    ValueError. Fetch errors omit signed URLs. This action returns file content
+    to MCP; use download_url when only a local client needs the bytes.
+    """
     attachment = _find(client, workspace_slug, project_id, workitem_id, attachment_id)
     attrs = attachment.attributes or {}
     name = attrs.get("name") or attachment_id
@@ -109,8 +143,8 @@ def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attach
     try:
         response = requests.get(url, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
-    except requests.RequestException as exc:
-        raise ValueError(f"Failed to fetch attachment content: {exc}") from exc
+    except requests.RequestException:
+        raise ValueError("Failed to fetch attachment content. Request a new download URL and retry.") from None
 
     payload = response.content
     limit = IMAGE_READ_LIMIT if is_image else TEXT_READ_LIMIT
@@ -126,18 +160,29 @@ def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attach
 
 
 def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url: str, name: str):
+    """Fetch a public source URL and return uploaded attachment metadata.
+
+    The server fetch enforces address safety and the upload size limit. The
+    scoped SDK call transfers and completes the attachment. Fetch and Plane
+    HTTP failures raise sanitized ValueError messages. A storage or API request
+    failure can leave the upload uncertain; check attachments before retrying.
+    """
     try:
         response = fetch_validated_get(url, max_bytes=UPLOAD_SIZE_LIMIT)
         response.raise_for_status()
-    except ValueError as exc:
-        raise ValueError(f"Failed to fetch file from {url!r}: {exc}") from exc
+    except UploadSizeLimitError:
+        raise ValueError("Source file exceeds the 5 MB upload limit.") from None
+    except ValueError:
+        raise ValueError(
+            "Failed to fetch source file. Check URL access, address safety, size, and proxy settings."
+        ) from None
 
     declared = response.headers.get("Content-Length")
     payload = response.content
     size = max(int(declared) if declared else 0, len(payload))
     if size > UPLOAD_SIZE_LIMIT:
         raise ValueError(
-            f"File at {url!r} is too large ({size // 1024 // 1024} MB). Maximum allowed "
+            f"Source file is too large ({size // 1024 // 1024} MB). Maximum allowed "
             f"size is {UPLOAD_SIZE_LIMIT // 1024 // 1024} MB."
         )
 
@@ -157,7 +202,9 @@ def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url:
             content_type=content_type,
         )
     except HttpError as exc:
-        raise ValueError(f"Failed to upload attachment: HTTP {exc.status_code} - {exc.response}") from exc
+        raise ValueError(f"Failed to upload attachment: HTTP {exc.status_code}.") from None
+    except requests.RequestException:
+        raise ValueError("Attachment upload is uncertain. Check attachments before retrying.") from None
     return attachment_to_dict(attachment, workspace_slug)
 
 
@@ -168,28 +215,85 @@ def register(mcp: FastMCP) -> None:
         annotations=build_annotations(TITLE, ACTIONS),
     )
     def workitem_attachment(
-        action: Literal["list", "read", "download_url", "upload_from_url", "delete"],
+        action: Literal["list", "read", "download_url", "upload_from_url", "delete", "begin_upload", "complete_upload"],
         project_id: str = "",
         workitem_id: str = "",
         attachment_id: str = "",
         url: str = "",
         name: str = "",
+        content_type: str = "",
+        size: Annotated[int, Field(strict=True)] = 0,
+        transfer_succeeded: Annotated[bool, Field(strict=True)] = False,
     ) -> Image | list[dict[str, Any]] | dict[str, Any] | str | None:
+        """Manage attachments in the current authenticated workspace.
+
+        Args:
+            action: Operation declared in ACTIONS.
+            project_id: Project UUID; required for every action.
+            workitem_id: Work-item UUID in the project; required for every action.
+            attachment_id: Required for read, download_url, delete, and complete_upload.
+            url: Public source URL required by upload_from_url.
+            name: Required filename for begin_upload; optional display name for
+                upload_from_url. begin_upload accepts no path or control characters.
+            content_type: Parameter-free MIME type required by begin_upload.
+            size: Integer byte count from 1 to 5,242,880, required by begin_upload.
+            transfer_succeeded: True only after confirmed storage success;
+                required by complete_upload. This is a caller assertion.
+
+        Returns:
+            list returns attachment metadata dictionaries. read returns an Image
+            or decoded text. download_url returns a sensitive signed URL, ID,
+            and name. upload_from_url returns uploaded attachment metadata.
+            begin_upload returns pending identity, metadata, sensitive signed
+            upload_data, and client instructions. complete_upload returns an ID
+            and completion confirmation, not independent byte verification.
+            delete returns None. Missing required arguments return an error string.
+
+        Raises:
+            ValueError: Metadata, scope, file access, transfer, or a Plane request
+                fails. Lifecycle errors describe pending-record cleanup or
+                checking the same attachment after uncertain completion.
+        """
         client, workspace_slug = get_plane_client_context()
 
         if error := needs(action, project_id=project_id, workitem_id=workitem_id):
             return error
 
         if action == "list":
-            attachments = client.work_items.attachments.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
-            )
+            try:
+                attachments = client.work_items.attachments.list(
+                    workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
+                )
+            except HttpError as exc:
+                raise ValueError(f"Failed to list attachments: HTTP {exc.status_code}.") from None
             return [attachment_to_dict(a, workspace_slug) for a in attachments]
 
         if action == "upload_from_url":
             if not url:
                 return missing(action, "url")
             return _upload(client, workspace_slug, project_id, workitem_id, url, name)
+
+        if action == "begin_upload":
+            if error := needs(action, name=name, content_type=content_type, size=size):
+                return error
+            return begin_upload(
+                client.work_items.attachments,
+                workspace_slug,
+                project_id,
+                workitem_id,
+                name=name,
+                content_type=content_type,
+                size=size,
+            )
+
+        if action == "complete_upload":
+            if error := needs(action, attachment_id=attachment_id, transfer_succeeded=transfer_succeeded):
+                return error
+            if transfer_succeeded is not True:
+                raise ValueError("transfer_succeeded must be true after a successful storage transfer.")
+            return complete_upload(
+                client.work_items.attachments, workspace_slug, project_id, workitem_id, attachment_id
+            )
 
         if not attachment_id:
             return missing(action, "attachment_id")
@@ -206,10 +310,13 @@ def register(mcp: FastMCP) -> None:
                 "name": attrs.get("name") or attachment_id,
             }
 
-        client.work_items.attachments.delete(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=workitem_id,
-            attachment_id=attachment_id,
-        )
+        try:
+            client.work_items.attachments.delete(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_id=workitem_id,
+                attachment_id=attachment_id,
+            )
+        except HttpError as exc:
+            raise ValueError(f"Failed to delete attachment: HTTP {exc.status_code}.") from None
         return None

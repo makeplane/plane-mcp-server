@@ -117,6 +117,10 @@ def _resolve_and_validate(hostname: str, port: int) -> str:
     return pinned_ip
 
 
+class UploadSizeLimitError(ValueError):
+    """The fetched file exceeds the configured upload size limit."""
+
+
 @dataclass(frozen=True)
 class FetchedResponse:
     """A fetch_validated_get result exposing the same attributes callers
@@ -134,18 +138,20 @@ class FetchedResponse:
 
 
 def _read_bounded(response: Any, url: str, max_bytes: int) -> bytes:
-    """Rejects via ValueError on a declared Content-Length over `max_bytes`
-    without reading the body, else reads at most `max_bytes + 1` bytes and
-    rejects if that still exceeds the limit -- never buffers more.
+    """Read at most max_bytes plus one guard byte.
+
+    Raise UploadSizeLimitError before reading if Content-Length exceeds the
+    limit, or after reading if the actual body exceeds it. The exception is
+    ValueError-compatible. Size errors omit the source URL.
     """
     declared = response.headers.get("Content-Length")
     if declared and declared.isdigit() and int(declared) > max_bytes:
         response.release_conn()
-        raise ValueError(f"Response from {url!r} exceeds the {max_bytes} byte limit")
+        raise UploadSizeLimitError(f"Source file exceeds the {max_bytes} byte upload limit.")
 
     content = response.read(max_bytes + 1)
     if len(content) > max_bytes:
-        raise ValueError(f"Response from {url!r} exceeds the {max_bytes} byte limit")
+        raise UploadSizeLimitError(f"Source file exceeds the {max_bytes} byte upload limit.")
     return content
 
 
