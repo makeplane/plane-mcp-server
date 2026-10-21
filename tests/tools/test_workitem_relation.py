@@ -13,6 +13,7 @@ already did before this change.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 from plane.errors.errors import HttpError
 
 
@@ -49,6 +50,27 @@ def test_list_propagates_non_404_errors_on_relations(registered, spy):
     spy.returns["work_items.relations.list"] = HttpError("boom", status_code=500)
     with pytest.raises(HttpError):
         _call(registered, action="list", project_id="p", workitem_id="w")
+
+
+def test_list_normalizes_ce_relation_objects(registered, spy):
+    """CE answers /relations/ with objects; the SDK model wants plain ids.
+
+    Validation must not fail the action: read the same route raw and reduce
+    each entry to its issue_id, while leaving already-plain ids alone.
+    """
+    spy.returns["work_items.relations.list"] = ValidationError.from_exception_data(
+        "WorkItemRelationResponse",
+        [{"type": "list_type", "loc": ("blocked_by",), "input": {"issue_id": "u1"}}],
+    )
+    spy.returns["work_items.relations._get"] = {
+        "blocked_by": [{"project_id": "p", "issue_id": "u1"}],
+        "relates_to": ["u2"],
+    }
+
+    result = _call(registered, action="list", project_id="p", workitem_id="w")
+
+    assert result["dependencies"]["blocked_by"] == ["u1"]
+    assert result["dependencies"]["relates_to"] == ["u2"]
 
 
 # --- create: a built-in relation_type must translate work_item_ids -> issues ---
