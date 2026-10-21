@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Literal, get_args
 
 from fastmcp import FastMCP
+from pydantic import ValidationError
 from plane.errors.errors import HttpError
 from plane.models.work_item_relation_definitions import (
     CreateWorkItemRelationDefinition,
@@ -196,9 +197,26 @@ def register(mcp: FastMCP) -> None:
             # /dependencies/ 404s on self-hosted CE; /relations/ is the route
             # that works there and on Cloud alike (#185). It groups by the
             # same eight relation_type keys the SDK's response model expects.
-            dependencies = client.work_items.relations.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
-            )
+            try:
+                dependencies = client.work_items.relations.list(
+                    workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
+                ).model_dump()
+            except ValidationError:
+                # Self-hosted CE answers with objects ({"project_id", "issue_id"})
+                # where plane-sdk 0.3.1's response model wants plain id strings,
+                # so validation fails on a payload that is perfectly usable.
+                # Read the same route raw and normalize both shapes. This goes
+                # away once the SDK model accepts either form.
+                relations_payload = client.work_items.relations._get(
+                    f"{workspace_slug}/projects/{project_id}/work-items/{workitem_id}/relations"
+                )
+                dependencies = {
+                    relation_type: [
+                        entry if isinstance(entry, str) else entry.get("issue_id")
+                        for entry in entries
+                    ]
+                    for relation_type, entries in (relations_payload or {}).items()
+                }
             try:
                 custom = client.work_items.custom_relations.list(
                     workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
@@ -210,7 +228,7 @@ def register(mcp: FastMCP) -> None:
                     raise
                 custom = {}
             return {
-                "dependencies": dependencies.model_dump(),
+                "dependencies": dependencies,
                 "custom": {label: [item.model_dump() for item in items] for label, items in custom.items()},
             }
 
