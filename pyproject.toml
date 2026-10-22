@@ -1,6 +1,6 @@
 [project]
 name = "plane-mcp-server"
-version = "0.3.4"
+version = "0.3.5"
 description = "A Model Context Protocol server for Plane integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,6 +22,8 @@ dependencies = [
     # pydocket 0.16.6 (pinned by fastmcp 2.14.4) imports `FakeConnection` from
     # `fakeredis.aioredis`, which was removed in fakeredis 2.35.0.
     "fakeredis[lua]>=2.32.1,<2.35.0",
+    # 2026.10.19 removes the emSign ECC Root CA - G3 (eMudhra CA incident, 2026-10-20).
+    "certifi>=2026.10.19",
 ]
 
 [project.optional-dependencies]

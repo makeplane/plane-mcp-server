@@ -5,7 +5,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -17,8 +18,9 @@ COPY pyproject.toml ./
 COPY uv.lock* ./
 COPY plane_mcp/ ./plane_mcp/
 
-# Install the package and dependencies using uv
-RUN uv pip install --system --no-cache .
+# Install the package and dependencies using uv. pip>=26.2.2 replaces the base
+# image's pip, whose vendored certifi still trusts the emSign ECC Root CA - G3.
+RUN uv pip install --system --no-cache . "pip>=26.2.2"
 
 # Expose port for HTTP transports (SSE, streamable-http, http)
 EXPOSE 8211
