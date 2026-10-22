@@ -140,7 +140,7 @@ def test_create_custom_relation_is_unaffected_by_the_route_change(registered, sp
 # --- delete: a dependency removal must use /relations/remove + related_issue ---
 
 
-def test_delete_dependency_uses_relations_delete_not_dependencies_remove(registered, spy):
+def test_delete_dependency_posts_to_the_relations_remove_route(registered, spy):
     _call(
         registered,
         action="delete",
@@ -149,8 +149,10 @@ def test_delete_dependency_uses_relations_delete_not_dependencies_remove(registe
         related_workitem_id="t1",
         is_dependency=True,
     )
-    assert "work_items.relations.delete" in spy.recorder.methods
+    assert "work_items.relations._post" in spy.recorder.methods
     assert "work_items.dependencies.remove" not in spy.recorder.methods
+    endpoint = spy.recorder.only().kwargs["endpoint"]
+    assert endpoint.endswith("/relations/remove/"), endpoint
 
 
 def test_delete_dependency_sends_related_issue_in_the_body(registered, spy):
@@ -163,8 +165,7 @@ def test_delete_dependency_sends_related_issue_in_the_body(registered, spy):
         is_dependency=True,
     )
     sent = spy.recorder.only().kwargs["data"]
-    assert sent.related_issue == "t1"
-    assert sent.model_dump()["related_issue"] == "t1"
+    assert sent == {"related_issue": "t1"}
 
 
 def test_delete_custom_relation_is_unaffected_by_the_route_change(registered, spy):

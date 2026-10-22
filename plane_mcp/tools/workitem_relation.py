@@ -271,14 +271,13 @@ def register(mcp: FastMCP) -> None:
         if not related_workitem_id:
             return missing(action, "related_workitem_id")
         if is_dependency:
-            # /dependencies/{id}/ 404s on self-hosted CE; /relations/ is the
-            # route that works there and on Cloud alike (#185). It takes the
-            # target id under "related_issue" in the body, not a path segment.
-            client.work_items.relations.delete(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                work_item_id=workitem_id,
-                data=RemoveWorkItemRelation(related_issue=related_workitem_id),
+            # /dependencies/{id}/ 404s on self-hosted CE (#185). The public
+            # relations removal route is the documented replacement
+            # (makeplane/plane#10091). plane-sdk 0.3.1 drops the trailing
+            # slash that route needs, so post to it directly.
+            client.work_items.relations._post(
+                f"{workspace_slug}/projects/{project_id}/work-items/{workitem_id}/relations/remove/",
+                RemoveWorkItemRelation(related_issue=related_workitem_id).model_dump(exclude_none=True),
             )
             return None
         client.work_items.custom_relations.remove(
