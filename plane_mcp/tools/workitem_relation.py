@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Any, Literal, get_args
 
 from fastmcp import FastMCP
+from pydantic import ValidationError
+from plane.errors.errors import HttpError
 from plane.models.work_item_relation_definitions import (
     CreateWorkItemRelationDefinition,
     PaginatedWorkItemRelationDefinitionResponse,
@@ -18,8 +20,9 @@ from plane.models.work_item_relation_definitions import (
 )
 from plane.models.work_items import (
     CreateWorkItemCustomRelation,
-    CreateWorkItemDependency,
+    CreateWorkItemRelation,
     DependencyTypeEnum,
+    RemoveWorkItemRelation,
 )
 
 from plane_mcp.client import get_plane_client_context
@@ -140,11 +143,19 @@ def register(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
 
         if action == "list_definitions":
+            try:
+                custom_definitions = [
+                    d.model_dump() for d in _all_definitions(client, workspace_slug, is_default, is_active)
+                ]
+            except HttpError as exc:
+                # work-item-relation-definitions/ is absent on self-hosted CE (#185);
+                # 404 means "no custom definitions available here", not a real error.
+                if exc.status_code != 404:
+                    raise
+                custom_definitions = []
             return {
                 "built_in_dependencies": list(DEPENDENCY_TYPES),
-                "custom_definitions": [
-                    d.model_dump() for d in _all_definitions(client, workspace_slug, is_default, is_active)
-                ],
+                "custom_definitions": custom_definitions,
             }
 
         if action == "create_definition":
@@ -183,14 +194,41 @@ def register(mcp: FastMCP) -> None:
             return error
 
         if action == "list":
-            dependencies = client.work_items.dependencies.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
-            )
-            custom = client.work_items.custom_relations.list(
-                workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
-            )
+            # /dependencies/ 404s on self-hosted CE; /relations/ is the route
+            # that works there and on Cloud alike (#185). It groups by the
+            # same eight relation_type keys the SDK's response model expects.
+            try:
+                dependencies = client.work_items.relations.list(
+                    workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
+                ).model_dump()
+            except ValidationError:
+                # Self-hosted CE answers with objects ({"project_id", "issue_id"})
+                # where plane-sdk 0.3.1's response model wants plain id strings,
+                # so validation fails on a payload that is perfectly usable.
+                # Read the same route raw and normalize both shapes. This goes
+                # away once the SDK model accepts either form.
+                relations_payload = client.work_items.relations._get(
+                    f"{workspace_slug}/projects/{project_id}/work-items/{workitem_id}/relations"
+                )
+                dependencies = {
+                    relation_type: [
+                        entry if isinstance(entry, str) else entry.get("issue_id")
+                        for entry in entries
+                    ]
+                    for relation_type, entries in (relations_payload or {}).items()
+                }
+            try:
+                custom = client.work_items.custom_relations.list(
+                    workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
+                )
+            except HttpError as exc:
+                # work-item-relations/ (definition-based custom relations) is
+                # absent on self-hosted CE; 404 means "none available here".
+                if exc.status_code != 404:
+                    raise
+                custom = {}
             return {
-                "dependencies": dependencies.model_dump(),
+                "dependencies": dependencies,
                 "custom": {label: [item.model_dump() for item in items] for label, items in custom.items()},
             }
 
@@ -201,13 +239,16 @@ def register(mcp: FastMCP) -> None:
             if relation_type:
                 if error := one_of("relation_type", relation_type, DEPENDENCY_TYPES, _OTHER_RELATIONS):
                     return error
-                return client.work_items.dependencies.create(
+                # /dependencies/ 404s on self-hosted CE; /relations/ is the route
+                # that works there and on Cloud alike (#185). It takes the target
+                # ids under "issues" rather than "work_item_ids".
+                return client.work_items.relations.create(
                     workspace_slug=workspace_slug,
                     project_id=project_id,
                     work_item_id=workitem_id,
-                    data=CreateWorkItemDependency(
+                    data=CreateWorkItemRelation(
                         relation_type=relation_type,  # type: ignore[arg-type]
-                        work_item_ids=targets,
+                        issues=targets,
                     ),
                 )
             if relation_definition_id and relation_definition_label:
@@ -229,8 +270,17 @@ def register(mcp: FastMCP) -> None:
 
         if not related_workitem_id:
             return missing(action, "related_workitem_id")
-        remove = client.work_items.dependencies.remove if is_dependency else client.work_items.custom_relations.remove
-        remove(
+        if is_dependency:
+            # /dependencies/{id}/ 404s on self-hosted CE (#185). The public
+            # relations removal route is the documented replacement
+            # (makeplane/plane#10091). plane-sdk 0.3.1 drops the trailing
+            # slash that route needs, so post to it directly.
+            client.work_items.relations._post(
+                f"{workspace_slug}/projects/{project_id}/work-items/{workitem_id}/relations/remove/",
+                RemoveWorkItemRelation(related_issue=related_workitem_id).model_dump(exclude_none=True),
+            )
+            return None
+        client.work_items.custom_relations.remove(
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=workitem_id,
