@@ -14,6 +14,10 @@ HTTP / SSE transports. Priority order (highest first):
 4. ``REDIS_HOST`` + ``REDIS_PORT`` → plain Redis (no auth).
 5. None of the above → in-memory store (dev only; tokens lost on restart).
 
+On the host/port paths (2–4) ``REDIS_SSL`` turns on TLS for both the startup
+PING and the token store's own connection. It defaults off, except on the
+ElastiCache path (3), where it defaults on.
+
 Misconfigurations raise ``RuntimeError`` at startup. Reachability is verified
 eagerly with a synchronous PING.
 """
@@ -42,6 +46,19 @@ def _redis_ssl_enabled(default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _redis_client(host: str, port: int, *, password: str | None = None, ssl: bool = False) -> Any:
+    """The async client a host/port token store connects with.
+
+    Built here rather than by ``RedisStore(host=..., password=...)``: that
+    constructor takes no TLS setting in the locked py-key-value-aio, so the
+    store connected in plaintext — sending ``REDIS_PASSWORD`` in the clear —
+    even when ``REDIS_SSL`` had made the startup PING use TLS.
+    """
+    from redis.asyncio import Redis as AsyncRedis
+
+    return AsyncRedis(host=host, port=port, password=password, decode_responses=True, ssl=ssl)
 
 
 def _redact_url(url: str) -> str:
@@ -175,7 +192,7 @@ def build_token_store() -> Any:
         # static-password deployments. Set REDIS_SSL=true for TLS-fronted Redis.
         use_ssl = _redis_ssl_enabled(default=False)
         _ping_redis(redis_host, int(redis_port), password=password, ssl=use_ssl)
-        store = RedisStore(host=redis_host, port=int(redis_port), password=password)
+        store = RedisStore(client=_redis_client(redis_host, int(redis_port), password=password, ssl=use_ssl))
         logger.info(
             "Token store: Redis (auth=password, host=%s, port=%s, ssl=%s)",
             redis_host,
@@ -233,9 +250,10 @@ def build_token_store() -> Any:
 
     # 4. Plain Redis
     if redis_host and redis_port:
-        _ping_redis(redis_host, int(redis_port))
-        store = RedisStore(host=redis_host, port=int(redis_port))
-        logger.info("Token store: Redis (auth=none, host=%s, port=%s)", redis_host, redis_port)
+        use_ssl = _redis_ssl_enabled(default=False)
+        _ping_redis(redis_host, int(redis_port), ssl=use_ssl)
+        store = RedisStore(client=_redis_client(redis_host, int(redis_port), ssl=use_ssl))
+        logger.info("Token store: Redis (auth=none, host=%s, port=%s, ssl=%s)", redis_host, redis_port, use_ssl)
         return store
 
     # 5. In-memory fallback

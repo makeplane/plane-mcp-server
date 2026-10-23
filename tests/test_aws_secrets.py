@@ -541,3 +541,49 @@ def test_ping_redis_passes_through_credentials_and_ssl(monkeypatch):
     assert calls[0]["port"] == 6380
     assert calls[0]["password"] == "pw"
     assert calls[0]["ssl"] is True
+
+
+# ---------------------------------------------------------------------------
+# TLS on the host/port paths: REDIS_SSL must reach the store, not just the PING
+# ---------------------------------------------------------------------------
+
+
+def _connection_class(store: RedisStore) -> str:
+    return store._client.connection_pool.connection_class.__name__
+
+
+def test_build_token_store_password_path_ssl_applies_to_store(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_HOST", "localhost")
+    monkeypatch.setenv("REDIS_PORT", "6380")
+    monkeypatch.setenv("REDIS_PASSWORD", "pw")
+    monkeypatch.setenv("REDIS_SSL", "true")
+    store = build_token_store()
+    assert _connection_class(store) == "SSLConnection"
+    assert store._client.connection_pool.connection_kwargs["password"] == "pw"
+
+
+def test_build_token_store_password_path_defaults_plaintext(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_HOST", "localhost")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.setenv("REDIS_PASSWORD", "pw")
+    assert _connection_class(build_token_store()) == "Connection"
+
+
+def test_build_token_store_plain_path_ssl_applies_to_store(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_HOST", "localhost")
+    monkeypatch.setenv("REDIS_PORT", "6380")
+    monkeypatch.setenv("REDIS_SSL", "true")
+    assert _connection_class(build_token_store()) == "SSLConnection"
+
+
+def test_build_token_store_ping_and_store_agree_on_ssl(monkeypatch):
+    """The startup PING and the store must use the same transport."""
+    pinged: dict[str, Any] = {}
+    monkeypatch.setattr(storage, "_ping_redis", lambda *a, **kw: pinged.update(kw))
+    monkeypatch.setenv("REDIS_HOST", "localhost")
+    monkeypatch.setenv("REDIS_PORT", "6380")
+    monkeypatch.setenv("REDIS_PASSWORD", "pw")
+    monkeypatch.setenv("REDIS_SSL", "true")
+    store = build_token_store()
+    assert pinged["ssl"] is True
+    assert _connection_class(store) == "SSLConnection"
