@@ -123,13 +123,18 @@ def _body(raw: str) -> dict[str, Any] | None:
 def _payload(model: Any, name: str, description: str, body: dict[str, Any] | None) -> Any:
     """Build a create or update payload for whichever scope's model this is.
 
-    The two scopes name the summary field differently -- `description_html` at the
-    workspace, `short_description` in a project -- so it is set by whichever the
-    model actually declares rather than by branching on scope again.
+    Workspace work item and page templates use `description_html`, workspace
+    project templates use `description`, and project-scoped templates use
+    `short_description`. Select the field the payload model declares.
     """
     fields: dict[str, Any] = {"name": opt(name), "template_data": body}
     if description:
-        summary = "description_html" if "description_html" in model.model_fields else "short_description"
+        if "description_html" in model.model_fields:
+            summary = "description_html"
+        elif "description" in model.model_fields:
+            summary = "description"
+        else:
+            summary = "short_description"
         fields[summary] = description
     return model(**{key: value for key, value in fields.items() if value is not None})
 
