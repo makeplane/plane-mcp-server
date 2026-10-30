@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import sys
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -20,16 +20,6 @@ LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
 
 
 class UserContextFilter(logging.Filter):
-    """Attach authenticated user/workspace context to every log record.
-
-    Pulls the current request's access token via FastMCP's dependency, which
-    returns None (never raises) outside a request context — so startup logs fall
-    back to environment config and otherwise carry no user info.
-
-    Always logs the opaque user id (sub claim) and the workspace slug; neither is
-    PII. The display name IS PII and is only included when LOG_USER_INFO=true.
-    """
-
     def filter(self, record: logging.LogRecord) -> bool:
         user_id = None
         display_name = None
@@ -42,26 +32,20 @@ class UserContextFilter(logging.Filter):
                 if LOG_USER_INFO:
                     display_name = token.claims.get("display_name")
         except Exception as exc:
-            # Never let logging enrichment break a request, but leave a signal.
             record.user_context_enrichment_error = type(exc).__name__
         record.user_id = user_id
         record.display_name = display_name
-        # stdio mode has no token; fall back to the configured workspace.
         record.workspace_slug = workspace_slug or os.getenv("PLANE_WORKSPACE_SLUG") or None
         return True
 
 
 class JSONFormatter(logging.Formatter):
-    """JSON log formatter for structured logging (Datadog, ELK, etc.)."""
-
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
             "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
         }
-        # The logging middleware emits a JSON object as its log message. Promote
-        # those keys to top-level fields (event, method, tool, duration_ms, ...)
         raw_message = record.getMessage()
         try:
             parsed = json.loads(raw_message)
@@ -90,10 +74,7 @@ class JSONFormatter(logging.Formatter):
 
 
 def configure_json_logging():
-    """Replace FastMCP's Rich handlers with a JSON formatter on the fastmcp logger."""
     fastmcp_logger = logging.getLogger("fastmcp")
-
-    # Remove all existing handlers (Rich)
     for handler in fastmcp_logger.handlers[:]:
         fastmcp_logger.removeHandler(handler)
 
@@ -106,7 +87,6 @@ def configure_json_logging():
 
 
 configure_json_logging()
-
 logger = logging.getLogger("fastmcp.plane_mcp")
 
 
@@ -117,69 +97,115 @@ class ServerMode(Enum):
 
 
 @asynccontextmanager
-async def combined_lifespan(oauth_app, header_app, sse_app):
-    """Combine lifespans from both OAuth and Header MCP apps."""
-    # Start both lifespans
-    async with oauth_app.lifespan(oauth_app):
-        async with header_app.lifespan(header_app):
-            async with sse_app.lifespan(sse_app):
-                yield
+async def combined_lifespan(app: Starlette, apps: list):
+    async with AsyncExitStack() as stack:
+        for a in apps:
+            await stack.enter_async_context(a.router.lifespan_context(a))
+        yield
+
+
+def create_app() -> Starlette:
+    prefix = os.getenv("MCP_PATH_PREFIX") or ""
+
+    # 1. Admin Surface (Upstream 30 tools + LegacyNames + YAML)
+    admin_oauth_mcp = get_oauth_mcp(prefix + "/admin", surface="admin")
+    admin_oauth_app = admin_oauth_mcp.http_app(stateless_http=True)
+    admin_header_app = get_header_mcp(surface="admin").http_app(stateless_http=True)
+    admin_well_known = admin_oauth_mcp.auth.get_well_known_routes(mcp_path="/admin/mcp")
+
+    # 2. Agent Surface (7 intent-based ticket workflow tools)
+    agent_oauth_mcp = get_oauth_mcp(prefix + "/agent", surface="agent")
+    agent_oauth_app = agent_oauth_mcp.http_app(stateless_http=True)
+    agent_header_app = get_header_mcp(surface="agent").http_app(stateless_http=True)
+    agent_well_known = agent_oauth_mcp.auth.get_well_known_routes(mcp_path="/agent/mcp")
+
+    # 3. Docs Surface (6 intent-based documentation tools)
+    docs_oauth_mcp = get_oauth_mcp(prefix + "/docs", surface="docs")
+    docs_oauth_app = docs_oauth_mcp.http_app(stateless_http=True)
+    docs_header_app = get_header_mcp(surface="docs").http_app(stateless_http=True)
+    docs_well_known = docs_oauth_mcp.auth.get_well_known_routes(mcp_path="/docs/mcp")
+
+    # 4. SSE Fallback (Admin surface on /)
+    sse_mcp = get_oauth_mcp(prefix, surface="admin")
+    sse_app = sse_mcp.http_app(transport="sse")
+    sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
+
+    routes = [
+        *admin_well_known,
+        *agent_well_known,
+        *docs_well_known,
+        *sse_well_known,
+        Mount(prefix + "/admin/api-key", app=admin_header_app),
+        Mount(prefix + "/admin", app=admin_oauth_app),
+        Mount(prefix + "/mcp/admin/api-key", app=admin_header_app),
+        Mount(prefix + "/mcp/admin", app=admin_oauth_app),
+        Mount(prefix + "/http/api-key", app=admin_header_app),
+        Mount(prefix + "/http", app=admin_oauth_app),
+        Mount(prefix + "/mcp/http/api-key", app=admin_header_app),
+        Mount(prefix + "/mcp/http", app=admin_oauth_app),
+        Mount(prefix + "/agent/api-key", app=agent_header_app),
+        Mount(prefix + "/agent", app=agent_oauth_app),
+        Mount(prefix + "/mcp/agent/api-key", app=agent_header_app),
+        Mount(prefix + "/mcp/agent", app=agent_oauth_app),
+        Mount(prefix + "/docs/api-key", app=docs_header_app),
+        Mount(prefix + "/docs", app=docs_oauth_app),
+        Mount(prefix + "/mcp/docs/api-key", app=docs_header_app),
+        Mount(prefix + "/mcp/docs", app=docs_oauth_app),
+        Mount(prefix or "/", app=sse_app),
+    ]
+
+    apps_to_lifecycle = [
+        admin_oauth_app,
+        admin_header_app,
+        agent_oauth_app,
+        agent_header_app,
+        docs_oauth_app,
+        docs_header_app,
+        sse_app,
+    ]
+
+    application = Starlette(
+        routes=routes,
+        lifespan=lambda app: combined_lifespan(app, apps_to_lifecycle),
+    )
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    return application
+
+
+def get_app() -> Starlette:
+    global _cached_app
+    if _cached_app is None:
+        _cached_app = create_app()
+    return _cached_app
+
+
+_cached_app = None
 
 
 def main() -> None:
-    """Run the MCP server."""
     server_mode = ServerMode.STDIO
     if len(sys.argv) > 1:
         server_mode = ServerMode(sys.argv[1])
 
+    surface = os.getenv("PLANE_MCP_SURFACE", "admin").lower()
+
     if server_mode == ServerMode.STDIO:
-        # Validate API_KEY and PLANE_WORKSPACE_SLUG are set
         if not os.getenv("PLANE_API_KEY"):
             raise ValueError("PLANE_API_KEY is not set")
         if not os.getenv("PLANE_WORKSPACE_SLUG"):
             raise ValueError("PLANE_WORKSPACE_SLUG is not set")
 
-        get_stdio_mcp().run()
+        get_stdio_mcp(surface=surface).run()
         return
 
     if server_mode == ServerMode.HTTP:
-        prefix = os.getenv("MCP_PATH_PREFIX") or ""
-
-        oauth_mcp = get_oauth_mcp(prefix + "/http")
-        oauth_app = oauth_mcp.http_app(stateless_http=True)
-        header_app = get_header_mcp().http_app(stateless_http=True)
-
-        sse_mcp = get_oauth_mcp(prefix)
-        sse_app = sse_mcp.http_app(transport="sse")
-
-        # mcp_path is appended to the auth provider's base_url to form the
-        # advertised resource URL. base_url already carries the prefix, so these
-        # stay at /mcp and /sse to avoid double-prefixing.
-        oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
-        sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
-
-        app = Starlette(
-            routes=[
-                # Well-known routes for OAuth and Header HTTP
-                *oauth_well_known,
-                *sse_well_known,
-                # Mount both MCP servers
-                Mount(prefix + "/http/api-key", app=header_app),
-                Mount(prefix + "/http", app=oauth_app),
-                Mount(prefix or "/", app=sse_app),
-            ],
-            lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
-        )
-
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=False,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-
-        # Configure uvicorn loggers to use JSON formatting too
         for uv_logger_name in ("uvicorn", "uvicorn.error"):
             uv_logger = logging.getLogger(uv_logger_name)
             for h in uv_logger.handlers[:]:
@@ -189,15 +215,14 @@ def main() -> None:
             uv_handler.addFilter(UserContextFilter())
             uv_logger.addHandler(uv_handler)
 
-        logger.info("Starting HTTP server at URLs: /mcp and /header/mcp")
+        logger.info("Starting Multi-Surface Plane MCP Server (Admin, Agent, Docs) on port 8211")
         uvicorn.run(
-            app,
+            get_app(),
             host="0.0.0.0",
             port=8211,
             log_level="info",
             access_log=False,
         )
-        return
 
 
 if __name__ == "__main__":
