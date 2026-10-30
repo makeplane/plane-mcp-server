@@ -4,17 +4,15 @@ import json
 import logging
 import os
 import sys
-from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
 
 import uvicorn
 from fastmcp.server.dependencies import get_access_token
 from starlette.applications import Starlette
-from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Mount
 
-from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
+from plane_mcp.server import get_stdio_mcp
+from plane_mcp.surfaces import build_mcp_app
 
 LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
 
@@ -96,87 +94,10 @@ class ServerMode(Enum):
     HTTP = "http"
 
 
-@asynccontextmanager
-async def combined_lifespan(app: Starlette, apps: list):
-    async with AsyncExitStack() as stack:
-        for a in apps:
-            await stack.enter_async_context(a.router.lifespan_context(a))
-        yield
-
-
 def create_app() -> Starlette:
+    """Create and configure the multi-surface Starlette application."""
     prefix = os.getenv("MCP_PATH_PREFIX") or ""
-
-    # 1. Admin Surface (Upstream 30 tools + LegacyNames + YAML)
-    admin_oauth_mcp = get_oauth_mcp(prefix + "/admin", surface="admin")
-    admin_oauth_app = admin_oauth_mcp.http_app(stateless_http=True)
-    admin_header_app = get_header_mcp(surface="admin").http_app(stateless_http=True)
-    admin_well_known = admin_oauth_mcp.auth.get_well_known_routes(mcp_path="/admin/mcp")
-
-    # 2. Agent Surface (7 intent-based ticket workflow tools)
-    agent_oauth_mcp = get_oauth_mcp(prefix + "/agent", surface="agent")
-    agent_oauth_app = agent_oauth_mcp.http_app(stateless_http=True)
-    agent_header_app = get_header_mcp(surface="agent").http_app(stateless_http=True)
-    agent_well_known = agent_oauth_mcp.auth.get_well_known_routes(mcp_path="/agent/mcp")
-
-    # 3. Docs Surface (6 intent-based documentation tools)
-    docs_oauth_mcp = get_oauth_mcp(prefix + "/docs", surface="docs")
-    docs_oauth_app = docs_oauth_mcp.http_app(stateless_http=True)
-    docs_header_app = get_header_mcp(surface="docs").http_app(stateless_http=True)
-    docs_well_known = docs_oauth_mcp.auth.get_well_known_routes(mcp_path="/docs/mcp")
-
-    # 4. SSE Fallback (Admin surface on /)
-    sse_mcp = get_oauth_mcp(prefix, surface="admin")
-    sse_app = sse_mcp.http_app(transport="sse")
-    sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
-
-    routes = [
-        *admin_well_known,
-        *agent_well_known,
-        *docs_well_known,
-        *sse_well_known,
-        Mount(prefix + "/admin/api-key", app=admin_header_app),
-        Mount(prefix + "/admin", app=admin_oauth_app),
-        Mount(prefix + "/mcp/admin/api-key", app=admin_header_app),
-        Mount(prefix + "/mcp/admin", app=admin_oauth_app),
-        Mount(prefix + "/http/api-key", app=admin_header_app),
-        Mount(prefix + "/http", app=admin_oauth_app),
-        Mount(prefix + "/mcp/http/api-key", app=admin_header_app),
-        Mount(prefix + "/mcp/http", app=admin_oauth_app),
-        Mount(prefix + "/agent/api-key", app=agent_header_app),
-        Mount(prefix + "/agent", app=agent_oauth_app),
-        Mount(prefix + "/mcp/agent/api-key", app=agent_header_app),
-        Mount(prefix + "/mcp/agent", app=agent_oauth_app),
-        Mount(prefix + "/docs/api-key", app=docs_header_app),
-        Mount(prefix + "/docs", app=docs_oauth_app),
-        Mount(prefix + "/mcp/docs/api-key", app=docs_header_app),
-        Mount(prefix + "/mcp/docs", app=docs_oauth_app),
-        Mount(prefix or "/", app=sse_app),
-    ]
-
-    apps_to_lifecycle = [
-        admin_oauth_app,
-        admin_header_app,
-        agent_oauth_app,
-        agent_header_app,
-        docs_oauth_app,
-        docs_header_app,
-        sse_app,
-    ]
-
-    application = Starlette(
-        routes=routes,
-        lifespan=lambda app: combined_lifespan(app, apps_to_lifecycle),
-    )
-
-    application.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    return application
+    return build_mcp_app(prefix=prefix)
 
 
 def get_app() -> Starlette:
