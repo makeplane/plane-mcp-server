@@ -3,13 +3,21 @@
 Two systems behind one tool: built-in dependencies (six fixed directional types)
 and custom relations (workspace-defined, each with an outward and inward label).
 `create` routes between them by which arguments are supplied.
+
+Self-hosted Community Edition has neither. It serves one route, GET and POST on
+`/work-items/{id}/relations/`, with eight fixed types and no removal, so with
+PLANE_COMMUNITY_EDITION=true `list` and `create` use that route and every other
+action is refused by name instead of answering a bare 404.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal, get_args
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from plane.models.enums import WorkItemRelationTypeEnum
 from plane.models.work_item_relation_definitions import (
     CreateWorkItemRelationDefinition,
     PaginatedWorkItemRelationDefinitionResponse,
@@ -19,6 +27,7 @@ from plane.models.work_item_relation_definitions import (
 from plane.models.work_items import (
     CreateWorkItemCustomRelation,
     CreateWorkItemDependency,
+    CreateWorkItemRelation,
     DependencyTypeEnum,
 )
 
@@ -38,6 +47,8 @@ NAME = "workitem_relation"
 TITLE = "Work item relations"
 
 DEPENDENCY_TYPES: tuple[str, ...] = get_args(DependencyTypeEnum)
+# What Community Edition's /relations/ route accepts.
+RELATION_TYPES: tuple[str, ...] = get_args(WorkItemRelationTypeEnum)
 
 _OTHER_RELATIONS = (
     "For any other relationship pass relation_definition_id and "
@@ -102,6 +113,18 @@ def _all_definitions(client, workspace_slug: str, is_default, is_active) -> list
             return results
 
 
+def _community_edition() -> bool:
+    return os.getenv("PLANE_COMMUNITY_EDITION", "false").lower() == "true"
+
+
+def _not_on_community_edition(what: str) -> ToolError:
+    return ToolError(
+        f"Plane Community Edition has no endpoint for {what}. It serves only the list and create "
+        f"actions, with relation_type one of: {', '.join(RELATION_TYPES)}. "
+        "Remove a relation, or manage relation definitions, in the Plane web app."
+    )
+
+
 def register(mcp: FastMCP) -> None:
     @mcp.tool(
         name=NAME,
@@ -138,6 +161,10 @@ def register(mcp: FastMCP) -> None:
         is_dependency: bool = False,
     ) -> Any:
         client, workspace_slug = get_plane_client_context()
+        community = _community_edition()
+
+        if community and action not in ("list", "create"):
+            raise _not_on_community_edition(f"the {action} action")
 
         if action == "list_definitions":
             return {
@@ -182,6 +209,15 @@ def register(mcp: FastMCP) -> None:
         if error := needs(action, project_id=project_id, workitem_id=workitem_id):
             return error
 
+        if action == "list" and community:
+            # Read untyped: the SDK's WorkItemRelationResponse wants each entry as an id string, and this route
+            # answers with {"project_id", "issue_id"} objects, so the typed list() fails on any real relation.
+            return {
+                "relations": client.work_items.relations._get(
+                    f"{workspace_slug}/projects/{project_id}/work-items/{workitem_id}/relations"
+                )
+            }
+
         if action == "list":
             dependencies = client.work_items.dependencies.list(
                 workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
@@ -198,6 +234,22 @@ def register(mcp: FastMCP) -> None:
             targets = coerce_list(workitem_ids)
             if not targets:
                 return missing(action, "workitem_ids")
+            if community:
+                if relation_definition_id or relation_definition_label:
+                    raise _not_on_community_edition("custom relations")
+                if not relation_type:
+                    return missing(action, "relation_type")
+                if error := one_of("relation_type", relation_type, RELATION_TYPES):
+                    return error
+                return client.work_items.relations.create(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    work_item_id=workitem_id,
+                    data=CreateWorkItemRelation(
+                        relation_type=relation_type,  # type: ignore[arg-type]
+                        issues=targets,
+                    ),
+                )
             if relation_type:
                 if error := one_of("relation_type", relation_type, DEPENDENCY_TYPES, _OTHER_RELATIONS):
                     return error
