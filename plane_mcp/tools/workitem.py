@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, get_args
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.utilities.logging import get_logger
 from plane.errors.errors import HttpError
 from plane.models.enums import PriorityEnum
@@ -241,9 +242,9 @@ def register(mcp: FastMCP) -> None:
         if error := one_of("priority", priority, PRIORITIES):
             return error
         if error := one_of("group_by", group_by, GROUP_BY_VALUES):
-            return error
+            raise ToolError(error)
         if error := one_of("sub_group_by", sub_group_by, GROUP_BY_VALUES):
-            return error
+            raise ToolError(error)
 
         def retrieve_params() -> RetrieveQueryParams:
             return RetrieveQueryParams(
