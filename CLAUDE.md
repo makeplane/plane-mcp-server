@@ -56,6 +56,7 @@ Ordered as registered; the earlier one wraps the later:
 | `PlaneLoggingMiddleware` | structured logging, plus the tool name |
 | `CoerceArguments` | repairs arguments a client encoded as strings, before validation (`coercion.py`) |
 | `ValidateActionArguments` | refuses a call with no `action`, and arguments the chosen action does not accept, from the `ACTIONS` declaration |
+| `PlaneReadOnlyMiddleware` | refuses any operation not explicitly marked `read=True` when `PLANE_READ_ONLY` is enabled |
 
 
 A dispatch tool's name is not its operation, so `PlaneLoggingMiddleware` adds `resource` and `action` to every `tools/call` record — start, success and error alike, where previously only success and error carried anything. For a retired name both are resolved through the alias table, since it carries no `action` of its own.
@@ -136,3 +137,4 @@ Integration tests in `tests/test_integration.py` use `FastMCP.Client` with `Stre
 | `PLANE_OAUTH_ALLOWED_REDIRECT_URIS` | http/sse OAuth (optional) | Comma-separated redirect URI patterns appended to the built-in allowlist (onboard clients without a release) |
 | `LOG_USER_INFO` | all (optional, default: false) | When `true`, include user info (PII such as display name) in logs alongside the opaque user id |
 | `LOG_PAYLOADS` | all (optional, default: true) | Log request payloads.|
+| `PLANE_READ_ONLY` | all (optional, default: false) | When `true`, refuse write operations across all tools |
