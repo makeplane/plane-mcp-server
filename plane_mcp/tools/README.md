@@ -1,6 +1,6 @@
 # The tool surface
 
-**30 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 207 actions in total.
+**30 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 208 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")
@@ -112,7 +112,7 @@ Where the workspace owns a resource outright, both directions of wrong-scope wri
 | `state` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `template` | `list` · `create` · `update` · `delete` |
 | `work_log` | `list` · `create` · `update` · `delete` |
-| `workitem` | `list` · `list_archived` · `retrieve` · `retrieve_by_identifier` · `search` · `count` · `create` · `update` · `delete` · `archive` · `manage_assignee` · `manage_label` |
+| `workitem` | `list` · `list_archived` · `retrieve` · `retrieve_by_identifier` · `search` · `count` · `create` · `update` · `delete` · `archive` · `manage_assignee` · `manage_label` · `read_description_image` |
 | `workitem_activity` | `list` · `retrieve` |
 | `workitem_attachment` | `list` · `read` · `download_url` · `upload_from_url` · `delete` |
 | `workitem_comment` | `list` · `retrieve` · `create` · `update` · `delete` |
