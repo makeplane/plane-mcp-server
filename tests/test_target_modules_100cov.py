@@ -460,3 +460,22 @@ def test_docs_tools_exhaustive_branches(mock_get_ctx):
     # organize_docs: unsupported target/action combination
     res_org_unsupp = organize_fn(target="template", action="create")
     assert "Unsupported combination" in res_org_unsupp
+
+
+def test_server_stdio_and_redirect_uris(monkeypatch):
+    from plane_mcp.server import get_allowed_client_redirect_uris, get_stdio_mcp
+
+    # Test get_allowed_client_redirect_uris with extra URIs
+    monkeypatch.setenv("PLANE_OAUTH_ALLOWED_REDIRECT_URIS", "https://extra.com/cb, , http://localhost:*")
+    uris = get_allowed_client_redirect_uris()
+    assert "https://extra.com/cb" in uris
+
+    # Test get_stdio_mcp across admin, agent, docs
+    mcp_admin = get_stdio_mcp(surface="admin")
+    assert "Plane MCP Server (stdio)" in mcp_admin.name
+
+    mcp_agent = get_stdio_mcp(surface="agent")
+    assert "Plane Agent MCP Server (stdio)" in mcp_agent.name
+
+    mcp_docs = get_stdio_mcp(surface="docs")
+    assert "Plane Docs MCP Server (stdio)" in mcp_docs.name

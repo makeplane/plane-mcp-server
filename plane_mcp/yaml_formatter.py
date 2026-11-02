@@ -173,4 +173,7 @@ class YamlOutputMiddleware(Middleware):
                 structured_content=None,  # Strip duplicate JSON structuredContent
                 meta=result.meta,
             )
-        return ToolResult(content=[TextContent(type="text", text=format_as_yaml(result))])
+        return ToolResult(
+            content=[TextContent(type="text", text=format_as_yaml(result))],
+            structured_content=None,
+        )

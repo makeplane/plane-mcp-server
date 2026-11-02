@@ -71,6 +71,11 @@ def _configure(mcp: FastMCP, surface: SurfaceType = "admin") -> FastMCP:
 
     _, registrar = _get_surface_registrar(surface)
     registrar(mcp)
+
+    for comp in getattr(getattr(mcp, "_local_provider", None), "_components", {}).values():
+        if hasattr(comp, "output_schema"):
+            comp.output_schema = None
+
     return mcp
 
 
