@@ -194,3 +194,28 @@ def test_a_rich_text_value_reads_back_with_its_html(registered, spy):
     result = registered["workitem_property"].fn(action="get_value", project_id="p", workitem_id="w", property_id="pr")
 
     assert result.value_detail.description_html == "<p>Notes</p>"
+
+
+# --- a type-scoped id must reach the SDK under the SDK's own parameter name ---
+
+
+@pytest.mark.parametrize("action", ["retrieve", "update", "delete"])
+def test_type_scoped_calls_name_the_id_the_way_the_sdk_does(action, registered, spy):
+    """`_scope_of` spelled the type-scoped id kwarg `workitem_property_id`; the SDK's
+    `WorkItemProperties.retrieve/update/delete` take `work_item_property_id`, so every
+    type-scoped call that named a property raised TypeError before it left the server.
+    The project-flat and workspace scopes, which pass `property_id`, were never affected.
+    """
+    extra = {"display_name": "Renamed"} if action == "update" else {}
+    result = registered["workitem_property"].fn(
+        action=action,
+        project_id="proj-1",
+        workitem_type_id="type-1",
+        workitem_property_id="prop-1",
+        **extra,
+    )
+    assert not (isinstance(result, str) and result.startswith("Error:")), result
+    call = spy.recorder.only()
+    assert call.method == f"work_item_properties.{action}"
+    assert call.kwargs["type_id"] == "type-1"
+    assert call.kwargs["work_item_property_id"] == "prop-1"
