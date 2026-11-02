@@ -73,11 +73,12 @@ NO_CALL_EXPECTED: set[tuple[str, str]] = {
 }
 
 # Actions that need populated remote state or an outbound HTTP fetch to get past
-# their own preconditions. Covered by tests/tools/test_attachments.py.
+# their own preconditions. Covered by tests/tools/test_attachments.py and test_description_image.py.
 NEEDS_FIXTURE: set[tuple[str, str]] = {
     ("workitem_attachment", "read"),
     ("workitem_attachment", "download_url"),
     ("workitem_attachment", "upload_from_url"),
+    ("workitem", "read_description_image"),  # needs an image in the description and an outbound fetch
 }
 
 
