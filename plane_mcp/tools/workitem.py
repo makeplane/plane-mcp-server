@@ -7,9 +7,12 @@ merging them teaches the model to filter on a field the API rejects.
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, Any, Literal, get_args
+from urllib.parse import urlparse
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.utilities.logging import get_logger
 from plane.errors.errors import HttpError
 from plane.models.enums import PriorityEnum
@@ -28,6 +31,7 @@ from plane.models.work_items import (
 )
 from pydantic import Field
 
+from plane_mcp.ce_count import count_fallback
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.pql_reference import PQL_FIELD_HINT
 from plane_mcp.toolkit import (
@@ -43,6 +47,12 @@ from plane_mcp.toolkit import (
     pql_failure,
     rich_text,
 )
+
+try:
+    from plane_mcp.toolkit import check_pql_capability, reject_ce_pql  # type: ignore[attr-defined]
+except (ImportError, AttributeError):
+    check_pql_capability = None  # type: ignore[assignment]
+    reject_ce_pql = None  # type: ignore[assignment]
 
 logger = get_logger(__name__)
 
@@ -169,6 +179,39 @@ LEGACY = {
     "manage_work_item_assignee": "manage_assignee",
     "manage_work_item_label": "manage_label",
 }
+
+
+def _is_plane_cloud_client(client: Any) -> bool:
+    """Exact hostname check for official Plane Cloud (api.plane.so)."""
+    cfg = getattr(client, "config", None)
+    if cfg is not None:
+        for attr in ("api_root", "base_path"):
+            val = getattr(cfg, attr, None)
+            if isinstance(val, str) and val.strip():
+                try:
+                    return urlparse(val).hostname == "api.plane.so"
+                except Exception:
+                    pass
+    env_url = os.getenv("PLANE_INTERNAL_BASE_URL") or os.getenv("PLANE_BASE_URL", "")
+    if env_url:
+        try:
+            return urlparse(env_url).hostname == "api.plane.so"
+        except Exception:
+            pass
+    return False
+
+
+def _pql_capability_established(client: Any) -> bool:
+    """Determine whether PQL capability is established without PR #259 capability engine."""
+    for var in ("PLANE_SUPPORTS_PQL", "PLANE_CAPABILITY_PQL"):
+        val = os.getenv(var)
+        if val is not None and val.strip():
+            norm = val.strip().lower()
+            if norm in ("true", "1", "yes"):
+                return True
+            if norm in ("false", "0", "no"):
+                return False
+    return _is_plane_cloud_client(client)
 
 
 def _scoped_pql(pql: str, project_id: str) -> str:
@@ -310,7 +353,62 @@ def register(mcp: FastMCP) -> None:
             return envelope(response, opt(fields))
 
         if action == "count":
+            has_user_pql = bool(pql and pql.strip())
+
+            # Standalone safe project count:
+            # Whenever project_id is supplied without user PQL or grouping, do not trust
+            # count_workspace with synthesized project PQL, because CE backends may either
+            # return 404 (absent route) or return HTTP 200 while silently ignoring PQL (which
+            # falsely returns the entire workspace total). Instead, directly read the project's
+            # work-item listing total_count (per_page=1), which is authoritative, exact, natively
+            # scoped by DRF at the SQL level, and supported across all Plane editions.
+            if project_id and not has_user_pql and not (group_by or sub_group_by):
+                return count_fallback(client, workspace_slug, project_id)
+
             scoped = _scoped_pql(pql, project_id)
+
+            # Integration with PQL capability detection (e.g. PR #259)
+            if callable(check_pql_capability) and scoped and scoped.strip():
+                if not check_pql_capability(
+                    client,
+                    workspace_slug,
+                    project_id=project_id,
+                    surface="workitem.count",
+                    probe_fn=lambda: client.work_items.count_workspace(
+                        workspace_slug=workspace_slug,
+                        params=WorkItemCountQueryParams(pql="(((pql_probe_syntax_check"),
+                    ),
+                ):
+                    # PQL filtering is not supported on this count endpoint.
+                    if group_by or sub_group_by:
+                        raise ToolError(
+                            "Grouped counts are unavailable through this Plane public API. "
+                            "No fabricated count was returned."
+                        )
+                    if callable(reject_ce_pql):
+                        reject_ce_pql(
+                            scoped,
+                            reason="PQL filtering is not supported on workitem.count in Plane CE.",
+                        )
+                    raise ToolError(
+                        "Filtered counts are unavailable when this Plane server's count endpoint does not support PQL. "
+                        "No fabricated count was returned."
+                    )
+            elif scoped and scoped.strip() and not _pql_capability_established(client):
+                # Standalone safety: When capability cannot be reliably established (e.g. self-hosted
+                # instance without PLANE_SUPPORTS_PQL=true), fail closed to prevent silent PQL ignore
+                # on older CE backends.
+                if group_by or sub_group_by:
+                    raise ToolError(
+                        "Grouped counts are unavailable through this Plane public API. "
+                        "Project-scoped grouped counts rely on PQL filtering, which is unavailable on unverified "
+                        "self-hosted Plane backends. Set PLANE_SUPPORTS_PQL=true if your instance supports PQL."
+                    )
+                raise ToolError(
+                    "Filtered counts are unavailable with explicit PQL on unverified self-hosted Plane backends. "
+                    "Set PLANE_SUPPORTS_PQL=true if your instance supports PQL."
+                )
+
             try:
                 response = client.work_items.count_workspace(
                     workspace_slug=workspace_slug,
@@ -321,8 +419,28 @@ def register(mcp: FastMCP) -> None:
             except HttpError as exc:
                 failure = pql_failure("workitem", action, scoped, exc)
                 if failure:
-                    return failure
-                raise
+                    hint = failure.get("hint", "")
+                    pql_guide = f" Reference: {PQL_FIELD_HINT}" if PQL_FIELD_HINT else ""
+                    raise ToolError(
+                        f"{failure['error']} Failed PQL: {failure['failed_pql']!r}. {hint}{pql_guide}"
+                    ) from exc
+                if exc.status_code != 404:
+                    raise
+                # F-05: Distinguish missing count route from non-existent workspace entity
+                resp_detail = str(exc.response).lower() if exc.response is not None else ""
+                if "workspace" in resp_detail and "not found" in resp_detail:
+                    raise
+                if group_by or sub_group_by:
+                    raise ToolError(
+                        "Grouped counts are unavailable through this Plane public API. "
+                        "No fabricated count was returned."
+                    ) from exc
+                if has_user_pql:
+                    raise ToolError(
+                        "Filtered counts are unavailable when this Plane server's count endpoint is missing. "
+                        "No fabricated count was returned."
+                    ) from exc
+                return count_fallback(client, workspace_slug, project_id)
             return response.model_dump()
 
         if action == "search":
