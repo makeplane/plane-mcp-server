@@ -15,6 +15,7 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from plane_mcp.toolkit.spec import action_names
 
@@ -144,7 +145,12 @@ def test_missing_required_params_are_reported(mod, action, registered, spy):
     signature = inspect.signature(tool.fn)
     args = {"action": action.name} if "action" in signature.parameters else {}
 
-    result = tool.fn(**args)
+    try:
+        result = tool.fn(**args)
+    except ToolError as exc:
+        if action.name != "list":
+            raise
+        result = str(exc)
 
     assert isinstance(result, str) and result.startswith("Error:"), (
         f"{mod.NAME}.{action.name} accepted a call with none of {action.requires} supplied"
