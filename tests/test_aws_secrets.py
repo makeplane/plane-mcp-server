@@ -51,6 +51,8 @@ def _reset_state(monkeypatch):
         "REDIS_PORT",
         "REDIS_PASSWORD",
         "REDIS_SSL",
+        "REDIS_USERNAME",
+        "REDIS_SENTINELS",
         "ELASTICACHE_SECRET_ARN",
         "REDIS_AUTH_TOKEN_KEY",
         "AWS_REGION",

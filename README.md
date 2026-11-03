@@ -165,8 +165,32 @@ Self-hosting the server itself:
 | `PLANE_INTERNAL_BASE_URL` | Internal URL for server-to-server calls, preferred over `PLANE_BASE_URL` |
 | `REDIS_URL` | OAuth token storage as one connection URL (`redis://` or `rediss://` for TLS); wins over host/port |
 | `REDIS_HOST` / `REDIS_PORT` | OAuth token storage; falls back to in-memory |
+| `REDIS_USERNAME` | ACL user for `REDIS_PASSWORD`, on the host/port and Sentinel paths |
 | `PLANE_OAUTH_PROVIDER_*` | OAuth client credentials and base URL |
 | `MCP_PATH_PREFIX` | Path prefix for the HTTP routes, when mounted behind a proxy — `/plane` serves `/plane/http/mcp` |
+
+#### Redis behind Sentinel
+
+Setting `REDIS_SENTINELS` stores OAuth tokens in a Redis you run behind Sentinel.
+The server asks the sentinels for the current primary on every (re)connect, so it
+follows a failover. Sentinel mode wins over `REDIS_URL`, host/port and
+ElastiCache; a warning is logged if `REDIS_URL` or `ELASTICACHE_SECRET_ARN` is
+also set.
+
+| Variable | Purpose |
+|---|---|
+| `REDIS_SENTINELS` | `host1:26379,host2:26379,host3:26379`; non-empty turns Sentinel mode on. The port defaults to 26379; IPv6 as `[addr]:port` |
+| `REDIS_SENTINEL_MASTER` | Master name the sentinels monitor. Required — startup fails without it |
+| `REDIS_SENTINEL_USERNAME` / `REDIS_SENTINEL_PASSWORD` | Auth to the sentinels (optional; ACL users need Redis 6.2+) |
+| `REDIS_USERNAME` / `REDIS_PASSWORD` | Auth to the data nodes (optional) |
+| `REDIS_DB` | Database index, default `0` |
+| `REDIS_SSL` | TLS to the data nodes (`1`/`true`/`yes`/`on`), default off |
+| `REDIS_SENTINEL_SSL` | TLS to the sentinels; unset or empty follows `REDIS_SSL` |
+| `REDIS_SSL_VERIFY` | Verify certificates and hostnames against the system CA bundle, both hops; default off. Sentinels usually report the primary by IP, so certificates need IP SANs (or use `announce-hostnames`) |
+
+Startup PINGs the resolved primary and fails with an error naming the step that
+broke (no master from the sentinels, or the master did not answer).
+Tested with Redis 7.x.
 
 ### OAuth redirect URIs
 
