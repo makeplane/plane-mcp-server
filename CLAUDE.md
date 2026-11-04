@@ -133,6 +133,9 @@ Integration tests in `tests/test_integration.py` use `FastMCP.Client` with `Stre
 | `REDIS_URL` | http/sse (optional) | Token storage as one connection URL (`redis://`/`rediss://`); wins over host/port |
 | `REDIS_HOST` / `REDIS_PORT` | http/sse (optional) | Token storage (falls back to in-memory) |
 | `PLANE_OAUTH_PROVIDER_*` | http/sse OAuth | OAuth client credentials and base URL |
+| `PLANE_OAUTH_PROVIDER_JWT_SIGNING_KEY` | http/sse OAuth (recommended) | Key for the server's own tokens; derived from the client secret when unset, so rotating the secret signs everyone out |
+| `PLANE_OAUTH_PROVIDER_REFRESH_TOKEN_TTL_SECONDS` | http/sse OAuth (optional, default: 90 days) | How long a connection stays signed in without re-authenticating; every refresh restarts it |
+| `PLANE_OAUTH_PROVIDER_ACCESS_TOKEN_TTL_SECONDS` | http/sse OAuth (optional, default: 24h) | Lifetime of the access token issued to the MCP client; the Plane token behind it is renewed transparently |
 | `PLANE_OAUTH_ALLOWED_REDIRECT_URIS` | http/sse OAuth (optional) | Comma-separated redirect URI patterns appended to the built-in allowlist (onboard clients without a release) |
 | `LOG_USER_INFO` | all (optional, default: false) | When `true`, include user info (PII such as display name) in logs alongside the opaque user id |
 | `LOG_PAYLOADS` | all (optional, default: true) | Log request payloads.|

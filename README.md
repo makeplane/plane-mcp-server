@@ -166,7 +166,24 @@ Self-hosting the server itself:
 | `REDIS_URL` | OAuth token storage as one connection URL (`redis://` or `rediss://` for TLS); wins over host/port |
 | `REDIS_HOST` / `REDIS_PORT` | OAuth token storage; falls back to in-memory |
 | `PLANE_OAUTH_PROVIDER_*` | OAuth client credentials and base URL |
+| `PLANE_OAUTH_PROVIDER_JWT_SIGNING_KEY` | Key the server signs its own tokens with. Set it explicitly in production: by default it is derived from the client secret, so rotating the secret signs every connection out |
+| `PLANE_OAUTH_PROVIDER_REFRESH_TOKEN_TTL_SECONDS` | How long a connection stays signed in without the user signing in again; every refresh restarts it. Default 90 days |
+| `PLANE_OAUTH_PROVIDER_ACCESS_TOKEN_TTL_SECONDS` | Lifetime of the access token issued to the MCP client; the Plane token behind it is renewed transparently. Default 24 hours |
 | `MCP_PATH_PREFIX` | Path prefix for the HTTP routes, when mounted behind a proxy — `/plane` serves `/plane/http/mcp` |
+
+### Session lifetime
+
+An OAuth connection stays signed in for as long as the client refreshes at
+least once per `PLANE_OAUTH_PROVIDER_REFRESH_TOKEN_TTL_SECONDS` (90 days by
+default); each refresh restarts the window, so an actively used connection
+never expires on its own. The server renews its Plane token behind the
+client's access token, retries Plane's token endpoint when Plane is briefly
+unavailable (and answers `503 Retry-After` rather than `invalid_grant` if it
+stays down, so the client keeps its refresh token), and answers a refresh
+token that was rotated in the last two minutes with the same new pair — so a
+Plane blip, a deploy, or two processes of one client refreshing at the same
+moment do not send the user back through sign-in. Run every replica against the same Redis (`REDIS_URL`): the in-memory
+store loses all sessions on restart and cannot be shared.
 
 ### OAuth redirect URIs
 
