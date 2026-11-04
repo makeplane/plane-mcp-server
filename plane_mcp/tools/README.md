@@ -1,6 +1,6 @@
 # The tool surface
 
-**30 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 207 actions in total.
+**31 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 208 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")
@@ -8,7 +8,7 @@ workitem(action="list", project_id=..., pql='state__group = "started"')
 cycle(action="archive", project_id=..., cycle_id=...)
 ```
 
-A compact catalogue — 30 tools, ~67k characters — loads fully in every MCP client and leaves the context budget to the conversation.
+A compact catalogue — 31 tools, ~67k characters — loads fully in every MCP client and leaves the context budget to the conversation.
 
 Five parts, in this order:
 
@@ -97,6 +97,7 @@ Where the workspace owns a resource outright, both directions of wrong-scope wri
 | `customer_request` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `cycle` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` · `transfer_workitems` · `complete` · `archive` · `unarchive` |
 | `get_pql_reference` | *(no action parameter)* |
+| `graphql_query` | *(no action parameter)* read-only GraphQL over the REST API |
 | `initiative` | `list` · `retrieve` · `create` · `update` · `delete` · `list_projects` · `add_projects` · `remove_projects` · `list_workitems` · `manage_workitems` |
 | `intake` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `label` | `list` · `retrieve` · `create` · `update` · `delete` |
