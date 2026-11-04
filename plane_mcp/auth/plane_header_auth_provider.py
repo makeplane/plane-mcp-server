@@ -47,10 +47,8 @@ class PlaneHeaderAuthProvider(TokenVerifier):
             headers = get_http_headers()
 
             if token:
-                workspace_slug = headers.get("x-workspace-slug")
-                if not workspace_slug:
-                    logger.warning("x-api-key header found but x-workspace-slug is missing")
-                    return None
+                # Optional: a tool call can name the workspace via its `workspace` argument.
+                workspace_slug = headers.get("x-workspace-slug", "")
 
                 if not await self._validate_api_key(token):
                     logger.warning("API key validation against Plane API failed")

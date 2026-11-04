@@ -8,6 +8,8 @@ from fastmcp.server.dependencies import get_access_token
 from fastmcp.utilities.logging import get_logger
 from plane import PlaneClient
 
+from plane_mcp.workspace import workspace_override
+
 logger = get_logger(__name__)
 
 
@@ -19,7 +21,9 @@ class PlaneClientContext(NamedTuple):
 
 
 def _workspace_slug(token: AccessToken | None) -> str:
-    """The slug a connection is bound to: its token's claim, else the environment."""
+    """The slug for this call: named on the call, else the token's claim, else the environment."""
+    if override := workspace_override():
+        return override
     if token:
         return token.claims.get("workspace_slug", "")
     return os.getenv("PLANE_WORKSPACE_SLUG", "")
@@ -91,6 +95,12 @@ def get_plane_client_context() -> PlaneClientContext:
         client = PlaneClient(
             base_url=base_url,
             api_key=api_key,
+        )
+
+    if not workspace_slug:
+        raise ValueError(
+            "No workspace selected. Pass the 'workspace' argument (the slug from the Plane URL) "
+            "or connect with an x-workspace-slug header."
         )
 
     return PlaneClientContext(

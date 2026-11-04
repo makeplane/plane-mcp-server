@@ -89,4 +89,6 @@ def test_a_token_without_a_slug_does_not_borrow_the_environments(connected, monk
     monkeypatch.setattr(client_module, "get_access_token", lambda: _token(auth_method="oauth"))
 
     assert current_workspace()["slug"] == ""
-    assert get_plane_client_context().workspace_slug == ""
+    # Nothing to act on: refused with guidance rather than a request to a blank workspace.
+    with pytest.raises(ValueError, match="No workspace selected"):
+        get_plane_client_context()
