@@ -279,6 +279,36 @@ def test_archive_does_not_edit_a_cycle_completed_today(registered, spy):
     assert "cycles.archive" in spy.recorder.methods
 
 
+@pytest.mark.parametrize(
+    ("end_date", "running"),
+    [
+        ("2026-10-30T23:00:00+00:00", True),  # later today
+        ("2026-10-30T23:00:00-08:00", True),  # today locally, tomorrow in UTC
+        ("2026-10-30T01:00:00+00:00", False),  # earlier today
+        ("2026-10-30T07:00:00+05:30", False),  # earlier today, other offset
+        ("2026-10-31T00:00:00+00:00", True),  # tomorrow
+        ("2026-10-29T23:00:00+00:00", False),  # yesterday
+        ("2026-10-30", False),  # date only: midnight UTC, already past
+        ("2026-10-30T23:00:00", True),  # no offset: read as UTC
+        (None, True),  # open-ended
+    ],
+)
+def test_still_running_compares_instants_not_dates(end_date, running, monkeypatch):
+    """A cycle ending at 23:00 today is still running at 02:00; Plane will not archive it until it ends."""
+    import datetime as dt
+
+    from plane_mcp.tools import cycle
+
+    class FrozenDatetime(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return dt.datetime(2026, 10, 30, 2, 0, tzinfo=dt.timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(cycle, "datetime", FrozenDatetime)
+
+    assert cycle._still_running(end_date) is running
+
+
 @pytest.mark.parametrize("field", ["assignee", "label"])
 def test_manage_accepts_several_ids_at_once(field, registered, spy):
     """Adding three assignees was one call per id, with no tool that took a list."""
