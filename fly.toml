@@ -1,0 +1,23 @@
+# Plane-MCP-Server (talent-factory/plane-mcp), nur Fly-intern erreichbar.
+# Öffentlich wird er über den Plane-Proxy unter https://plane.talent-factory.ch/mcp ausgeliefert
+# (Route im Caddyfile von talent-factory/plane, plane-fly/proxy). Deshalb kein [http_service]:
+# die App bekommt keine öffentliche IP.
+app = "talent-factory-plane-mcp"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Fly-interne Namen (*.internal) lösen nur auf IPv6 auf, also dual-stack lauschen.
+  MCP_HOST = "::"
+  MCP_PORT = "8211"
+  PLANE_BASE_URL = "https://plane.talent-factory.ch"
+  PLANE_INTERNAL_BASE_URL = "http://talent-factory-plane-api.internal:8000"
+  # Tool-Inhalte (Titel, Beschreibungen, Kommentare) nicht loggen.
+  LOG_PAYLOADS = "false"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
