@@ -71,6 +71,7 @@ def spy(monkeypatch):
     Every resource module imports `get_plane_client_context` by value, so each
     module's own reference is patched rather than the definition site.
     """
+    monkeypatch.setenv("PLANE_SUPPORTS_PQL", "true")
     client = SpyClient()
     # Resources gated on a workspace feature probe it first; answer yes so the
     # dispatch under test is what gets exercised.

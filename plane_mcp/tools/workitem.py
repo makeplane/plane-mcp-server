@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, get_args
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.utilities.logging import get_logger
 from plane.errors.errors import HttpError
 from plane.models.enums import PriorityEnum
@@ -34,6 +35,7 @@ from plane_mcp.toolkit import (
     Action,
     build_annotations,
     build_description,
+    check_pql_capability,
     coerce_list,
     envelope,
     ids_of,
@@ -41,6 +43,7 @@ from plane_mcp.toolkit import (
     one_of,
     opt,
     pql_failure,
+    reject_ce_pql,
     rich_text,
 )
 
@@ -281,6 +284,29 @@ def register(mcp: FastMCP) -> None:
         if action in ("list", "list_archived"):
             if action == "list_archived" and not project_id:
                 return missing(action, "project_id")
+            if pql and pql.strip():
+                surface = f"workitem.{action}" if project_id else "workitem.list_workspace"
+                probe_fn = None
+                if action == "list_archived":
+
+                    def probe_fn():
+                        return client.work_items.list_archived(
+                            workspace_slug=workspace_slug,
+                            project_id=project_id,
+                            params=WorkItemQueryParams(pql="(((pql_probe_syntax_check", per_page=1),
+                        )
+
+                if not check_pql_capability(
+                    client,
+                    workspace_slug,
+                    project_id=project_id,
+                    surface=surface,
+                    probe_fn=probe_fn,
+                ):
+                    reject_ce_pql(
+                        pql,
+                        reason="PQL filtering is not supported on this Plane installation.",
+                    )
             params = WorkItemQueryParams(
                 pql=opt(pql),
                 order_by=opt(order_by),
@@ -305,12 +331,37 @@ def register(mcp: FastMCP) -> None:
             except HttpError as exc:
                 failure = pql_failure("workitem", action, pql, exc)
                 if failure:
-                    return failure
+                    raise ToolError(
+                        f"{failure['error']} Failed PQL: {failure['failed_pql']!r}. {failure['hint']}"
+                    ) from exc
                 raise
             return envelope(response, opt(fields))
 
         if action == "count":
+            has_user_pql = bool(pql and pql.strip())
             scoped = _scoped_pql(pql, project_id)
+            if scoped and scoped.strip():
+                if not check_pql_capability(
+                    client,
+                    workspace_slug,
+                    project_id=project_id,
+                    surface="workitem.count",
+                    probe_fn=lambda: client.work_items.count_workspace(
+                        workspace_slug=workspace_slug,
+                        params=WorkItemCountQueryParams(pql="(((pql_probe_syntax_check"),
+                    ),
+                ):
+                    if not has_user_pql and project_id:
+                        raise ToolError(
+                            "Project-scoped workitem count relies on PQL filtering, which is not supported on "
+                            "workitem.count in Plane CE. "
+                            f"Cannot count project {project_id!r} without returning an inaccurate workspace-wide "
+                            f"total. List work items with project_id={project_id!r} or use client-side counting."
+                        )
+                    reject_ce_pql(
+                        scoped,
+                        reason="PQL filtering is not supported on workitem.count in Plane CE.",
+                    )
             try:
                 response = client.work_items.count_workspace(
                     workspace_slug=workspace_slug,
@@ -321,7 +372,9 @@ def register(mcp: FastMCP) -> None:
             except HttpError as exc:
                 failure = pql_failure("workitem", action, scoped, exc)
                 if failure:
-                    return failure
+                    raise ToolError(
+                        f"{failure['error']} Failed PQL: {failure['failed_pql']!r}. {failure['hint']}"
+                    ) from exc
                 raise
             return response.model_dump()
 
