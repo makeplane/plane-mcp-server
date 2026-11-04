@@ -176,8 +176,8 @@ def main() -> None:
         logger.info("Starting HTTP server (header auth) at %s/mcp", prefix)
         uvicorn.run(
             app,
-            host="0.0.0.0",
-            port=8211,
+            host=os.getenv("MCP_HOST", "0.0.0.0"),  # Fly-internal names resolve to IPv6 only: set "::" there
+            port=int(os.getenv("MCP_PORT", "8211")),
             log_level="info",
             access_log=False,
         )
