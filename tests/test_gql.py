@@ -132,6 +132,23 @@ def test_workspace_wide_listing_when_project_omitted():
     assert fake.counts["list_ws"] == 1
 
 
+@pytest.mark.parametrize("ref", ["p1", "PLANE", "plane"])
+def test_work_items_project_accepts_id_or_identifier(ref):
+    fake = Fake([item(1)])
+    out = run(fake, f'{{ workItems(project: "{ref}") {{ results {{ identifier }} }} }}')
+    assert out["data"]["workItems"]["results"] == [{"identifier": "PLANE-1"}]
+    assert fake.counts["list"] == 1
+    assert fake.counts.get("list_ws", 0) == 0
+    assert fake.counts["projects"] == 1
+
+
+def test_work_items_unknown_project_is_a_graphql_error():
+    fake = Fake([item(1)])
+    out = run(fake, '{ workItems(project: "NOPE") { results { identifier } } }')
+    assert "not found" in out["errors"][0]["message"]
+    assert fake.counts.get("list", 0) == 0
+
+
 def test_bad_identifier_is_a_graphql_error():
     out = run(Fake([]), '{ workItem(identifier: "nope") { name } }')
     assert "PROJECT-123" in out["errors"][0]["message"]

@@ -46,7 +46,7 @@ type Query {
   project(id: ID, identifier: String): Project
   "One work item by identifier, e.g. PLANE-1."
   workItem(identifier: String!): WorkItem
-  "Work items of a project (or of the whole workspace when project is omitted), filtered by PQL."
+  "Work items of a project (id or identifier, e.g. STEMMA; whole workspace if omitted), filtered by PQL."
   workItems(project: ID, pql: String, orderBy: String, first: Int = 50, after: String): WorkItemPage!
 }
 
@@ -222,6 +222,19 @@ def project_by_id(ctx: Context, project_id: str) -> dict[str, Any]:
     raise GraphQLError(f"Project {project_id} not found in workspace {ctx.workspace}.")
 
 
+def resolve_project_id(ctx: Context, ref: str) -> str:
+    """Accept a project id or its identifier (e.g. STEMMA, case-insensitive) and return the id."""
+    wanted = ref.strip()
+    rows = projects(ctx)
+    for p in rows:
+        if p["id"] == wanted:
+            return p["id"]
+    for p in rows:
+        if p["identifier"].lower() == wanted.lower():
+            return p["id"]
+    raise GraphQLError(f"Project {ref} not found in workspace {ctx.workspace}.")
+
+
 def states(ctx: Context, project_id: str) -> list[dict[str, Any]]:
     return ctx.once(("states", project_id), lambda: _collect(ctx, ctx.client.states.list, ctx.workspace, project_id))
 
@@ -318,7 +331,9 @@ def _(_src, info, identifier):
 
 @resolver("Query.workItems")
 def _(_src, info, project=None, pql=None, orderBy=None, first=50, after=None):
-    return work_item_page(_ctx(info), project, pql, orderBy, first, after)
+    ctx = _ctx(info)
+    project_id = resolve_project_id(ctx, project) if project else None
+    return work_item_page(ctx, project_id, pql, orderBy, first, after)
 
 
 @resolver("Project.states")
