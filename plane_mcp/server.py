@@ -12,6 +12,7 @@ from plane_mcp.instructions import SERVER_INSTRUCTIONS
 from plane_mcp.middleware import CoerceArguments, PlaneLoggingMiddleware, ValidateActionArguments
 from plane_mcp.storage import build_token_store
 from plane_mcp.tools import register_tools
+from plane_mcp.workspace import SelectWorkspace
 
 # Baseline redirect URIs shipped with the server. Additional patterns can be
 # supplied at runtime via PLANE_OAUTH_ALLOWED_REDIRECT_URIS (comma-separated) so
@@ -57,6 +58,8 @@ LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "true").lower() == "true"
 def _configured(mcp: FastMCP) -> FastMCP:
     """The middleware stack and tools every transport shares."""
     mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=LOG_PAYLOADS))
+    # Outermost after logging: strips `workspace` before coercion/validation see it.
+    mcp.add_middleware(SelectWorkspace())
     mcp.add_middleware(CoerceArguments())
     mcp.add_middleware(ValidateActionArguments())
     register_tools(mcp)

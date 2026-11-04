@@ -14,7 +14,7 @@ from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
-from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
+from plane_mcp.server import get_header_mcp, get_stdio_mcp
 
 LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
 
@@ -143,32 +143,16 @@ def main() -> None:
         return
 
     if server_mode == ServerMode.HTTP:
+        # Fork: header (bearer-token) mode only. OAuth and SSE are not mounted, so no
+        # PLANE_OAUTH_PROVIDER_* configuration is needed. The workspace comes from the
+        # per-call `workspace` argument (or an optional x-workspace-slug header).
         prefix = os.getenv("MCP_PATH_PREFIX") or ""
 
-        oauth_mcp = get_oauth_mcp(prefix + "/http")
-        oauth_app = oauth_mcp.http_app(stateless_http=True)
         header_app = get_header_mcp().http_app(stateless_http=True)
 
-        sse_mcp = get_oauth_mcp(prefix)
-        sse_app = sse_mcp.http_app(transport="sse")
-
-        # mcp_path is appended to the auth provider's base_url to form the
-        # advertised resource URL. base_url already carries the prefix, so these
-        # stay at /mcp and /sse to avoid double-prefixing.
-        oauth_well_known = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
-        sse_well_known = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
-
         app = Starlette(
-            routes=[
-                # Well-known routes for OAuth and Header HTTP
-                *oauth_well_known,
-                *sse_well_known,
-                # Mount both MCP servers
-                Mount(prefix + "/http/api-key", app=header_app),
-                Mount(prefix + "/http", app=oauth_app),
-                Mount(prefix or "/", app=sse_app),
-            ],
-            lifespan=lambda app: combined_lifespan(oauth_app, header_app, sse_app),
+            routes=[Mount(prefix or "/", app=header_app)],
+            lifespan=lambda app: header_app.lifespan(header_app),
         )
 
         app.add_middleware(
@@ -189,7 +173,7 @@ def main() -> None:
             uv_handler.addFilter(UserContextFilter())
             uv_logger.addHandler(uv_handler)
 
-        logger.info("Starting HTTP server at URLs: /mcp and /header/mcp")
+        logger.info("Starting HTTP server (header auth) at %s/mcp", prefix)
         uvicorn.run(
             app,
             host="0.0.0.0",
