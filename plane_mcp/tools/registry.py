@@ -23,6 +23,7 @@ from plane_mcp.tools import (
     customer_request,
     cycle,
     get_pql_reference,
+    graphql_query,
     initiative,
     intake,
     label,
@@ -80,6 +81,7 @@ RESOURCES: tuple[ModuleType, ...] = (
     workspace,
     template,
     collection,
+    graphql_query,
 )
 
 

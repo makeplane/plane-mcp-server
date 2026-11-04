@@ -66,6 +66,7 @@ CATALOGUE = [
     # Appended, not sorted in: see registry.py.
     "template",
     "collection",
+    "graphql_query",
 ]
 
 

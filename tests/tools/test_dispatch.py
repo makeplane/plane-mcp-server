@@ -70,6 +70,7 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
 NO_CALL_EXPECTED: set[tuple[str, str]] = {
     ("get_pql_reference", "read"),  # returns static reference text
     ("workspace", "retrieve"),  # answered from the connection's own credentials
+    ("graphql_query", "query"),  # a sample string is not valid GraphQL; fails before any SDK call
 }
 
 # Actions that need populated remote state or an outbound HTTP fetch to get past

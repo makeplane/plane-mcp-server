@@ -14,6 +14,7 @@ keywords = ["mcp", "plane", "fastmcp", "ai", "automation"]
 dependencies = [
     "fastmcp==3.2.0",
     "plane-sdk==0.3.1",
+    "graphql-core>=3.2.6,<3.3",
     "py-key-value-aio[redis]>=0.4.4,<0.5.0",
     "mcp==1.28.1",
     "PyJWT>=2.13.0",
