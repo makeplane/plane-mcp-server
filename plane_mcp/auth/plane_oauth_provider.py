@@ -1,21 +1,23 @@
 """Plane OAuth provider for FastMCP.
 
-This module provides a complete Plane OAuth integration that's ready to use
-with just a client ID and client secret. It handles all the complexity of
-Plane's OAuth flow, token validation, and user management.
+FastMCP's ``OAuthProxy`` runs the OAuth flow; this module points it at Plane
+and keeps an MCP connection signed in for as long as it is used. The pieces
+that make that hold live beside it:
+
+- ``verifier``      — who a Plane token belongs to, tolerant of Plane blips
+- ``plane_api``     — retrying Plane's token endpoint, 503 instead of invalid_grant
+- ``refresh_grace`` — a rotated refresh token replayed moments later still works
 
 Example:
     ```python
     from fastmcp import FastMCP
-    from plane_mcp.plane_oauth_provider import PlaneOAuthProvider
+    from plane_mcp.auth import PlaneOAuthProvider
 
-    # Simple Plane OAuth protection
     auth = PlaneOAuthProvider(
         client_id="your-plane-client-id",
         client_secret="your-plane-client-secret",
-        base_url="https://api.plane.so"
+        base_url="https://my-server.com",
     )
-
     mcp = FastMCP("My Protected Server", auth=auth)
     ```
 """
@@ -23,60 +25,46 @@ Example:
 from __future__ import annotations
 
 import os
-import time
 
 import httpx
-from fastmcp.server.auth import TokenVerifier
-from fastmcp.server.auth.auth import AccessToken
+from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.settings import ENV_FILE
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import NotSet, NotSetT
 from key_value.aio.protocols import AsyncKeyValue
-from plane.models.users import UserLite
-from pydantic import AnyHttpUrl, BaseModel, SecretStr, field_validator
+from mcp.server.auth.provider import RefreshToken, TokenError
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.requests import Request
+from starlette.routing import Route
+
+from plane_mcp.auth.plane_api import (
+    TOKEN_REQUEST_TIMEOUT_SECONDS,
+    PlaneTokenClient,
+    PlaneUnavailable,
+    ServiceUnavailableWhilePlaneIsDown,
+)
+from plane_mcp.auth.refresh_grace import GRACE_WINDOW_SECONDS, RefreshGrace, RotatedRefreshToken
+from plane_mcp.auth.verifier import DEFAULT_PLANE_BASE_URL, PlaneOAuthTokenVerifier
 
 logger = get_logger(__name__)
 
-# When true, user info (PII such as the display name) is included in logs.
-# Defaults to false so PII is never logged unless explicitly opted in.
-LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
-
-
-DEFAULT_PLANE_BASE_URL = "https://api.plane.so"
+# How long a connection stays signed in without the user signing in again.
+# Every refresh restarts the window, so a connection in use never expires.
+# Plane's own refresh tokens never expire; 90 days matches Plane's web sessions.
+DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 90 * 24 * 60 * 60
+# The access token handed to the MCP client. It is a reference to Plane's
+# 10-hour token and outlives it: the proxy renews Plane's token behind it, so
+# clients refresh (and risk a failed refresh) once a day instead of every 10 h.
+DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 24 * 60 * 60
+# Renew Plane's token when a request lands this close to its expiry.
+UPSTREAM_REFRESH_THRESHOLD_SECONDS = 60
 
 # Name FastMCP's consent flow gives the cookie that remembers a Deny (it lives for a year).
 _DENIED_CLIENTS_COOKIE = "MCP_DENIED_CLIENTS"
-
-
-class WorkspaceDetail(BaseModel):
-    """Workspace detail information."""
-
-    name: str
-    slug: str
-    id: str
-    logo_url: str | None = None
-
-
-class PlaneOAuthAppInstallation(BaseModel):
-    """Plane OAuth app installation information."""
-
-    id: str
-    workspace_detail: WorkspaceDetail
-    created_at: str
-    updated_at: str
-    deleted_at: str | None = None
-    status: str
-    created_by: str | None = None
-    updated_by: str | None = None
-    workspace: str
-    application: str
-    installed_by: str
-    app_bot: str
-    webhook: str | None = None
 
 
 class PlaneOAuthProviderSettings(BaseSettings):
@@ -100,150 +88,25 @@ class PlaneOAuthProviderSettings(BaseSettings):
     plane_base_url: str | None = None
     plane_internal_base_url: str | None = None  # Internal URL for server-to-server calls
     enable_cimd: bool = False
+    refresh_token_ttl_seconds: int = Field(default=DEFAULT_REFRESH_TOKEN_TTL_SECONDS, gt=0)
+    # At least the grace window, so a replayed pair never carries an expired access token.
+    access_token_ttl_seconds: int = Field(default=DEFAULT_ACCESS_TOKEN_TTL_SECONDS, ge=GRACE_WINDOW_SECONDS)
 
     @field_validator("required_scopes", mode="before")
     @classmethod
     def _parse_scopes(cls, v):
         return parse_scopes(v)
 
-
-class PlaneOAuthTokenVerifier(TokenVerifier):
-    """Token verifier for Plane OAuth tokens.
-
-    Plane OAuth tokens are verified by calling Plane's API to check if they're
-    valid and get user info.
-    """
-
-    def __init__(
-        self,
-        *,
-        required_scopes: list[str] | None = None,
-        timeout_seconds: int = 10,
-        plane_base_url: str | None = None,
-    ):
-        """Initialize the Plane token verifier.
-
-        Args:
-            required_scopes: Required OAuth scopes (currently not enforced by Plane API)
-            timeout_seconds: HTTP request timeout
-            plane_base_url: Base URL for Plane API (defaults to https://api.plane.so)
-        """
-        super().__init__(required_scopes=required_scopes)
-        self.timeout_seconds = timeout_seconds
-        self.plane_base_url = plane_base_url or os.getenv("PLANE_BASE_URL", DEFAULT_PLANE_BASE_URL)
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        """Verify Plane OAuth token by calling Plane API."""
-        logger.info(f"verify_token called, token_present={bool(token)}, token_length={len(token) if token else 0}")
-        try:
-            # Build the user endpoint URL
-            base_url = self.plane_base_url.rstrip("/")
-            user_url = f"{base_url}/api/v1/users/me/"
-            logger.info(f"Verifying token against: {user_url}")
-
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                # Get current user info to verify token
-                response = await client.get(
-                    user_url,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                )
-
-                logger.info(f"Plane API response status: {response.status_code}")
-                if response.status_code != 200:
-                    logger.info(
-                        "Plane token verification failed: %s - %s",
-                        response.status_code,
-                        response.text[:200],
-                    )
-                    return None
-
-                # Parse user data
-                user_data = response.json()
-                user = UserLite.model_validate(user_data)
-
-                expires_at = int(time.time() + 3600)
-
-                # display_name is PII — only log it when explicitly opted in.
-                if LOG_USER_INFO:
-                    logger.info(f"User verified: ({user.id}) - {user.display_name}")
-                else:
-                    logger.info(f"User verified: ({user.id})")
-
-                installations_response = await client.get(
-                    f"{base_url}/auth/o/app-installation/",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                )
-
-                installations: list[PlaneOAuthAppInstallation] = installations_response.json()
-
-                if not installations:
-                    raise ValueError("No app installations found")
-
-                installation = installations[0]
-
-                # Create AccessToken with Plane user info
-                return AccessToken(
-                    token=token,
-                    client_id=user.id or "unknown",
-                    scopes=["read", "write"],  # Plane doesn't expose scopes in user endpoint
-                    expires_at=expires_at,
-                    claims={
-                        "auth_method": "oauth",
-                        "sub": user.id or "unknown",
-                        "email": user.email,
-                        "first_name": user.first_name,
-                        "last_name": user.last_name,
-                        "display_name": user.display_name,
-                        "avatar": user.avatar,
-                        "avatar_url": user.avatar_url,
-                        "plane_user_data": user_data,
-                        "workspace_slug": installation.get("workspace_detail", {}).get("slug"),
-                        "workspace": installation.get("workspace_detail", {}),
-                    },
-                )
-
-        except httpx.RequestError as e:
-            logger.info(f"Failed to verify Plane token (request error): {e}")
-            return None
-        except Exception as e:
-            logger.info(f"Failed to verify Plane token: {e}", exc_info=True)
-            return None
+    @model_validator(mode="after")
+    def _access_expires_before_refresh(self) -> PlaneOAuthProviderSettings:
+        # A client refreshes when its access token expires; the refresh token must still be valid then.
+        if self.access_token_ttl_seconds >= self.refresh_token_ttl_seconds:
+            raise ValueError("access_token_ttl_seconds must be shorter than refresh_token_ttl_seconds")
+        return self
 
 
 class PlaneOAuthProvider(OAuthProxy):
-    """Complete Plane OAuth provider for FastMCP.
-
-    This provider makes it trivial to add Plane OAuth protection to any
-    FastMCP server. Just provide your Plane OAuth app credentials and
-    a base URL, and you're ready to go.
-
-    Features:
-    - Transparent OAuth proxy to Plane
-    - Automatic token validation via Plane API
-    - User information extraction
-    - Minimal configuration required
-
-    Example:
-        ```python
-        from fastmcp import FastMCP
-        from plane_mcp.plane_oauth_provider import PlaneOAuthProvider
-
-        auth = PlaneOAuthProvider(
-            client_id="your-client-id",
-            client_secret="your-client-secret",
-            base_url="https://my-server.com",
-            plane_base_url="https://api.plane.so"
-        )
-
-        mcp = FastMCP("My App", auth=auth)
-        ```
-    """
+    """FastMCP's OAuth proxy, pointed at Plane and hardened against forced re-sign-ins."""
 
     def __init__(
         self,
@@ -262,6 +125,8 @@ class PlaneOAuthProvider(OAuthProxy):
         plane_base_url: str | NotSetT = NotSet,
         plane_internal_base_url: str | NotSetT = NotSet,
         enable_cimd: bool | NotSetT = NotSet,
+        refresh_token_ttl_seconds: int | NotSetT = NotSet,
+        access_token_ttl_seconds: int | NotSetT = NotSet,
     ):
         """Initialize Plane OAuth provider.
 
@@ -290,7 +155,9 @@ class PlaneOAuthProvider(OAuthProxy):
                 (any string or bytes). If bytes are provided, they will be used
                 as is. If a string is provided, it will be derived into a
                 32-byte key. If not provided, the upstream client secret will be
-                used to derive a 32-byte key using PBKDF2.
+                used to derive a 32-byte key using PBKDF2 — so rotating that
+                secret signs every connection out. Set it explicitly in
+                production (PLANE_OAUTH_PROVIDER_JWT_SIGNING_KEY).
             require_authorization_consent: Whether to require user consent
                 before authorizing clients (default True). When True, users see
                 a consent screen before being redirected to Plane. When False,
@@ -301,6 +168,12 @@ class PlaneOAuthProvider(OAuthProxy):
                 (defaults to https://api.plane.so or PLANE_BASE_URL env var)
             enable_cimd: Whether to enable CIMD (Client ID Metadata Document) support.
                 Defaults to False. Can be set via the PLANE_OAUTH_PROVIDER_ENABLE_CIMD environment variable.
+            refresh_token_ttl_seconds: How long a connection stays signed in
+                without the user signing in again; every refresh restarts it.
+                Defaults to 90 days (PLANE_OAUTH_PROVIDER_REFRESH_TOKEN_TTL_SECONDS).
+            access_token_ttl_seconds: Lifetime of the access token issued to the
+                MCP client; the Plane token behind it is renewed transparently.
+                Defaults to 24 hours (PLANE_OAUTH_PROVIDER_ACCESS_TOKEN_TTL_SECONDS).
         """
 
         settings = PlaneOAuthProviderSettings.model_validate(
@@ -319,6 +192,8 @@ class PlaneOAuthProvider(OAuthProxy):
                     "plane_base_url": plane_base_url,
                     "plane_internal_base_url": plane_internal_base_url,
                     "enable_cimd": enable_cimd,
+                    "refresh_token_ttl_seconds": refresh_token_ttl_seconds,
+                    "access_token_ttl_seconds": access_token_ttl_seconds,
                 }.items()
                 if v is not NotSet
             }
@@ -369,7 +244,13 @@ class PlaneOAuthProvider(OAuthProxy):
             require_authorization_consent=require_authorization_consent,
             valid_scopes=["read", "write"],
             enable_cimd=settings.enable_cimd,
+            fallback_refresh_token_expiry_seconds=settings.refresh_token_ttl_seconds,
+            fastmcp_access_token_expiry_seconds=settings.access_token_ttl_seconds,
+            token_expiry_threshold_seconds=UPSTREAM_REFRESH_THRESHOLD_SECONDS,
         )
+
+        self._refresh_token_ttl_seconds = settings.refresh_token_ttl_seconds
+        self._refresh_grace = RefreshGrace(self._client_storage)
 
         logger.info(
             "Initialized Plane OAuth provider for client %s with scopes: %s",
@@ -382,3 +263,77 @@ class PlaneOAuthProvider(OAuthProxy):
         if base_name == _DENIED_CLIENTS_COOKIE:
             return []
         return super()._decode_list_cookie(request, base_name)
+
+    def get_routes(self, mcp_path: str | None = None) -> list[Route]:
+        """FastMCP's routes, with the token endpoint answering 503 while Plane is down."""
+        return [
+            Route(
+                route.path,
+                ServiceUnavailableWhilePlaneIsDown(route.endpoint),
+                methods=sorted(route.methods or []),
+                name=route.name,
+            )
+            if isinstance(route, Route) and route.path == "/token"
+            else route
+            for route in super().get_routes(mcp_path)
+        ]
+
+    def _create_upstream_oauth_client(self) -> AsyncOAuth2Client:
+        secret = self._upstream_client_secret
+        return PlaneTokenClient(
+            client_id=self._upstream_client_id,
+            client_secret=secret.get_secret_value() if secret is not None else None,
+            token_endpoint_auth_method=self._token_endpoint_auth_method,
+            timeout=TOKEN_REQUEST_TIMEOUT_SECONDS,
+            refresh_expires_in=self._refresh_token_ttl_seconds,
+        )
+
+    async def load_refresh_token(self, client: OAuthClientInformationFull, refresh_token: str) -> RefreshToken | None:
+        loaded = await super().load_refresh_token(client, refresh_token)
+        if loaded is not None:
+            return loaded
+        # Rotated already, or being rotated by a concurrent refresh in this
+        # process: waiting for its lock lets that refresh record the new pair.
+        # Or rotated a moment ago on another replica, which is still recording the pair.
+        async with self._refresh_grace.lock(refresh_token):
+            rotated = await self._refresh_grace.get(refresh_token, settle_seconds=0.5)
+        if rotated is None or rotated.client_id != client.client_id:
+            return None
+        return RefreshToken(
+            token=refresh_token,
+            client_id=rotated.client_id,
+            scopes=(rotated.tokens.scope or "").split(),
+            expires_at=int(rotated.grace_ends_at),
+        )
+
+    async def exchange_refresh_token(
+        self, client: OAuthClientInformationFull, refresh_token: RefreshToken, scopes: list[str]
+    ) -> OAuthToken:
+        async with self._refresh_grace.lock(refresh_token.token):
+            if rotated := await self._refresh_grace.get(refresh_token.token):
+                return self._replay(rotated, client)
+            try:
+                tokens = await super().exchange_refresh_token(client, refresh_token, scopes)
+            except TokenError as exc:
+                # FastMCP reports every upstream failure as invalid_grant; an outage is not one.
+                if isinstance(exc.__cause__, (PlaneUnavailable, httpx.TransportError)):
+                    raise PlaneUnavailable(str(exc.__cause__)) from exc.__cause__
+                # Another replica may have rotated this token a moment ago.
+                if rotated := await self._refresh_grace.get(refresh_token.token, settle_seconds=0.5):
+                    return self._replay(rotated, client)
+                raise
+            if tokens.refresh_token:
+                # The old token is already gone; losing the grace entry must not lose the new pair.
+                try:
+                    await self._refresh_grace.record(refresh_token.token, client.client_id, tokens)
+                except Exception:
+                    logger.warning("Could not record the rotated refresh token; replays will be refused", exc_info=True)
+            return tokens
+
+    @staticmethod
+    def _replay(rotated: RotatedRefreshToken, client: OAuthClientInformationFull) -> OAuthToken:
+        # load_refresh_token already filters by client; checked again because a pair is being handed out.
+        if rotated.client_id != client.client_id:
+            raise TokenError("invalid_grant", "Refresh token was issued to another client")
+        logger.info("Rotated refresh token presented again; answering with the same token pair")
+        return rotated.replay()
