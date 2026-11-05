@@ -221,6 +221,7 @@ def register(mcp: FastMCP) -> None:
                     is_required=is_required,
                     default_value=coerce_list(default_value, split=False),
                     is_active=is_active,
+                    is_multi=is_multi,
                     options=_json(options, list) if options else None,
                     external_source=opt(external_source),
                     external_id=opt(external_id),
