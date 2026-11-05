@@ -98,8 +98,8 @@ class PlaneOAuthTokenVerifier(TokenVerifier):
                 installations_response.json() if installations_response.status_code == 200 else []
             )
         except Exception as exc:
-            logger.info("Unexpected answer from Plane while verifying a token: %s", exc, exc_info=True)
-            return None
+            # Plane said yes but sent a body we cannot read: its fault, not the token's.
+            raise PlaneUnavailable(f"unreadable answer from Plane: {exc}") from exc
         if not installations:
             logger.info("Token has no app installation (HTTP %s)", installations_response.status_code)
             return None

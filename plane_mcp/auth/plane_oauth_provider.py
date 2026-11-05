@@ -36,7 +36,7 @@ from fastmcp.utilities.types import NotSet, NotSetT
 from key_value.aio.protocols import AsyncKeyValue
 from mcp.server.auth.provider import RefreshToken, TokenError
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
-from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.requests import Request
 from starlette.routing import Route
@@ -47,7 +47,7 @@ from plane_mcp.auth.plane_api import (
     PlaneUnavailable,
     ServiceUnavailableWhilePlaneIsDown,
 )
-from plane_mcp.auth.refresh_grace import RefreshGrace, RotatedRefreshToken
+from plane_mcp.auth.refresh_grace import GRACE_WINDOW_SECONDS, RefreshGrace, RotatedRefreshToken
 from plane_mcp.auth.verifier import DEFAULT_PLANE_BASE_URL, PlaneOAuthTokenVerifier
 
 logger = get_logger(__name__)
@@ -89,12 +89,20 @@ class PlaneOAuthProviderSettings(BaseSettings):
     plane_internal_base_url: str | None = None  # Internal URL for server-to-server calls
     enable_cimd: bool = False
     refresh_token_ttl_seconds: int = Field(default=DEFAULT_REFRESH_TOKEN_TTL_SECONDS, gt=0)
-    access_token_ttl_seconds: int = Field(default=DEFAULT_ACCESS_TOKEN_TTL_SECONDS, gt=0)
+    # At least the grace window, so a replayed pair never carries an expired access token.
+    access_token_ttl_seconds: int = Field(default=DEFAULT_ACCESS_TOKEN_TTL_SECONDS, ge=GRACE_WINDOW_SECONDS)
 
     @field_validator("required_scopes", mode="before")
     @classmethod
     def _parse_scopes(cls, v):
         return parse_scopes(v)
+
+    @model_validator(mode="after")
+    def _access_expires_before_refresh(self) -> PlaneOAuthProviderSettings:
+        # A client refreshes when its access token expires; the refresh token must still be valid then.
+        if self.access_token_ttl_seconds >= self.refresh_token_ttl_seconds:
+            raise ValueError("access_token_ttl_seconds must be shorter than refresh_token_ttl_seconds")
+        return self
 
 
 class PlaneOAuthProvider(OAuthProxy):
@@ -286,8 +294,9 @@ class PlaneOAuthProvider(OAuthProxy):
             return loaded
         # Rotated already, or being rotated by a concurrent refresh in this
         # process: waiting for its lock lets that refresh record the new pair.
+        # Or rotated a moment ago on another replica, which is still recording the pair.
         async with self._refresh_grace.lock(refresh_token):
-            rotated = await self._refresh_grace.get(refresh_token)
+            rotated = await self._refresh_grace.get(refresh_token, settle_seconds=0.5)
         if rotated is None or rotated.client_id != client.client_id:
             return None
         return RefreshToken(
@@ -314,7 +323,11 @@ class PlaneOAuthProvider(OAuthProxy):
                     return self._replay(rotated, client)
                 raise
             if tokens.refresh_token:
-                await self._refresh_grace.record(refresh_token.token, client.client_id, tokens)
+                # The old token is already gone; losing the grace entry must not lose the new pair.
+                try:
+                    await self._refresh_grace.record(refresh_token.token, client.client_id, tokens)
+                except Exception:
+                    logger.warning("Could not record the rotated refresh token; replays will be refused", exc_info=True)
             return tokens
 
     @staticmethod

@@ -30,11 +30,11 @@ RETRY_DELAYS_SECONDS = (0.5, 1.0)
 
 
 class PlaneUnavailable(Exception):
-    """Plane could not answer: 5xx, throttled (429) or unreachable. Says nothing about the token."""
+    """Plane could not answer: timed out (408), throttled (429), 5xx or unreachable. Says nothing about the token."""
 
 
 def raise_if_unavailable(response: httpx.Response) -> None:
-    if response.status_code == 429 or response.status_code >= 500:
+    if response.status_code in (408, 429) or response.status_code >= 500:
         request = response.request
         raise PlaneUnavailable(f"{request.method} {request.url.path} answered HTTP {response.status_code}")
 

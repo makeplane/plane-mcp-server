@@ -183,12 +183,9 @@ class TestOAuthRedirectAttack:
 
         response = authorize(client, reg.json()["client_id"], legitimate_uri)
 
-        # Should proceed with the OAuth flow (302 to upstream), not error
-        assert response.status_code != 400, f"Legitimate redirect URI was rejected: {response.text}"
-        if response.is_redirect:
-            # The proxy sends the browser to its own consent page or to upstream
-            # Plane — never straight to the client.
-            assert "attacker" not in response.headers.get("location", "")
+        # Consent is off in this fixture, so the browser goes straight to Plane.
+        assert response.is_redirect, f"{response.status_code}: {response.text}"
+        assert response.headers["location"].startswith("http://localhost:9999/auth/o/authorize-app/")
 
     def test_cors_blocks_cross_origin_token_theft(self, client: TestClient) -> None:
         """Step 5: Even if attacker got a code, CORS blocks cross-origin token exchange.

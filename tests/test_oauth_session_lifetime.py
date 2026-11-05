@@ -26,7 +26,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from plane_mcp.auth import plane_api
@@ -96,6 +96,8 @@ class FakePlane:
     async def me(self, request: Request) -> JSONResponse:
         self.me_calls += 1
         status = self.me_plan.pop(0) if self.me_plan else 200
+        if status == "unreadable":
+            return Response("<html>gateway page</html>", status_code=200)
         if status != 200:
             return JSONResponse({"detail": "injected"}, status_code=status)
         return JSONResponse(
@@ -277,6 +279,17 @@ def test_a_zero_window_is_refused(monkeypatch, plane):
         make_provider(plane)
 
 
+@pytest.mark.parametrize(
+    ("access", "refresh"),
+    [(ONE_DAY, ONE_DAY), (2 * ONE_DAY, ONE_DAY), (GRACE_WINDOW_SECONDS - 1, ONE_DAY)],
+    ids=["equal", "access-outlives-refresh", "access-shorter-than-grace"],
+)
+def test_inconsistent_lifetimes_are_refused(plane, access, refresh):
+    """An access token must expire before the refresh token, and outlast a replayed pair."""
+    with pytest.raises(ValidationError):
+        make_provider(plane, access_token_ttl_seconds=access, refresh_token_ttl_seconds=refresh)
+
+
 def test_lifetimes_are_wired_into_fastmcp(plane):
     provider = make_provider(plane)
 
@@ -318,7 +331,7 @@ async def test_token_responses_carry_the_refresh_lifetime(plane):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("status", [429, 500, 502, 503, 504])
+@pytest.mark.parametrize("status", [408, 429, 500, 502, 503, 504])
 async def test_a_refresh_survives_plane_answering_an_error_once(plane, fast_retries, status):
     provider = make_provider(plane)
     tokens = await sign_in(provider, plane)
@@ -473,6 +486,42 @@ async def test_simultaneous_refreshes_on_two_replicas_both_succeed(plane):
     assert all(r.refresh_token for r in results)
 
 
+@pytest.mark.anyio
+async def test_a_failed_grace_record_still_returns_the_new_pair(plane):
+    """The old token is already gone by then; the client must not lose the new one too."""
+    provider = make_provider(plane)
+    tokens = await sign_in(provider, plane)
+
+    async def broken_record(*args, **kwargs):
+        raise ConnectionError("redis went away")
+
+    provider._refresh_grace.record = broken_record
+
+    renewed = await refresh(provider, tokens)
+
+    assert renewed.refresh_token and renewed.refresh_token != tokens.refresh_token
+
+
+def test_a_held_refresh_lock_is_never_evicted(monkeypatch):
+    from key_value.aio.stores.memory import MemoryStore as Store
+
+    from plane_mcp.auth import refresh_grace
+
+    monkeypatch.setattr(refresh_grace, "LOCK_CACHE_SIZE", 2)
+    grace = refresh_grace.RefreshGrace(Store())
+    held = grace.lock("token-a")
+
+    async def hold_and_crowd():
+        async with held:
+            grace.lock("token-b")
+            grace.lock("token-c")
+            assert grace.lock("token-a") is held
+
+    import anyio
+
+    anyio.run(hold_and_crowd)
+
+
 # --- verifying tokens while Plane wobbles --------------------------------------
 
 
@@ -510,7 +559,7 @@ async def test_a_minute_later_plane_is_asked_again(plane):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("status", [429, 500, 503])
+@pytest.mark.parametrize("status", [408, 429, 500, 503, "unreadable"])
 async def test_a_recently_verified_token_stays_valid_while_plane_is_down(plane, status):
     provider = make_provider(plane)
     verifier = provider._token_validator

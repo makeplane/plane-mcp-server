@@ -54,15 +54,17 @@ class RefreshGrace:
         self._locks: OrderedDict[str, anyio.Lock] = OrderedDict()
 
     def lock(self, refresh_token: str) -> anyio.Lock:
-        """Serialises refreshes of one token within this process (bounded LRU)."""
+        """Serialises refreshes of one token within this process (bounded LRU; a held lock is never evicted)."""
         key = _key(refresh_token)
         if key in self._locks:
             self._locks.move_to_end(key)
-        else:
-            self._locks[key] = anyio.Lock()
-            if len(self._locks) > LOCK_CACHE_SIZE:
-                self._locks.popitem(last=False)
-        return self._locks[key]
+            return self._locks[key]
+        lock = self._locks[key] = anyio.Lock()
+        if len(self._locks) > LOCK_CACHE_SIZE:
+            idle = next((k for k, held in self._locks.items() if not held.locked() and k != key), None)
+            if idle is not None:
+                del self._locks[idle]
+        return lock
 
     async def get(self, refresh_token: str, *, settle_seconds: float = 0) -> RotatedRefreshToken | None:
         """The pair this refresh token was rotated into, if within the window.
