@@ -6,12 +6,28 @@ from typing import Literal
 
 from fastmcp import FastMCP
 from plane.models.query_params import MemberListQueryParams
-
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, opt
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, opt
 
 NAME = "member"
 TITLE = "Members and roles"
+
+_PROJECT_ROLE_VALUES = {
+    "guest": 5,
+    "member": 15,
+    "contributor": 15,
+    "admin": 20,
+}
+
+
+def _project_role_value(role: str) -> int | None:
+    normalized = role.strip().lower()
+    if normalized in _PROJECT_ROLE_VALUES:
+        return _PROJECT_ROLE_VALUES[normalized]
+    if normalized.isdigit():
+        value = int(normalized)
+        return value if value in {5, 15, 20} else None
+    return None
 
 ACTIONS = (
     Action("me", note="the authenticated user", read=True),
@@ -32,7 +48,28 @@ ACTIONS = (
         note="name filters match case-insensitively and combine with AND",
         read=True,
     ),
-    Action("list_project", ("project_id",), read=True),
+    Action(
+        "list_project",
+        ("project_id",),
+        note="returns project member users; id is the workspace user UUID (the v1 list API does not expose membership row ids)",
+        read=True,
+    ),
+    Action(
+        "add_project",
+        ("project_id", "member_id", "role"),
+        note="adds an existing workspace user through Plane API v1; returns the created membership row including its id",
+    ),
+    Action(
+        "update_project",
+        ("project_id", "membership_id", "role"),
+        note="changes the project role through Plane API v1; requires a known membership row id",
+    ),
+    Action(
+        "remove_project",
+        ("project_id", "membership_id"),
+        note="removes project access through Plane API v1; requires a known membership row id",
+        destructive=True,
+    ),
     Action("list_roles", optional=("namespace", "cursor", "per_page"), read=True),
     Action("retrieve_role", ("role_id",), read=True),
 )
@@ -40,7 +77,11 @@ ACTIONS = (
 FOOTER = (
     "namespace is 'workspace' (Owner/Admin/Member/Guest) or 'project' "
     "(Admin/Contributor/Commenter/Guest); omit for both. A role slug is stable but not "
-    "globally unique -- key on (namespace, slug)."
+    "globally unique -- key on (namespace, slug). For project membership writes, member_id "
+    "is the workspace user UUID from list_workspace; membership_id is the project-membership "
+    "row id returned when a membership is created (Plane API v1 does not expose row ids in its "
+    "project-member list). For writes, role accepts guest (5), member/contributor (15), admin (20), "
+    "or the numeric value as a string."
 )
 
 LEGACY = {
@@ -59,8 +100,20 @@ def register(mcp: FastMCP) -> None:
         annotations=build_annotations(TITLE, ACTIONS),
     )
     def member(
-        action: Literal["me", "list_workspace", "list_project", "list_roles", "retrieve_role"],
+        action: Literal[
+            "me",
+            "list_workspace",
+            "list_project",
+            "add_project",
+            "update_project",
+            "remove_project",
+            "list_roles",
+            "retrieve_role",
+        ],
         project_id: str = "",
+        member_id: str = "",
+        membership_id: str = "",
+        role: str = "",
         role_id: str = "",
         namespace: str = "",
         first_name: str = "",
@@ -101,6 +154,36 @@ def register(mcp: FastMCP) -> None:
             if not project_id:
                 return missing(action, "project_id")
             return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id)
+
+        if action == "add_project":
+            if error := needs(action, project_id=project_id, member_id=member_id, role=role):
+                return error
+            role_value = _project_role_value(role)
+            if role_value is None:
+                return "Error: role must be guest, member, contributor, admin, 5, 15, or 20."
+            return client.projects._post(
+                f"{workspace_slug}/projects/{project_id}/members",
+                {"member": member_id, "role": role_value},
+            )
+
+        if action == "update_project":
+            if error := needs(action, project_id=project_id, membership_id=membership_id, role=role):
+                return error
+            role_value = _project_role_value(role)
+            if role_value is None:
+                return "Error: role must be guest, member, contributor, admin, 5, 15, or 20."
+            return client.projects._patch(
+                f"{workspace_slug}/projects/{project_id}/members/{membership_id}",
+                {"role": role_value},
+            )
+
+        if action == "remove_project":
+            if error := needs(action, project_id=project_id, membership_id=membership_id):
+                return error
+            client.projects._delete(
+                f"{workspace_slug}/projects/{project_id}/members/{membership_id}"
+            )
+            return None
 
         if action == "list_roles":
             return client.roles.list(
