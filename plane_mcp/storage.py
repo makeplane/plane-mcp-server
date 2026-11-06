@@ -246,25 +246,30 @@ def _parse_sentinels(raw: str) -> list[tuple[str, int]]:
         entry = entry.strip()
         if not entry:
             continue
+        # Errors name the position, never the entry: a pasted URL or user:password@host would put a
+        # secret in the logs.
+        position = len(sentinels) + 1
+        if "/" in entry or "@" in entry:
+            raise RuntimeError(f"REDIS_SENTINELS entry {position} must be host:port.")
         if entry.startswith("["):
             host, sep, rest = entry[1:].partition("]")
             if not sep or (rest and not rest.startswith(":")):
-                raise RuntimeError(f"REDIS_SENTINELS entry {entry!r} is not [ipv6]:port.")
+                raise RuntimeError(f"REDIS_SENTINELS entry {position} is not [ipv6]:port.")
             port_text = rest[1:]
         elif entry.count(":") == 1:
             host, port_text = entry.split(":")
         elif ":" in entry:
-            raise RuntimeError(f"REDIS_SENTINELS entry {entry!r}: put an IPv6 address in brackets, [addr]:port.")
+            raise RuntimeError(f"REDIS_SENTINELS entry {position}: put an IPv6 address in brackets, [addr]:port.")
         else:
             host, port_text = entry, ""
         if not host:
-            raise RuntimeError(f"REDIS_SENTINELS entry {entry!r} has no host.")
+            raise RuntimeError(f"REDIS_SENTINELS entry {position} has no host.")
         try:
             port = int(port_text) if port_text else _SENTINEL_DEFAULT_PORT
         except ValueError:
-            raise RuntimeError(f"REDIS_SENTINELS entry {entry!r} has a non-numeric port.") from None
+            raise RuntimeError(f"REDIS_SENTINELS entry {position} has a non-numeric port.") from None
         if not 0 < port < 65536:
-            raise RuntimeError(f"REDIS_SENTINELS entry {entry!r} has an out-of-range port.")
+            raise RuntimeError(f"REDIS_SENTINELS entry {position} has an out-of-range port.")
         sentinels.append((host, port))
     if not sentinels:
         raise RuntimeError("REDIS_SENTINELS is set but lists no sentinel addresses.")

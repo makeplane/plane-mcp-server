@@ -108,6 +108,16 @@ def test_parse_sentinels_rejects_bad_entries(raw):
         storage._parse_sentinels(raw)
 
 
+@pytest.mark.parametrize("raw", ["user:s3cret@host", "redis://user:s3cret@host:26379", "user:s3cret", "a:b:s3cret"])
+def test_parse_sentinels_does_not_echo_a_rejected_entry(raw):
+    """It may be a pasted URL, and this message reaches the startup logs."""
+    with pytest.raises(RuntimeError) as error:
+        storage._parse_sentinels(f"good:26379,{raw}")
+
+    assert "s3cret" not in str(error.value)
+    assert "entry 2" in str(error.value)
+
+
 # ---------------------------------------------------------------------------
 # Selection and validation
 # ---------------------------------------------------------------------------
