@@ -3,11 +3,17 @@
 Selects and verifies the storage backing the OAuth token cache used by the
 HTTP / SSE transports. Priority order (highest first):
 
+0. ``REDIS_SENTINELS`` (non-empty) → Redis behind a customer-run Sentinel.
+   ``REDIS_SENTINEL_MASTER`` names the master and is required. The client asks
+   the sentinels for the current primary on every (re)connect, so it follows a
+   failover. Wins over everything below; ``REDIS_URL`` and
+   ``ELASTICACHE_SECRET_ARN`` are ignored with a warning.
 1. ``REDIS_URL`` → Redis from a single connection URL. The URL carries host,
    port, db, credentials and TLS (``rediss://``) in one value; ``REDIS_SSL``
    is ignored here because the scheme already decides. ``REDIS_PASSWORD``
    applies only when the URL itself carries no password.
-2. ``REDIS_PASSWORD`` + ``REDIS_HOST``/``REDIS_PORT`` → Redis with a static password.
+2. ``REDIS_PASSWORD`` + ``REDIS_HOST``/``REDIS_PORT`` → Redis with a static
+   password (and ``REDIS_USERNAME`` for an ACL user, when set).
 3. ``ELASTICACHE_SECRET_ARN`` + IRSA (``AWS_ROLE_ARN``) or EKS Pod Identity
    (``AWS_CONTAINER_CREDENTIALS_FULL_URI``) + host/port → Redis with a rotating
    AUTH token from AWS Secrets Manager.
@@ -18,6 +24,17 @@ On the host/port paths (2–4) ``REDIS_SSL`` turns on TLS for both the startup
 PING and the token store's own connection. It defaults off, except on the
 ElastiCache path (3), where it defaults on.
 
+Sentinel mode (0) reads its own set of variables:
+
+- ``REDIS_SENTINELS`` — ``host1:26379,host2:26379``; the port defaults to 26379.
+- ``REDIS_SENTINEL_USERNAME`` / ``REDIS_SENTINEL_PASSWORD`` — auth to the sentinels.
+- ``REDIS_USERNAME`` / ``REDIS_PASSWORD`` — auth to the data nodes.
+- ``REDIS_DB`` — database index, default 0.
+- ``REDIS_SSL`` — TLS to the data nodes, default off.
+- ``REDIS_SENTINEL_SSL`` — TLS to the sentinels; unset or empty follows ``REDIS_SSL``.
+- ``REDIS_SSL_VERIFY`` — verify server certificates against the system CA
+  bundle (both hops), default off.
+
 Misconfigurations raise ``RuntimeError`` at startup. Reachability is verified
 eagerly with a synchronous PING.
 """
@@ -25,6 +42,7 @@ eagerly with a synchronous PING.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -33,6 +51,20 @@ from key_value.aio.stores.memory import MemoryStore
 from key_value.aio.stores.redis import RedisStore
 
 logger = get_logger(__name__)
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+# Sentinel's well-known port, used when a REDIS_SENTINELS entry carries none.
+_SENTINEL_DEFAULT_PORT = 26379
+
+# Socket timeouts in Sentinel mode. A primary that vanishes mid-failover must
+# surface as a timeout (which the client retries against the newly discovered
+# primary) rather than a read that waits on the dead socket indefinitely.
+_SENTINEL_SOCKET_TIMEOUT_SECONDS = 5.0
+
+# Both build_token_store() calls in HTTP mode (OAuth + SSE) resolve the same
+# environment; warn about the ignored variables once, not per call.
+_sentinel_override_warned = False
 
 
 def _has_aws_credentials() -> bool:
@@ -45,10 +77,41 @@ def _redis_ssl_enabled(default: bool) -> bool:
     raw = os.getenv("REDIS_SSL")
     if raw is None:
         return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return raw.strip().lower() in _TRUTHY
 
 
-def _redis_client(host: str, port: int, *, password: str | None = None, ssl: bool = False) -> Any:
+def _env_str(name: str) -> str | None:
+    """The variable's value, or None when unset or blank.
+
+    The Helm chart renders every key it knows, so an unused setting arrives as
+    an empty string and has to mean the same as an absent one.
+    """
+    value = (os.getenv(name) or "").strip()
+    return value or None
+
+
+def _env_secret(name: str) -> str | None:
+    """A credential's value, or None when unset or empty. Not stripped: the
+    whitespace may be part of the password."""
+    return os.getenv(name) or None
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """A boolean variable; unset or blank gives ``default``."""
+    value = _env_str(name)
+    if value is None:
+        return default
+    return value.lower() in _TRUTHY
+
+
+def _redis_client(
+    host: str,
+    port: int,
+    *,
+    username: str | None = None,
+    password: str | None = None,
+    ssl: bool = False,
+) -> Any:
     """The async client a host/port token store connects with.
 
     Built here rather than by ``RedisStore(host=..., password=...)``: that
@@ -58,7 +121,7 @@ def _redis_client(host: str, port: int, *, password: str | None = None, ssl: boo
     """
     from redis.asyncio import Redis as AsyncRedis
 
-    return AsyncRedis(host=host, port=port, password=password, decode_responses=True, ssl=ssl)
+    return AsyncRedis(host=host, port=port, username=username, password=password, decode_responses=True, ssl=ssl)
 
 
 def _redact_url(url: str) -> str:
@@ -113,6 +176,7 @@ def _ping_redis(
     host: str,
     port: int,
     *,
+    username: str | None = None,
     password: str | None = None,
     ssl: bool = False,
     timeout_seconds: float = 5.0,
@@ -126,6 +190,7 @@ def _ping_redis(
     client = redis.Redis(
         host=host,
         port=port,
+        username=username,
         password=password,
         ssl=ssl,
         socket_connect_timeout=timeout_seconds,
@@ -144,6 +209,250 @@ def _ping_redis(
     logger.info("Redis connection verified (PING succeeded)")
 
 
+# ---------------------------------------------------------------------------
+# Sentinel
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _SentinelConfig:
+    """Sentinel-mode settings resolved from the environment.
+
+    ``repr`` leaves the credentials out, so the object is safe to log.
+    """
+
+    sentinels: list[tuple[str, int]]
+    master: str
+    db: int
+    ssl: bool
+    sentinel_ssl: bool
+    ssl_verify: bool
+    username: str | None = field(default=None, repr=False)
+    password: str | None = field(default=None, repr=False)
+    sentinel_username: str | None = field(default=None, repr=False)
+    sentinel_password: str | None = field(default=None, repr=False)
+
+    def describe_sentinels(self) -> str:
+        return ",".join(f"{host}:{port}" for host, port in self.sentinels)
+
+
+def _parse_sentinels(raw: str) -> list[tuple[str, int]]:
+    """``host1:26379,host2,[::1]:26380`` → ``[(host, port), ...]``.
+
+    A missing port means 26379. IPv6 literals go in brackets.
+    """
+    sentinels: list[tuple[str, int]] = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        # Errors name the position, never the entry: a pasted URL or user:password@host would put a
+        # secret in the logs.
+        position = len(sentinels) + 1
+        if "/" in entry or "@" in entry:
+            raise RuntimeError(f"REDIS_SENTINELS entry {position} must be host:port.")
+        if entry.startswith("["):
+            host, sep, rest = entry[1:].partition("]")
+            if not sep or (rest and not rest.startswith(":")):
+                raise RuntimeError(f"REDIS_SENTINELS entry {position} is not [ipv6]:port.")
+            port_text = rest[1:]
+        elif entry.count(":") == 1:
+            host, port_text = entry.split(":")
+        elif ":" in entry:
+            raise RuntimeError(f"REDIS_SENTINELS entry {position}: put an IPv6 address in brackets, [addr]:port.")
+        else:
+            host, port_text = entry, ""
+        if not host:
+            raise RuntimeError(f"REDIS_SENTINELS entry {position} has no host.")
+        try:
+            port = int(port_text) if port_text else _SENTINEL_DEFAULT_PORT
+        except ValueError:
+            raise RuntimeError(f"REDIS_SENTINELS entry {position} has a non-numeric port.") from None
+        if not 0 < port < 65536:
+            raise RuntimeError(f"REDIS_SENTINELS entry {position} has an out-of-range port.")
+        sentinels.append((host, port))
+    if not sentinels:
+        raise RuntimeError("REDIS_SENTINELS is set but lists no sentinel addresses.")
+    return sentinels
+
+
+def _sentinel_config(raw_sentinels: str) -> _SentinelConfig:
+    """Resolve and validate Sentinel mode's variables. Raises ``RuntimeError``."""
+    master = _env_str("REDIS_SENTINEL_MASTER")
+    if not master:
+        raise RuntimeError(
+            "REDIS_SENTINELS is set but REDIS_SENTINEL_MASTER is not — set it to the master name "
+            "your sentinels monitor (the name in `sentinel monitor <name> ...`)."
+        )
+
+    db_text = _env_str("REDIS_DB") or "0"
+    try:
+        db = int(db_text)
+    except ValueError:
+        raise RuntimeError(f"REDIS_DB must be a non-negative integer, got {db_text!r}.") from None
+    if db < 0:
+        raise RuntimeError(f"REDIS_DB must be a non-negative integer, got {db_text!r}.")
+
+    ssl = _redis_ssl_enabled(default=False)
+    return _SentinelConfig(
+        sentinels=_parse_sentinels(raw_sentinels),
+        master=master,
+        db=db,
+        ssl=ssl,
+        sentinel_ssl=_env_flag("REDIS_SENTINEL_SSL", default=ssl),
+        ssl_verify=_env_flag("REDIS_SSL_VERIFY", default=False),
+        username=_env_str("REDIS_USERNAME"),
+        password=_env_secret("REDIS_PASSWORD"),
+        sentinel_username=_env_str("REDIS_SENTINEL_USERNAME"),
+        sentinel_password=_env_secret("REDIS_SENTINEL_PASSWORD"),
+    )
+
+
+def _tls_kwargs(enabled: bool, verify: bool) -> dict[str, Any]:
+    """redis-py TLS kwargs for one hop (data nodes or sentinels).
+
+    ``REDIS_SSL_VERIFY`` off (the default, shared with Plane's other services)
+    encrypts without checking the certificate: sentinels usually announce the
+    primary by IP, which few certificates name. On, the certificate chain and
+    hostname are checked against the system CA bundle (redis-py's
+    ``ssl.create_default_context()``; ``SSL_CERT_FILE`` points it elsewhere).
+
+    This applies to Sentinel mode only. The host/port paths keep redis-py's
+    own default, which verifies.
+    """
+    if not enabled:
+        return {}
+    return {
+        "ssl": True,
+        "ssl_cert_reqs": "required" if verify else "none",
+        "ssl_check_hostname": verify,
+    }
+
+
+def _sentinel_node_kwargs(cfg: _SentinelConfig, timeout_seconds: float) -> dict[str, Any]:
+    """Connection kwargs for the sentinels themselves."""
+    return {
+        "username": cfg.sentinel_username,
+        "password": cfg.sentinel_password,
+        "socket_connect_timeout": timeout_seconds,
+        "socket_timeout": timeout_seconds,
+        **_tls_kwargs(cfg.sentinel_ssl, cfg.ssl_verify),
+    }
+
+
+def _data_node_kwargs(cfg: _SentinelConfig, timeout_seconds: float) -> dict[str, Any]:
+    """Connection kwargs for the primary that ``master_for`` resolves."""
+    return {
+        "db": cfg.db,
+        "username": cfg.username,
+        "password": cfg.password,
+        "socket_connect_timeout": timeout_seconds,
+        "socket_timeout": timeout_seconds,
+        **_tls_kwargs(cfg.ssl, cfg.ssl_verify),
+    }
+
+
+def _sentinel_diagnosis(sentinel_clients: list[Any]) -> str:
+    """One line per sentinel saying why it gave no master.
+
+    Replaces redis-py's ``MasterNotFoundError`` text, which embeds the full
+    repr of every sentinel client. Each sentinel is pinged on its own:
+    an error here is a reachability, auth or TLS problem; a reply means it is
+    reachable but has no healthy master by that name.
+    """
+    parts = []
+    for client in sentinel_clients:
+        kwargs = client.connection_pool.connection_kwargs
+        addr = f"{kwargs.get('host')}:{kwargs.get('port')}"
+        try:
+            client.ping()
+            parts.append(f"{addr} reachable, reports no usable master by that name")
+        except Exception as exc:
+            parts.append(f"{addr} {type(exc).__name__}: {exc}")
+    return "; ".join(parts)
+
+
+def _ping_redis_sentinel(cfg: _SentinelConfig, *, timeout_seconds: float = 5.0) -> None:
+    """Resolve the master through the sentinels and PING it, synchronously.
+
+    Raises ``RuntimeError`` naming which step failed: no sentinel could name
+    the master, or the master it named did not answer.
+    """
+    from redis.sentinel import MasterNotFoundError, Sentinel
+
+    sentinel = Sentinel(
+        cfg.sentinels,
+        sentinel_kwargs=_sentinel_node_kwargs(cfg, timeout_seconds),
+        **_data_node_kwargs(cfg, timeout_seconds),
+    )
+    client = sentinel.master_for(cfg.master)
+    try:
+        client.ping()
+    except MasterNotFoundError as exc:
+        raise RuntimeError(
+            f"Redis Sentinel: no sentinel in REDIS_SENTINELS returned a usable master named {cfg.master!r}. "
+            f"Check the address list, REDIS_SENTINEL_MASTER, sentinel auth (REDIS_SENTINEL_USERNAME/PASSWORD) "
+            f"and REDIS_SENTINEL_SSL. Per sentinel: {_sentinel_diagnosis(sentinel.sentinels)}"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"Redis Sentinel: master {cfg.master!r} was resolved but the startup PING failed. Check data-node "
+            f"auth (REDIS_USERNAME/PASSWORD), REDIS_DB, REDIS_SSL and REDIS_SSL_VERIFY. Detail: {exc}"
+        ) from exc
+    finally:
+        for c in (client, *sentinel.sentinels):
+            try:
+                c.close()
+            except Exception:
+                pass
+
+    logger.info("Redis connection verified via Sentinel (PING succeeded)")
+
+
+def _sentinel_client(cfg: _SentinelConfig) -> Any:
+    """The async client the Sentinel token store connects with.
+
+    ``master_for`` returns a ``redis.asyncio.Redis`` over a
+    ``SentinelConnectionPool``: every new connection asks the sentinels for the
+    current primary, and a ``READONLY`` reply from a demoted primary drops the
+    connection so the retry lands on the new one. The pool is built from the
+    caller's kwargs, not the ``Redis()`` defaults, so the retry policy has to
+    be passed explicitly — without it a failover surfaces as an error on the
+    first request that hits it.
+    """
+    from redis.asyncio.retry import Retry
+    from redis.asyncio.sentinel import Sentinel
+    from redis.backoff import ExponentialWithJitterBackoff
+
+    sentinel = Sentinel(
+        cfg.sentinels,
+        sentinel_kwargs=_sentinel_node_kwargs(cfg, _SENTINEL_SOCKET_TIMEOUT_SECONDS),
+        **_data_node_kwargs(cfg, _SENTINEL_SOCKET_TIMEOUT_SECONDS),
+    )
+    return sentinel.master_for(
+        cfg.master,
+        decode_responses=True,
+        retry=Retry(ExponentialWithJitterBackoff(base=1, cap=10), retries=3),
+    )
+
+
+def _warn_sentinel_overrides(*, redis_url: str | None, secret_arn: str | None) -> None:
+    """Log once that Sentinel mode is ignoring a URL / ElastiCache setting."""
+    global _sentinel_override_warned
+    ignored = [name for name, value in (("REDIS_URL", redis_url), ("ELASTICACHE_SECRET_ARN", secret_arn)) if value]
+    if not ignored or _sentinel_override_warned:
+        return
+    _sentinel_override_warned = True
+    logger.warning("REDIS_SENTINELS is set — Sentinel mode wins, %s ignored.", " and ".join(ignored))
+
+
+def _auth_kind(username: str | None, password: str | None) -> str:
+    """How a hop authenticates, for logging without the credentials."""
+    if username and password:
+        return "acl"
+    return "password" if password else "none"
+
+
 def build_token_store() -> Any:
     """Select and build the OAuth token store from environment variables.
 
@@ -155,6 +464,28 @@ def build_token_store() -> Any:
     redis_port = os.getenv("REDIS_PORT")
     password = os.getenv("REDIS_PASSWORD")
     secret_arn = os.getenv("ELASTICACHE_SECRET_ARN")
+
+    # 0. Redis behind a customer-run Sentinel
+    raw_sentinels = _env_str("REDIS_SENTINELS")
+    if raw_sentinels:
+        cfg = _sentinel_config(raw_sentinels)
+        _warn_sentinel_overrides(redis_url=redis_url, secret_arn=secret_arn)
+
+        _ping_redis_sentinel(cfg)
+        store = RedisStore(client=_sentinel_client(cfg))
+        logger.info(
+            "Token store: Redis Sentinel (master=%s, sentinels=%s, db=%s, ssl=%s, sentinel_ssl=%s, "
+            "ssl_verify=%s, auth=%s, sentinel_auth=%s)",
+            cfg.master,
+            cfg.describe_sentinels(),
+            cfg.db,
+            cfg.ssl,
+            cfg.sentinel_ssl,
+            cfg.ssl_verify,
+            _auth_kind(cfg.username, cfg.password),
+            _auth_kind(cfg.sentinel_username, cfg.sentinel_password),
+        )
+        return store
 
     # 1. Redis by connection URL
     if redis_url:
@@ -191,10 +522,15 @@ def build_token_store() -> Any:
         # REDIS_SSL defaults False here: plain Redis is the common case for
         # static-password deployments. Set REDIS_SSL=true for TLS-fronted Redis.
         use_ssl = _redis_ssl_enabled(default=False)
-        _ping_redis(redis_host, int(redis_port), password=password, ssl=use_ssl)
-        store = RedisStore(client=_redis_client(redis_host, int(redis_port), password=password, ssl=use_ssl))
+        # REDIS_USERNAME selects an ACL user; unset keeps the legacy AUTH <password>.
+        username = _env_str("REDIS_USERNAME")
+        _ping_redis(redis_host, int(redis_port), username=username, password=password, ssl=use_ssl)
+        store = RedisStore(
+            client=_redis_client(redis_host, int(redis_port), username=username, password=password, ssl=use_ssl)
+        )
         logger.info(
-            "Token store: Redis (auth=password, host=%s, port=%s, ssl=%s)",
+            "Token store: Redis (auth=%s, host=%s, port=%s, ssl=%s)",
+            _auth_kind(username, password),
             redis_host,
             redis_port,
             use_ssl,
