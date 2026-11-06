@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import yaml
 
-from plane_mcp.journey.yaml_formatter import (
+from plane_mcp.yaml_formatter import (
     FlowList,
     _clean_and_convert,
     format_as_yaml,
@@ -167,7 +167,7 @@ class TestFormatAsYaml:
         """On YAML dump failure, return original data unchanged."""
         bad_data = {"key": "value"}
         with patch(
-            "plane_mcp.journey.yaml_formatter.yaml.safe_dump",
+            "plane_mcp.yaml_formatter.yaml.dump",
             side_effect=Exception("boom"),
         ):
             result = format_as_yaml(bad_data)

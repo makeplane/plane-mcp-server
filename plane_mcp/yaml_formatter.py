@@ -132,8 +132,9 @@ def format_as_yaml(raw_data: Any) -> Any:
         cleaned_data = _clean_and_convert(raw_data)
         if not cleaned_data and cleaned_data != 0 and cleaned_data is not False:
             return "{}"
-        yaml_str = yaml.safe_dump(
+        yaml_str = yaml.dump(
             cleaned_data,
+            Dumper=InlineSafeDumper,
             allow_unicode=True,
             sort_keys=False,
             default_flow_style=False,

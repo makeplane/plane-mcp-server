@@ -10,9 +10,9 @@ from plane.models.work_items import CreateWorkItem
 
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
-from plane_mcp.journey.yaml_formatter import with_yaml
 from plane_mcp.resolver import EntityResolver
 from plane_mcp.sanitize import sanitize_html
+from plane_mcp.yaml_formatter import with_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +89,7 @@ class CreateUpdateJourney(JourneyBase):
     ) -> dict:
 
         if project_slug.lower() == "help":
-            from plane_mcp.journey.cache import get_cached_workspace_context
-
-            ctx = get_cached_workspace_context(0)
-            llm_content = {"projects": ctx.get("projects", []), "priorities": ctx.get("priorities", [])}
-            return llm_content
+            return self.get_workspace_help_context()
 
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()

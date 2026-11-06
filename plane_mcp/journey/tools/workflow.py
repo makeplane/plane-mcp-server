@@ -12,9 +12,9 @@ from plane.models.work_items import CreateWorkItemComment, UpdateWorkItem
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
 from plane_mcp.journey.lod import LODProfile
-from plane_mcp.journey.yaml_formatter import with_yaml
 from plane_mcp.resolver import EntityResolutionError, EntityResolver
 from plane_mcp.sanitize import sanitize_html
+from plane_mcp.yaml_formatter import with_yaml
 
 logger = logging.getLogger(__name__)
 

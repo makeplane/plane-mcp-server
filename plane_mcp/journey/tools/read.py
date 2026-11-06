@@ -8,8 +8,8 @@ from plane.models.query_params import RetrieveQueryParams
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
 from plane_mcp.journey.lod import LODProfile
-from plane_mcp.journey.yaml_formatter import with_yaml
 from plane_mcp.resolver import EntityResolver
+from plane_mcp.yaml_formatter import with_yaml
 
 
 class ReadJourney(JourneyBase):
@@ -28,12 +28,7 @@ class ReadJourney(JourneyBase):
         import json
 
         if project_slug.lower() == "help":
-            from plane_mcp.journey.cache import get_cached_workspace_context
-
-            opts = get_cached_workspace_context(0).copy()
-            llm_content = {"projects": opts.get("projects", []), "priorities": opts.get("priorities", [])}
-
-            return llm_content
+            return self.get_workspace_help_context()
 
         project_id = self.resolver.resolve_project(project_slug)
         client, workspace_slug = get_plane_client_context()
@@ -225,7 +220,7 @@ def register_read_tools(mcp: FastMCP) -> None:
         # Strip HTML tags from description fields in-place for clean human+machine output
         import re
 
-        _html_re = re.compile(r"<[^>]+")
+        _html_re = re.compile(r"<[^>]+>")
         for item in raw_data.get("results", []):
             if item.get("description"):
                 item["description"] = " ".join(_html_re.sub("", item["description"]).split()).strip()
