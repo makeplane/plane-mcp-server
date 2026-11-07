@@ -101,6 +101,38 @@ def test_resolve_project_evicts_stale_aliases_on_refresh(resolver, mock_client):
         resolver.resolve_project("OLD")
 
 
+def test_resolve_project_identifiers_take_precedence_over_names_and_slugs(resolver, mock_client):
+    """Verify canonical project identifiers are not overwritten by later projects' names or slugs."""
+    proj_a = MagicMock(id="proj-a", identifier="OPS", slug="operations")
+    proj_a.name = "Operations"
+    proj_b = MagicMock(id="proj-b", identifier="OPS2", slug="ops")
+    proj_b.name = "Ops"
+
+    mock_client.projects.list.return_value = MagicMock(
+        results=[proj_a, proj_b], next_cursor=None, next_page_results=False
+    )
+
+    assert resolver.resolve_project("OPS") == "proj-a"
+    assert resolver.resolve_project("OPS2") == "proj-b"
+
+
+def test_bound_cache_evicts_per_entry_timestamps(resolver, monkeypatch):
+    """Verify _bound_cache removes per-entry timestamps when evicting from page or ticket_context caches."""
+    monkeypatch.setattr(plane_mcp.resolver, "_MAX_CACHE_ENTRIES", 4)
+
+    for i in range(5):
+        key = f"workspace:page-{i}"
+        resolver._page_cache[key] = (f"id-{i}", None)
+        resolver._ts[f"page:{key}"] = 1000.0 + i
+
+    resolver._bound_cache(resolver._page_cache, ts_prefix="page")
+
+    assert "workspace:page-0" not in resolver._page_cache
+    assert "page:workspace:page-0" not in resolver._ts
+    assert "workspace:page-4" in resolver._page_cache
+    assert "page:workspace:page-4" in resolver._ts
+
+
 def test_resolve_state_success(resolver, mock_client):
     """Verify resolving workflow states by case-insensitive name and caching the result."""
     project_mock = MagicMock()
@@ -214,9 +246,14 @@ def test_resolve_ticket_context_sequence_and_uuid_resolution(resolver, mock_clie
     ticket_uuid = "33333333-3333-3333-3333-333333333333"
     mock_client.work_items._get.return_value = {"id": ticket_uuid}
 
-    # 1. Resolve by sequence ID
+    # 1. Resolve by sequence ID (and matching project_slug)
     wid, proj_id, proj_ident = resolver.resolve_ticket_context("ENG-42")
     assert (wid, proj_id, proj_ident) == (ticket_uuid, "proj-1", "ENG")
+    assert resolver.resolve_ticket_context("ENG-42", project_slug="ENG") == (ticket_uuid, "proj-1", "ENG")
+
+    # Mismatched project_slug for sequence ID raises EntityResolutionError
+    with pytest.raises(EntityResolutionError, match="belongs to project 'ENG', which does not match project_slug"):
+        resolver.resolve_ticket_context("ENG-42", project_slug="OPS")
 
     # 2. Subsequent UUID lookup uses cached context from sequence resolution
     assert resolver.resolve_ticket_context(ticket_uuid) == (ticket_uuid, "proj-1", "ENG")

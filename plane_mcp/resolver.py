@@ -117,13 +117,16 @@ class EntityResolver:
         self._template_body_cache = _GLOBAL_TEMPLATE_BODY_CACHE[self.workspace_slug]
         self._ts = _CACHE_LAST_UPDATED[self.workspace_slug]
 
-    def _bound_cache(self, cache: dict) -> None:
+    def _bound_cache(self, cache: dict[str, Any], ts_prefix: str | None = None) -> None:
         """Evict oldest quarter of entries when a cache exceeds _MAX_CACHE_ENTRIES."""
         if len(cache) > _MAX_CACHE_ENTRIES:
             evict_count = len(cache) // 4
             for _ in range(evict_count):
                 if cache:
-                    cache.pop(next(iter(cache)))
+                    oldest_key = next(iter(cache))
+                    cache.pop(oldest_key)
+                    if ts_prefix:
+                        self._ts.pop(f"{ts_prefix}:{oldest_key}", None)
 
     def _fetch_all_projects(self) -> list[Any]:
         """Fetch all projects across paginated responses from the Plane API."""
@@ -173,22 +176,24 @@ class EntityResolver:
         try:
             projects = self._fetch_all_projects()
             refreshed_cache: dict[str, str] = {}
+            identifier_map: dict[str, str] = {}
             available: list[str] = []
             for p in projects:
                 p_id = str(p.id)
                 identifier = getattr(p, "identifier", None)
                 if isinstance(identifier, str) and identifier:
-                    refreshed_cache[identifier.upper()] = p_id
+                    identifier_map[identifier.upper()] = p_id
                     available.append(identifier)
 
                 name = getattr(p, "name", None)
                 if isinstance(name, str) and name:
-                    refreshed_cache[name.upper()] = p_id
+                    refreshed_cache.setdefault(name.upper(), p_id)
 
                 slug = getattr(p, "slug", None)
                 if isinstance(slug, str) and slug:
-                    refreshed_cache[slug.upper()] = p_id
+                    refreshed_cache.setdefault(slug.upper(), p_id)
 
+            refreshed_cache.update(identifier_map)
             self._project_cache.clear()
             self._project_cache.update(refreshed_cache)
             self._ts["projects"] = time.time()
@@ -294,7 +299,7 @@ class EntityResolver:
             ctx_key = resolved_id.lower()
             self._ticket_context_cache[ctx_key] = (resolved_id, project_id, project_identifier)
             self._ts[f"ticket_ctx:{ctx_key}"] = now
-            self._bound_cache(self._ticket_context_cache)
+            self._bound_cache(self._ticket_context_cache, ts_prefix="ticket_ctx")
             return resolved_id
         except HttpError as e:
             if getattr(e, "status_code", None) == 404 or "404" in str(e):
@@ -363,13 +368,20 @@ class EntityResolver:
                 msg = f"Invalid ticket sequence in '{ticket_id}'. Must be a positive integer (e.g., 123)."
                 raise ValueError(msg) from None
 
-            project_id = self.resolve_project(project_slug or project_identifier)
+            project_id = self.resolve_project(project_identifier)
+            if project_slug:
+                explicit_project_id = self.resolve_project(project_slug)
+                if explicit_project_id != project_id:
+                    raise EntityResolutionError(
+                        f"Ticket '{ticket_id}' belongs to project '{project_identifier}', "
+                        f"which does not match project_slug '{project_slug}'."
+                    )
             work_item_id = self.resolve_ticket(val)
             ctx = (work_item_id, project_id, project_identifier)
             ctx_key = work_item_id.lower()
             self._ticket_context_cache[ctx_key] = ctx
             self._ts[f"ticket_ctx:{ctx_key}"] = time.time()
-            self._bound_cache(self._ticket_context_cache)
+            self._bound_cache(self._ticket_context_cache, ts_prefix="ticket_ctx")
             return ctx
 
         if project_slug:
@@ -380,7 +392,7 @@ class EntityResolver:
             ctx_key = val.lower()
             self._ticket_context_cache[ctx_key] = ctx
             self._ts[f"ticket_ctx:{ctx_key}"] = time.time()
-            self._bound_cache(self._ticket_context_cache)
+            self._bound_cache(self._ticket_context_cache, ts_prefix="ticket_ctx")
             return ctx
 
         cache_key = val.lower()
@@ -398,7 +410,7 @@ class EntityResolver:
                 ctx = (val, proj_id, proj_ident)
                 self._ticket_context_cache[cache_key] = ctx
                 self._ts[ts_key] = time.time()
-                self._bound_cache(self._ticket_context_cache)
+                self._bound_cache(self._ticket_context_cache, ts_prefix="ticket_ctx")
                 return ctx
         except Exception:
             pass
@@ -432,19 +444,13 @@ class EntityResolver:
                 continue
 
             item_id = item.get("id") if isinstance(item, dict) else getattr(item, "id", None)
-            if isinstance(item_id, (str, uuid.UUID)) and str(item_id).strip():
-                if str(item_id).strip().lower() != val.lower():
-                    continue
-            elif isinstance(item, dict):
-                if not item:
-                    continue
-            elif getattr(item, "_mock_new_name", None) == "()":
+            if not isinstance(item_id, (str, uuid.UUID)) or str(item_id).strip().lower() != val.lower():
                 continue
 
             ctx = (val, p_id, p_ident)
             self._ticket_context_cache[cache_key] = ctx
             self._ts[ts_key] = time.time()
-            self._bound_cache(self._ticket_context_cache)
+            self._bound_cache(self._ticket_context_cache, ts_prefix="ticket_ctx")
             return ctx
 
         raise EntityResolutionError(
@@ -504,7 +510,7 @@ class EntityResolver:
                 self._page_cache[cache_key] = res
                 self._ts[ts_key] = now
                 self._ts["pages"] = now
-                self._bound_cache(self._page_cache)
+                self._bound_cache(self._page_cache, ts_prefix="page")
                 return res
 
             scope_desc = f"project '{project_slug}'" if project_slug else "workspace"

@@ -152,7 +152,10 @@ class WorkflowJourney(JourneyBase):
 
             results[proj_identifier] = msg
 
-        response: dict[str, object] = {"status": "success", "details": results}
+        response: dict[str, object] = {
+            "status": "partial" if all_failed else "success",
+            "details": results,
+        }
         if all_failed:
             response["failed_transitions"] = all_failed
         return response
@@ -200,7 +203,7 @@ class WorkflowJourney(JourneyBase):
                 "status": "partial",
                 "comment_added": True,
                 "message": (
-                    f"Completion comment was added to {ticket_id}, but transitioning state failed: {e}. "
+                    f"Completion comment was added to {ticket_id}, but transitioning state failed. "
                     "Call transition_ticket directly to retry the state transition without duplicating the comment."
                 ),
             }

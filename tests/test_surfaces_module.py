@@ -10,7 +10,7 @@ os.environ["PLANE_BASE_URL"] = "https://api.plane.so"
 from unittest.mock import MagicMock, patch
 
 import pytest
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 from starlette.testclient import TestClient
 
 from plane_mcp.server import (
@@ -103,14 +103,20 @@ def test_surface_registry_compilation_and_caching():
     routes1, apps1 = reg.compile()
     assert routes1 and apps1
 
-    # Docs/agent-only registry omits the root "/" SSE fallback mount
-    mount_paths = [getattr(r, "path", "") for r in routes1]
-    assert "/" not in mount_paths
+    # Docs/agent-only registry omits the root "/" SSE fallback mount (Starlette normalizes Mount("/") to path == "")
+    root_mounts = [r for r in routes1 if isinstance(r, Mount) and r.path == ""]
+    assert root_mounts == []
 
     # Second call uses cache
     routes2, apps2 = reg.compile()
     assert routes1 is routes2
     assert apps1 is apps2
+
+    # Admin-enabled registry includes the root "/" SSE fallback mount
+    admin_reg = SurfaceRegistry(surfaces=[SurfaceSpec(name="admin", surface_type="admin")])
+    admin_routes, _ = admin_reg.compile()
+    admin_root_mounts = [r for r in admin_routes if isinstance(r, Mount) and r.path == ""]
+    assert len(admin_root_mounts) == 1
 
 
 def test_surface_registry_duplicate_signatures_and_warnings():

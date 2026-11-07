@@ -337,3 +337,36 @@ def test_link_doc_with_ticket_uuid(mock_get_ctx):
     mock_client.work_items.pages.create.assert_called_once()
     assert mock_client.work_items.pages.create.call_args.kwargs["project_id"] == proj_uuid
     assert mock_client.work_items.pages.create.call_args.kwargs["work_item_id"] == ticket_uuid
+
+
+@patch("plane_mcp.docs.tools.get_plane_client_context")
+def test_organize_docs_remove_page_validates_all_memberships_before_removing(mock_get_ctx):
+    """Verify remove_page validates all page memberships before calling remove on any page."""
+    mock_client = MagicMock()
+    mock_get_ctx.return_value = (mock_client, "test-ws-organize-atomic")
+
+    coll_uuid = "11111111-2222-3333-4444-555555555555"
+    valid_page_uuid = "66666666-7777-8888-9999-000000000000"
+    non_member_page_uuid = "77777777-8888-9999-0000-111111111111"
+    membership_uuid = "99999999-8888-7777-6666-555555555555"
+
+    mock_client.collections.pages.list.return_value = MagicMock(
+        results=[{"page_collection_id": membership_uuid, "page": {"id": valid_page_uuid, "name": "Runbook"}}],
+        next_cursor=None,
+        next_page_results=False,
+    )
+    mock_client.pages.retrieve_workspace_page.return_value = {"id": non_member_page_uuid, "name": "Unfiled"}
+
+    mcp = FastMCP("test-docs")
+    register_docs_tools(mcp)
+    organize_fn = asyncio.run(mcp.get_tool("organize_docs")).fn
+
+    res = organize_fn(
+        target="collection",
+        action="remove_page",
+        name_or_id=coll_uuid,
+        pages=[valid_page_uuid, non_member_page_uuid],
+    )
+    assert "status: error" in res
+    assert non_member_page_uuid in res
+    mock_client.collections.pages.remove.assert_not_called()

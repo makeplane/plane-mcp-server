@@ -85,7 +85,7 @@ def _resolve_ticket_and_project(
             try:
                 wi = client.work_items.retrieve(workspace_slug=workspace_slug, project_id=p_id, work_item_id=wid)
                 wi_id = _get_str_attr(wi, "id")
-                if wi is not None and wi_id is not None:
+                if wi is not None and wi_id is not None and wi_id.lower() == wid.lower():
                     return wid, p_id, p_ident or p_id
             except Exception:
                 continue
@@ -738,6 +738,7 @@ def register_docs_tools(mcp: FastMCP) -> None:
             if action == "remove_page":
                 if not pages:
                     return {"status": "error", "message": "remove_page requires pages list"}
+                memberships: list[str] = []
                 for p in pages:
                     page_id, _ = resolver.resolve_page(p)
                     membership_id = _resolve_collection_membership_id(client, workspace_slug, coll_id, page_id)
@@ -746,10 +747,12 @@ def register_docs_tools(mcp: FastMCP) -> None:
                             "status": "error",
                             "message": f"Page '{p}' is not a member of collection '{name_or_id}'",
                         }
+                    memberships.append(str(membership_id))
+                for membership_id in memberships:
                     client.collections.pages.remove(
                         workspace_slug=workspace_slug,
                         collection_id=coll_id,
-                        page_collection_id=str(membership_id),
+                        page_collection_id=membership_id,
                     )
                 return {"collection_id": coll_id, "pages_removed": pages, "status": "pages_removed"}
 

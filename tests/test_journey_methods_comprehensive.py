@@ -645,7 +645,7 @@ def test_begin_work_partial_transition_failure_continues_and_reports(mock_get_co
 
     result = journey.begin_work(["TEST-1", "TEST-2"], "Sprint 3")
 
-    assert result["status"] == "success"
+    assert result["status"] == "partial"
     assert mock_client.work_items.update.call_count == 2
     assert "failed_transitions" in result
     assert result["failed_transitions"] == ["TEST-1"]
@@ -673,5 +673,6 @@ def test_complete_work_update_failure_after_comment_returns_partial(mock_get_con
     assert result["issue_key"] == "TEST-1"
     assert result["comment_added"] is True
     assert "transition_ticket" in result["message"]
+    assert "502 Bad Gateway" not in result["message"]
     mock_client.work_items.comments.create.assert_called_once()
     mock_client.work_items.update.assert_called_once()

@@ -134,7 +134,7 @@ def test_markdown_or_html_to_safe_html_constructs():
     """Verify markdown_or_html_to_safe_html renders Markdown blocks and inline syntax before sanitizing."""
     md_input = (
         "# Heading 1\n\n"
-        "**bold** and *italic* and ~~strike~~ and `code` and [Site](https://example.com)\n\n"
+        "**bold** and *italic* and ~~strike~~ and `code` and `__init__` and `a*b*c` and [Site](https://example.com)\n\n"
         "- item one\n- item two\n\n"
         "1. first\n2. second\n\n"
         "> quoted line\n\n"
@@ -146,6 +146,8 @@ def test_markdown_or_html_to_safe_html_constructs():
     assert "<em>italic</em>" in html_out
     assert "<del>strike</del>" in html_out
     assert "<code>code</code>" in html_out
+    assert "<code>__init__</code>" in html_out
+    assert "<code>a*b*c</code>" in html_out
     assert 'href="https://example.com"' in html_out
     assert "<ul><li>item one</li><li>item two</li></ul>" in html_out
     assert "<ol><li>first</li><li>second</li></ol>" in html_out

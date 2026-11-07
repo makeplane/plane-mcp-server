@@ -80,8 +80,15 @@ def sanitize_html(html_str: str | None) -> str | None:
 
 def _render_inline_markdown(text: str) -> str:
     """Render common inline Markdown formatting on HTML-escaped text."""
-    escaped = html_lib.escape(text)
-    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    escaped = html_lib.escape(text.replace("\x00", ""))
+    code_spans: list[str] = []
+
+    def _stash_code(match: re.Match[str]) -> str:
+        """Stash an inline code span and return a collision-safe placeholder."""
+        code_spans.append(match.group(1))
+        return f"\x00CODE{len(code_spans) - 1}\x00"
+
+    escaped = re.sub(r"`([^`]+)`", _stash_code, escaped)
     escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
     escaped = re.sub(r"__(.+?)__", r"<strong>\1</strong>", escaped)
     escaped = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", escaped)
@@ -92,7 +99,11 @@ def _render_inline_markdown(text: str) -> str:
         r'<a href="\2">\1</a>',
         escaped,
     )
-    return escaped
+    return re.sub(
+        r"\x00CODE(\d+)\x00",
+        lambda m: f"<code>{code_spans[int(m.group(1))]}</code>",
+        escaped,
+    )
 
 
 def _render_markdown_block(block: str) -> str:
