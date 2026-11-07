@@ -228,7 +228,7 @@ def _resolve_collection_membership_id(
         try:
             filed = client.pages.retrieve_workspace_page(workspace_slug=workspace_slug, page_id=resolved_page_id)
             pc_id = _get_str_attr(filed, "page_collection_id")
-            if pc_id:
+            if pc_id and (_get_str_attr(filed, "collection_id") or "").lower() == coll_id.lower():
                 return pc_id
         except Exception:
             pass

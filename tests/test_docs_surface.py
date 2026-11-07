@@ -355,7 +355,12 @@ def test_organize_docs_remove_page_validates_all_memberships_before_removing(moc
         next_cursor=None,
         next_page_results=False,
     )
-    mock_client.pages.retrieve_workspace_page.return_value = {"id": non_member_page_uuid, "name": "Unfiled"}
+    mock_client.pages.retrieve_workspace_page.return_value = {
+        "id": non_member_page_uuid,
+        "name": "Filed In Other Collection",
+        "collection_id": "99999999-9999-9999-9999-999999999999",
+        "page_collection_id": "pc-other-coll-1",
+    }
 
     mcp = FastMCP("test-docs")
     register_docs_tools(mcp)
