@@ -9,6 +9,7 @@ from plane_mcp.yaml_formatter import format_as_yaml
 
 
 def test_validate_identifier_rejections():
+    """Verify validate_identifier rejects null bytes, control chars, path traversal, and invalid lengths."""
     # Null bytes
     with pytest.raises(ValueError, match="invalid control characters or null bytes"):
         validate_identifier("ENG" + chr(0) + "1", "ticket_id")
@@ -31,6 +32,7 @@ def test_validate_identifier_rejections():
 
 
 def test_sanitize_html_xss_protection():
+    """Verify sanitize_html strips script tags, event handlers, and javascript: URIs."""
     dirty = '<script>alert(1)</script><img src=x onerror="alert(2)"><a href="javascript:alert(3)">link</a>'
     clean = sanitize_html(dirty)
     assert "<script>" not in clean
@@ -40,6 +42,7 @@ def test_sanitize_html_xss_protection():
 
 
 def test_snippet_editing_rejections():
+    """Verify apply_snippet_edits rejects missing, ambiguous, and whitespace-only snippets."""
     current_html = "<p>Task A: Todo</p><p>Task B: Done</p>"
 
     # Missing snippet
@@ -57,6 +60,7 @@ def test_snippet_editing_rejections():
 
 
 def test_yaml_formatter_safe_injection_resistance():
+    """Verify format_as_yaml safely quotes strings containing YAML injection payloads."""
     malicious = {
         "labels": ["feat", "admin: true # injected\nmalicious: [1, 2]"],
         "normal": "safe",
@@ -69,6 +73,7 @@ def test_yaml_formatter_safe_injection_resistance():
 
 
 def test_yaml_formatter_anchor_alias_suppression():
+    """Verify format_as_yaml suppresses YAML anchors (&id) and aliases (*id) for shared objects."""
     shared_list = ["apple", "banana"]
     data = {
         "basket1": shared_list,

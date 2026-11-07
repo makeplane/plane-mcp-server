@@ -23,7 +23,10 @@ from plane_mcp.yaml_formatter import (
 
 
 class TestFlowList:
+    """Tests for the FlowList inline YAML sequence subclass."""
+
     def test_flow_list_is_list(self):
+        """Verify FlowList instances behave as standard Python lists."""
         fl = FlowList([1, 2, 3])
         assert isinstance(fl, list)
         assert fl == [1, 2, 3]
@@ -49,31 +52,38 @@ class TestFlowList:
 
 
 class TestCleanAndConvert:
+    """Tests for _clean_and_convert recursive dict/list pruning."""
+
     def test_strips_none_values(self):
+        """Verify None values are removed from dictionaries."""
         data = {"a": 1, "b": None, "c": "hello"}
         result = _clean_and_convert(data)
         assert "b" not in result
         assert result["a"] == 1
 
     def test_strips_empty_strings(self):
+        """Verify empty string values are removed from dictionaries."""
         data = {"a": "", "b": "text"}
         result = _clean_and_convert(data)
         assert "a" not in result
         assert result["b"] == "text"
 
     def test_strips_empty_lists(self):
+        """Verify empty list values are removed and non-empty lists become FlowList."""
         data = {"a": [], "b": [1, 2]}
         result = _clean_and_convert(data)
         assert "a" not in result
         assert isinstance(result["b"], FlowList)
 
     def test_strips_empty_dicts(self):
+        """Verify empty dict values are removed from dictionaries."""
         data = {"a": {}, "b": {"key": "val"}}
         result = _clean_and_convert(data)
         assert "a" not in result
         assert result["b"] == {"key": "val"}
 
     def test_preserves_false_and_zero(self):
+        """Verify boolean False and numeric 0 are preserved."""
         data = {"a": False, "b": 0, "c": None}
         result = _clean_and_convert(data)
         assert result["a"] is False
@@ -81,11 +91,13 @@ class TestCleanAndConvert:
         assert "c" not in result
 
     def test_converts_lists_to_flow_list(self):
+        """Verify primitive lists are converted to FlowList."""
         data = {"tags": ["x", "y"]}
         result = _clean_and_convert(data)
         assert isinstance(result["tags"], FlowList)
 
     def test_nested_cleaning(self):
+        """Verify nested dictionaries and lists are recursively cleaned."""
         data = {"outer": {"keep": "yes", "drop": None, "nested_list": ["a", "b"], "empty_nested": {}}}
         result = _clean_and_convert(data)
         assert "drop" not in result["outer"]
@@ -94,7 +106,10 @@ class TestCleanAndConvert:
 
 
 class TestFormatAsYaml:
+    """Tests for format_as_yaml serialization."""
+
     def test_basic_dict(self):
+        """Verify basic dictionary serialization to YAML."""
         data = {"issue_key": "TEST-999", "title": "Hello"}
         result = format_as_yaml(data)
         assert isinstance(result, str)
@@ -134,6 +149,7 @@ class TestFormatAsYaml:
         assert "description: |" in result or "description: |\n" in result
 
     def test_strips_empty_values(self):
+        """Verify None, empty strings, and empty lists are omitted from YAML output."""
         data = {"a": 1, "b": None, "c": "", "d": [], "e": "keep"}
         result = format_as_yaml(data)
         assert "b:" not in result
@@ -143,11 +159,13 @@ class TestFormatAsYaml:
         assert "e: keep" in result
 
     def test_passthrough_primitive(self):
+        """Verify primitive non-JSON inputs are returned unchanged."""
         assert format_as_yaml("hello") == "hello"
         assert format_as_yaml(42) == 42
         assert format_as_yaml(None) is None
 
     def test_list_input(self):
+        """Verify list-of-dicts inputs are serialized to YAML."""
         data = [{"a": 1}, {"b": 2}]
         result = format_as_yaml(data)
         assert isinstance(result, str)
@@ -175,9 +193,14 @@ class TestFormatAsYaml:
 
 
 class TestWithYamlDecorator:
+    """Tests for the @with_yaml decorator."""
+
     def test_wraps_dict_return(self):
+        """Verify @with_yaml converts dict return values to YAML strings."""
+
         @with_yaml
         def my_tool():
+            """Return sample dict."""
             return {"issue_key": "TEST-1", "title": "Hello"}
 
         result = my_tool()
@@ -185,22 +208,30 @@ class TestWithYamlDecorator:
         assert "issue_key: TEST-1" in result
 
     def test_wraps_list_return(self):
+        """Verify @with_yaml converts list return values to YAML strings."""
+
         @with_yaml
         def my_tool():
+            """Return sample list."""
             return [{"a": 1}]
 
         result = my_tool()
         assert isinstance(result, str)
 
     def test_passthrough_string_return(self):
+        """Verify @with_yaml passes through plain strings unchanged."""
+
         @with_yaml
         def my_tool():
+            """Return plain string."""
             return "already a string"
 
         result = my_tool()
         assert result == "already a string"
 
     def test_preserves_function_name(self):
+        """Verify @with_yaml preserves wrapped function __name__ and __doc__."""
+
         @with_yaml
         def my_cool_tool():
             """Docstring."""
@@ -214,6 +245,7 @@ class TestEndToEndFormat:
     """Integration-style test matching the user's exact example format."""
 
     def test_user_example_format(self):
+        """Verify end-to-end YAML formatting of issue_key, flow labels, and multiline description."""
         data = {
             "issue_key": "TEST-999",
             "labels": ["foo", "bar", "baz", "buzz bing", "pow,bangboom"],

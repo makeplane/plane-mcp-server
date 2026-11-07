@@ -10,6 +10,7 @@ from plane_mcp.journey.lod import LODProfile, apply_lod, inject_sequence_id
 
 @pytest.fixture
 def mock_issue():
+    """Return a representative work item dictionary with verbose metadata for LOD tests."""
     return {
         "id": "uuid-123",
         "name": "Test Issue",
@@ -122,8 +123,11 @@ def test_with_lod_decorator(mock_issue):
     """Test the @with_lod decorator."""
 
     class MyJourney(JourneyBase):
+        """Sample JourneyBase subclass for testing @with_lod."""
+
         @with_lod(profile=LODProfile.SUMMARY)
         def get_ticket(self, ticket_id):
+            """Return the mock issue payload."""
             return mock_issue
 
     resolver = Mock()

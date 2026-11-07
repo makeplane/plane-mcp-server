@@ -17,6 +17,7 @@ from plane_mcp.sanitize import (
 
 
 def test_validate_identifier_and_uuid_branches():
+    """Verify UUID validation and identifier type and path traversal branches."""
     assert is_valid_uuid("11111111-1111-1111-1111-111111111111")
     assert not is_valid_uuid("not-a-uuid")
     assert not is_valid_uuid(None)
@@ -30,6 +31,7 @@ def test_validate_identifier_and_uuid_branches():
 
 
 def test_sanitize_html_edge_cases():
+    """Verify sanitize_html, markdown_or_html_to_safe_html, and html_to_clean_markdown edge cases."""
     assert sanitize_html(None) is None
     assert sanitize_html("") == ""
 
@@ -50,6 +52,7 @@ def test_sanitize_html_edge_cases():
 
 
 def test_apply_snippet_edits_exhaustive():
+    """Verify all branches of apply_snippet_edits including entities, anchors, and rejections."""
     current = "<p>Title</p><p>Section A</p>"
 
     # Neither replace nor append
@@ -87,6 +90,7 @@ def test_apply_snippet_edits_exhaustive():
 
 
 def test_resolver_exhaustive_branches():
+    """Verify EntityResolver cache bounding, UUID passthrough, and entity resolution branches."""
     mock_client = MagicMock()
     resolver = EntityResolver(mock_client, "test-ws")
 
@@ -155,6 +159,7 @@ def test_resolver_exhaustive_branches():
 
 @patch("plane_mcp.docs.tools.get_plane_client_context")
 def test_docs_tools_exhaustive_actions(mock_get_ctx):
+    """Verify search_docs, link_doc, organize_docs, and update_doc action branches."""
     mock_client = MagicMock()
     mock_get_ctx.return_value = (mock_client, "test-ws")
 

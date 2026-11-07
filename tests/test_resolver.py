@@ -221,10 +221,14 @@ def test_resolve_ticket_not_found(resolver, mock_client):
     mock_client.projects.list.return_value = mock_proj_resp
 
     class MockHttpError(HttpError):
+        """Mock Plane SDK HttpError returning HTTP 404."""
+
         def __init__(self):
+            """Initialize with HTTP 404 status code."""
             self.status_code = 404
 
         def __str__(self):
+            """Return string representation of HTTP 404."""
             return "404 Not Found"
 
     mock_client.work_items._get.side_effect = MockHttpError()
