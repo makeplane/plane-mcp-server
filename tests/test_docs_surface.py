@@ -376,6 +376,33 @@ def test_organize_docs_remove_page_validates_all_memberships_before_removing(moc
     assert non_member_page_uuid in res
     mock_client.collections.pages.remove.assert_not_called()
 
+    # Positive fallback: collection listing omits the page, but retrieve_workspace_page returns matching collection_id
+    fallback_page_uuid = "88888888-9999-0000-1111-222222222222"
+    fallback_membership_id = "pc-fallback-match-1"
+    mock_client.collections.pages.list.return_value = MagicMock(
+        results=[],
+        next_cursor=None,
+        next_page_results=False,
+    )
+    mock_client.pages.retrieve_workspace_page.return_value = {
+        "id": fallback_page_uuid,
+        "name": "Filed In Target Collection",
+        "collection_id": coll_uuid,
+        "page_collection_id": fallback_membership_id,
+    }
+    res_fallback = organize_fn(
+        target="collection",
+        action="remove_page",
+        name_or_id=coll_uuid,
+        pages=[fallback_page_uuid],
+    )
+    assert "pages_removed" in res_fallback
+    mock_client.collections.pages.remove.assert_called_once_with(
+        workspace_slug="test-ws-organize-atomic",
+        collection_id=coll_uuid,
+        page_collection_id=fallback_membership_id,
+    )
+
 
 @patch("plane_mcp.docs.tools.get_plane_client_context")
 def test_organize_docs_remove_page_by_title_with_duplicate_unfiled_page(mock_get_ctx):
