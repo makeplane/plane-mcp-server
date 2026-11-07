@@ -370,3 +370,50 @@ def test_organize_docs_remove_page_validates_all_memberships_before_removing(moc
     assert "status: error" in res
     assert non_member_page_uuid in res
     mock_client.collections.pages.remove.assert_not_called()
+
+
+@patch("plane_mcp.docs.tools.get_plane_client_context")
+def test_organize_docs_remove_page_by_title_with_duplicate_unfiled_page(mock_get_ctx):
+    """Verify remove_page resolves page titles within the target collection even if an unfiled page shares the title."""
+    mock_client = MagicMock()
+    mock_get_ctx.return_value = (mock_client, "test-ws-dup-title")
+
+    coll_uuid = "11111111-2222-3333-4444-555555555555"
+    coll_obj = MagicMock(id=coll_uuid)
+    coll_obj.name = "Engineering"
+    mock_client.collections.list.return_value = MagicMock(results=[coll_obj])
+
+    coll_page_id = "66666666-7777-8888-9999-000000000001"
+    unfiled_page_id = "66666666-7777-8888-9999-000000000002"
+    p_in_coll = MagicMock(id=coll_page_id)
+    p_in_coll.name = "Runbook"
+    p_unfiled = MagicMock(id=unfiled_page_id)
+    p_unfiled.name = "Runbook"
+    mock_client.pages.list_workspace_pages.return_value = MagicMock(
+        results=[p_in_coll, p_unfiled],
+        next_cursor=None,
+        next_page_results=False,
+    )
+
+    mock_client.collections.pages.list.return_value = MagicMock(
+        results=[{"page_collection_id": "pc-runbook-1", "page": {"id": coll_page_id, "name": "Runbook"}}],
+        next_cursor=None,
+        next_page_results=False,
+    )
+
+    mcp = FastMCP("test-docs")
+    register_docs_tools(mcp)
+    organize_fn = asyncio.run(mcp.get_tool("organize_docs")).fn
+
+    res = organize_fn(
+        target="collection",
+        action="remove_page",
+        name_or_id="Engineering",
+        pages=["Runbook"],
+    )
+    assert "pages_removed" in res
+    mock_client.collections.pages.remove.assert_called_once_with(
+        workspace_slug="test-ws-dup-title",
+        collection_id=coll_uuid,
+        page_collection_id="pc-runbook-1",
+    )

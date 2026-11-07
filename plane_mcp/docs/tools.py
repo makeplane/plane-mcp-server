@@ -9,7 +9,7 @@ from fastmcp import FastMCP
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.docs.lod import DocsLOD, apply_doc_lod
 from plane_mcp.journey.base import mcp_error_boundary
-from plane_mcp.resolver import EntityResolver, is_valid_uuid
+from plane_mcp.resolver import EntityResolver, is_valid_uuid, validate_identifier
 from plane_mcp.sanitize import apply_snippet_edits, markdown_or_html_to_safe_html
 from plane_mcp.yaml_formatter import with_yaml
 
@@ -144,13 +144,19 @@ def _resolve_collection_membership_id(
     client: Any,
     workspace_slug: str,
     coll_id: str,
-    page_id: str,
+    page_identifier: str,
+    resolver: EntityResolver | None = None,
 ) -> str | None:
-    """Resolve the page_collection_id membership row UUID for a page inside a collection."""
+    """Resolve the page_collection_id membership row UUID for a page title or UUID inside a collection."""
     from plane.models.query_params import CollectionPageQueryParams
+
+    val = validate_identifier(page_identifier, "page", max_len=255)
+    val_is_uuid = is_valid_uuid(val)
 
     cursor: str | None = None
     seen_cursors: set[str] = set()
+    collected_items: list[tuple[str | None, str | None, str | None]] = []
+
     while True:
         coll_pages = (
             client.collections.pages.list(workspace_slug=workspace_slug, collection_id=coll_id)
@@ -173,11 +179,26 @@ def _resolve_collection_membership_id(
                 item_page_id = _get_str_attr(item, "page_id")
             item_id = _get_str_attr(item, "id")
             pc_id = _get_str_attr(item, "page_collection_id")
+            item_name = (
+                _get_str_attr(item, "name")
+                or (
+                    _get_str_attr(item_page, "name")
+                    if item_page is not None and not isinstance(item_page, str)
+                    else None
+                )
+                or _get_str_attr(item, "title")
+            )
+            collected_items.append((item_page_id, item_id, pc_id))
 
-            if item_page_id == str(page_id) or item_id == str(page_id):
-                membership = pc_id or item_id
-                if membership:
+            membership = pc_id or item_id
+            if not membership:
+                continue
+
+            if val_is_uuid:
+                if val.lower() in {str(x).lower() for x in (item_page_id, item_id, pc_id) if x}:
                     return membership
+            elif item_name and item_name.strip().lower() == val.lower():
+                return membership
 
         next_cursor = _get_str_attr(coll_pages, "next_cursor")
         next_page_results = getattr(
@@ -191,13 +212,26 @@ def _resolve_collection_membership_id(
         else:
             break
 
-    try:
-        filed = client.pages.retrieve_workspace_page(workspace_slug=workspace_slug, page_id=page_id)
-        pc_id = _get_str_attr(filed, "page_collection_id")
-        if pc_id:
-            return pc_id
-    except Exception:
-        pass
+    resolved_page_id: str | None = val if val_is_uuid else None
+    if resolved_page_id is None and resolver is not None:
+        try:
+            resolved_page_id, _ = resolver.resolve_page(val)
+        except Exception:
+            resolved_page_id = None
+
+    if resolved_page_id:
+        for item_page_id, item_id, pc_id in collected_items:
+            if resolved_page_id.lower() in {str(x).lower() for x in (item_page_id, item_id) if x}:
+                membership = pc_id or item_id
+                if membership:
+                    return membership
+        try:
+            filed = client.pages.retrieve_workspace_page(workspace_slug=workspace_slug, page_id=resolved_page_id)
+            pc_id = _get_str_attr(filed, "page_collection_id")
+            if pc_id:
+                return pc_id
+        except Exception:
+            pass
 
     return None
 
@@ -740,8 +774,9 @@ def register_docs_tools(mcp: FastMCP) -> None:
                     return {"status": "error", "message": "remove_page requires pages list"}
                 memberships: list[str] = []
                 for p in pages:
-                    page_id, _ = resolver.resolve_page(p)
-                    membership_id = _resolve_collection_membership_id(client, workspace_slug, coll_id, page_id)
+                    membership_id = _resolve_collection_membership_id(
+                        client, workspace_slug, coll_id, p, resolver=resolver
+                    )
                     if not membership_id:
                         return {
                             "status": "error",
