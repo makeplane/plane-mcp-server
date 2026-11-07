@@ -41,27 +41,42 @@ from plane_mcp.yaml_formatter import (
 
 
 class DummyWithGoodModelDump:
+    """Dummy model implementing a working model_dump method."""
+
     def model_dump(self, mode="json"):
+        """Return a valid dictionary payload."""
         return {"id": "good-1", "name": "GoodModel", "description_html": "<p>Good</p>"}
 
 
 class DummyWithBrokenModelDump:
+    """Dummy model raising RuntimeError from model_dump."""
+
     def model_dump(self, mode="json"):
+        """Raise RuntimeError to test fallback handling."""
         raise RuntimeError("model_dump failed")
 
 
 class DummyWithDictMethod:
+    """Dummy model implementing a working legacy dict method."""
+
     def dict(self):
+        """Return a valid dictionary payload."""
         return {"id": "d-1", "name": "DictModel", "description_html": "<p>Dict</p>"}
 
 
 class DummyWithBrokenDict:
+    """Dummy model raising RuntimeError from dict."""
+
     def dict(self):
+        """Raise RuntimeError to test fallback handling."""
         raise RuntimeError("dict failed")
 
 
 class DummyPlainObject:
+    """Plain object with attributes and no serialization methods."""
+
     def __init__(self):
+        """Initialize plain object attributes."""
         self.id = "p-plain"
         self.name = "Plain"
         self.description_html = "Plain text"
@@ -75,6 +90,7 @@ class DummyPlainObject:
 
 
 def test_docs_lod_edge_cases():
+    """Verify apply_doc_lod handles model_dump, dict, broken methods, and plain attribute objects."""
     # Good model_dump returning dict
     good_md = DummyWithGoodModelDump()
     res_g = apply_doc_lod(good_md)
@@ -108,6 +124,7 @@ def test_docs_lod_edge_cases():
 
 
 def test_sanitize_edge_cases():
+    """Verify html_to_clean_markdown fallback and apply_snippet_edits HTML entity matching."""
     # Exception inside html_to_clean_markdown
     with patch("plane_mcp.sanitize.md", side_effect=RuntimeError("md engine crash")):
         fallback = html_to_clean_markdown("<b>Fallback HTML</b>")
@@ -145,6 +162,7 @@ def test_sanitize_edge_cases():
 
 
 def test_yaml_formatter_edge_cases():
+    """Verify InlineSafeDumper alias suppression, model serialization helpers, and empty dict formatting."""
     # InlineSafeDumper.ignore_aliases
     dumper = InlineSafeDumper(stream=MagicMock())
     assert dumper.ignore_aliases({"a": 1}) is True
@@ -169,6 +187,7 @@ def test_yaml_formatter_edge_cases():
 
 @pytest.mark.asyncio
 async def test_yaml_output_middleware_exhaustive():
+    """Verify YamlOutputMiddleware converts TextContent and raw dictionaries while preserving non-text blocks."""
     middleware = YamlOutputMiddleware()
     ctx = MagicMock()
 
@@ -180,6 +199,7 @@ async def test_yaml_output_middleware_exhaustive():
     )
 
     async def call_next_mixed(_):
+        """Return mixed ToolResult content."""
         return result_with_mixed
 
     res1 = await middleware.on_call_tool(ctx, call_next_mixed)
@@ -189,6 +209,7 @@ async def test_yaml_output_middleware_exhaustive():
 
     # Case 2: call_next returns non-ToolResult (raw dict)
     async def call_next_raw(_):
+        """Return raw dictionary payload."""
         return {"status": "ok", "items": ["a", "b"]}
 
     res2 = await middleware.on_call_tool(ctx, call_next_raw)
@@ -203,6 +224,7 @@ async def test_yaml_output_middleware_exhaustive():
 
 
 def test_resolver_exceptions_and_edge_branches():
+    """Verify EntityResolver error handling and caching across projects, states, tickets, pages, and templates."""
     mock_client = MagicMock()
     resolver = EntityResolver(mock_client, "test-ws")
 
@@ -308,6 +330,7 @@ def test_resolver_exceptions_and_edge_branches():
 
 @patch("plane_mcp.docs.tools.get_plane_client_context")
 def test_docs_tools_exhaustive_branches(mock_get_ctx):
+    """Verify docs tools handle project scoping, snippet errors, attach/detach validation, and organization."""
     mock_client = MagicMock()
     mock_get_ctx.return_value = (mock_client, "test-ws")
 
@@ -458,11 +481,12 @@ def test_docs_tools_exhaustive_branches(mock_get_ctx):
     assert "requires name_or_id" in res_tmpl_noname
 
     # organize_docs: unsupported target/action combination
-    res_org_unsupp = organize_fn(target="template", action="create")
+    res_org_unsupp = organize_fn(target="template", action="add_pages")
     assert "Unsupported combination" in res_org_unsupp
 
 
 def test_server_stdio_and_redirect_uris(monkeypatch):
+    """Verify get_allowed_client_redirect_uris and get_stdio_mcp across all supported surfaces."""
     from plane_mcp.server import get_allowed_client_redirect_uris, get_stdio_mcp
 
     # Test get_allowed_client_redirect_uris with extra URIs

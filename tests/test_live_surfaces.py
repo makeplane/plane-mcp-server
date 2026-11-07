@@ -1,3 +1,5 @@
+"""Live HTTP surface tests for multi-surface Plane MCP routing, OAuth discovery, and tool handshakes."""
+
 import json
 import os
 from unittest.mock import patch
@@ -15,18 +17,42 @@ from plane_mcp.__main__ import create_app
 
 @pytest.fixture
 def client():
+    """Yield a TestClient wrapping a freshly created multi-surface Starlette app."""
     # Fresh app per test to avoid StreamableHTTPSessionManager single-run reuse limitation
     app_instance = create_app()
     with TestClient(app_instance) as test_client:
         yield test_client
 
 
-def test_well_known_oauth_endpoints(client):
+def test_well_known_oauth_endpoints(client, monkeypatch):
+    """Verify root and per-mount RFC 8414/9728 OAuth discovery endpoints return surface-specific URLs."""
     res = client.get("/.well-known/oauth-authorization-server")
     assert res.status_code == 200
 
+    # Per-mount protected resource & authorization server metadata for /mcp/docs/mcp and /docs/mcp
+    res_pr_mcp_docs = client.get("/.well-known/oauth-protected-resource/mcp/docs/mcp")
+    assert res_pr_mcp_docs.status_code == 200
+    pr_data = res_pr_mcp_docs.json()
+    assert pr_data["resource"].endswith("/mcp/docs/mcp")
+    assert any(str(s).rstrip("/").endswith("/mcp/docs") for s in pr_data["authorization_servers"])
+
+    res_as_mcp_docs = client.get("/.well-known/oauth-authorization-server/mcp/docs")
+    assert res_as_mcp_docs.status_code == 200
+    as_data = res_as_mcp_docs.json()
+    assert as_data["authorization_endpoint"].endswith("/mcp/docs/authorize")
+
+    # Verify PLANE_OAUTH_PROVIDER_ISSUER_URL still scopes issuer per mounted surface path
+    monkeypatch.setenv("PLANE_OAUTH_PROVIDER_ISSUER_URL", "https://plane.example.com")
+    with TestClient(create_app()) as custom_client:
+        res_pr_issuer = custom_client.get("/.well-known/oauth-protected-resource/mcp/docs/mcp")
+        assert res_pr_issuer.status_code == 200
+        issuer_pr_data = res_pr_issuer.json()
+        auth_servers = [str(s).rstrip("/") for s in issuer_pr_data["authorization_servers"]]
+        assert "https://plane.example.com/mcp/docs" in auth_servers
+
 
 def test_unauthenticated_api_key_header_rejection(client):
+    """Verify unauthenticated requests to API-key surfaces are rejected with 401 or 403."""
     res_admin = client.post("/admin/api-key/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize"})
     assert res_admin.status_code in (401, 403)
 
@@ -38,6 +64,7 @@ def test_unauthenticated_api_key_header_rejection(client):
 
 
 def parse_sse_or_json(response):
+    """Parse an SSE event-stream or JSON HTTP response into a decoded object."""
     text = response.text
     if text.startswith("event:"):
         for line in text.splitlines():
@@ -48,6 +75,7 @@ def parse_sse_or_json(response):
 
 @patch("plane_mcp.auth.plane_header_auth_provider.PlaneHeaderAuthProvider._validate_api_key", return_value=True)
 def test_authenticated_initialize_handshake(mock_validate, client):
+    """Verify authenticated MCP initialize handshakes succeed across all surfaces and aliases."""
     headers = {
         "Authorization": "Bearer test-pat-token",
         "X-Workspace-Slug": "test-workspace",
@@ -100,6 +128,7 @@ def test_authenticated_initialize_handshake(mock_validate, client):
 
 @patch("plane_mcp.auth.plane_header_auth_provider.PlaneHeaderAuthProvider._validate_api_key", return_value=True)
 def test_surface_tools_list(mock_validate, client):
+    """Verify tools/list returns the isolated tool catalogue expected for each surface."""
     headers = {
         "Authorization": "Bearer test-pat-token",
         "X-Workspace-Slug": "test-workspace",

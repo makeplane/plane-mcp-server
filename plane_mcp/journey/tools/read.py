@@ -8,11 +8,43 @@ from plane.models.query_params import RetrieveQueryParams
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
 from plane_mcp.journey.lod import LODProfile
-from plane_mcp.resolver import EntityResolver
+from plane_mcp.resolver import EntityResolver, is_valid_uuid
 from plane_mcp.yaml_formatter import with_yaml
 
 
+def _extract_member_list(resp: object) -> list:
+    """Extract a list of member records from a Plane SDK response or raw list."""
+    if isinstance(resp, list):
+        return resp
+    results = getattr(resp, "results", None)
+    if isinstance(results, list):
+        return results
+    return []
+
+
+def _match_member_id(members: list, target: str) -> str | None:
+    """Match a target username/display_name/email against workspace/project members and return user UUID."""
+    target_lower = target.strip().lower()
+    if not target_lower:
+        return None
+
+    for m in members:
+        nested = m.get("member") if isinstance(m, dict) else getattr(m, "member", None)
+        candidates = [c for c in (nested, m) if c is not None]
+        for candidate in candidates:
+            for field in ("username", "display_name", "email", "first_name"):
+                val = candidate.get(field) if isinstance(candidate, dict) else getattr(candidate, field, None)
+                if isinstance(val, str) and val.strip().lower() == target_lower:
+                    for id_source in candidates:
+                        raw_id = id_source.get("id") if isinstance(id_source, dict) else getattr(id_source, "id", None)
+                        if isinstance(raw_id, str) and raw_id.strip():
+                            return raw_id.strip()
+    return None
+
+
 class ReadJourney(JourneyBase):
+    """Journey handler for reading and searching Plane work items."""
+
     def search_tickets(
         self,
         project_slug: str,
@@ -25,6 +57,7 @@ class ReadJourney(JourneyBase):
         cursor: str | None = None,
         lod: Literal["summary", "standard", "full"] = "standard",
     ) -> dict:
+        """Search and filter tickets within a project with deep text matching and pagination."""
         import json
 
         if project_slug.lower() == "help":
@@ -37,13 +70,11 @@ class ReadJourney(JourneyBase):
             return {"results": [], "next_cursor": None, "prev_cursor": None}
         limit = min(limit, 100)
         per_page = limit
-        query_params = {
+        query_params: dict[str, object] = {
             "per_page": per_page,
             "expand": "assignees,labels,state",
         }
 
-        if cursor:
-            query_params["cursor"] = cursor
         if priority:
             query_params["priority"] = ",".join([p.lower() for p in priority])
 
@@ -62,8 +93,15 @@ class ReadJourney(JourneyBase):
                         label_ids.append(name_to_id[name.lower()])
                     else:
                         unresolved_labels.append(name)
-                if label_ids:
-                    query_params["labels"] = ",".join(label_ids)
+                if not label_ids:
+                    return {
+                        "status": "error",
+                        "error": f"None of the requested labels could be resolved: {', '.join(unresolved_labels)}",
+                        "results": [],
+                        "next_cursor": None,
+                        "prev_cursor": None,
+                    }
+                query_params["labels"] = ",".join(label_ids)
             except Exception as e:
                 import logging
 
@@ -79,23 +117,77 @@ class ReadJourney(JourneyBase):
                 }
 
         if assignees:
-            assignee_ids = []
+            assignee_ids: list[str] = []
+            unresolved_assignees: list[str] = []
+            members_cache: list | None = None
+
             for a in assignees:
-                if a.lower() == "me":
+                a_clean = a.strip() if isinstance(a, str) else ""
+                if not a_clean:
+                    unresolved_assignees.append(str(a))
+                    continue
+
+                if a_clean.lower() == "me":
+                    resolved_me = False
                     try:
                         me = client.users.get_me()
-                        if hasattr(me, "id"):
-                            assignee_ids.append(me.id)
+                        me_id = getattr(me, "id", None)
+                        if isinstance(me_id, str) and me_id:
+                            assignee_ids.append(me_id)
+                            resolved_me = True
                     except Exception:
                         pass
-            if assignee_ids:
-                query_params["assignees"] = ",".join(assignee_ids)
+                    if not resolved_me:
+                        unresolved_assignees.append(a)
+                elif is_valid_uuid(a_clean):
+                    assignee_ids.append(a_clean)
+                else:
+                    if members_cache is None:
+                        members_cache = []
+                        for getter in (
+                            lambda: client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id),
+                            lambda: client.workspaces.get_members_lite(workspace_slug=workspace_slug),
+                            lambda: client.workspaces.get_members(workspace_slug=workspace_slug),
+                        ):
+                            try:
+                                extracted = _extract_member_list(getter())
+                                if extracted:
+                                    members_cache.extend(extracted)
+                            except Exception:
+                                continue
+
+                    matched_id = _match_member_id(members_cache, a_clean)
+                    if matched_id:
+                        assignee_ids.append(matched_id)
+                    else:
+                        unresolved_assignees.append(a)
+
+            if unresolved_assignees or not assignee_ids:
+                return {
+                    "status": "error",
+                    "error": (
+                        f"Assignee filter could not be resolved for: {', '.join(unresolved_assignees)}. "
+                        "Pass 'me', a user UUID, or a valid workspace member username/display_name."
+                    ),
+                    "results": [],
+                    "next_cursor": None,
+                    "prev_cursor": None,
+                }
+            query_params["assignees"] = ",".join(assignee_ids)
 
         from plane.models.work_items import PaginatedWorkItemResponse
 
         matched_results = []
+        skip_matches = 0
         current_cursor = cursor
+        if cursor and "|" in cursor:
+            raw_cursor, offset_str = cursor.rsplit("|", 1)
+            if offset_str.isdigit():
+                skip_matches = int(offset_str)
+                current_cursor = None if raw_cursor == ":initial" else raw_cursor
+
         next_cursor_to_return = None
+        paginated = None
 
         query_lower = query.lower() if query else None
 
@@ -104,26 +196,44 @@ class ReadJourney(JourneyBase):
 
         # Loop to pull pages and deep-search until we hit the requested limit or run out of pages
         while len(matched_results) < limit and pages_fetched < max_pages_to_fetch:
+            page_cursor = current_cursor
             if current_cursor:
                 query_params["cursor"] = current_cursor
+            else:
+                query_params.pop("cursor", None)
 
             response = client.work_items._get(f"{workspace_slug}/projects/{project_id}/work-items", params=query_params)
             pages_fetched += 1
 
             paginated = PaginatedWorkItemResponse.model_validate(response)
 
+            page_matches = []
             for item in paginated.results:
                 if query_lower:
                     # Deep JSON string match
                     item_json = json.dumps(item.model_dump(), default=str).lower()
                     if query_lower in item_json:
-                        matched_results.append(item)
+                        page_matches.append(item)
                 else:
-                    matched_results.append(item)
+                    page_matches.append(item)
 
-            # Advance cursor only after a full page is consumed — keeps page boundaries aligned
+            page_skip = skip_matches
+            skip_matches = 0
+            available_matches = page_matches[page_skip:]
+            needed = limit - len(matched_results)
+
+            if len(available_matches) > needed:
+                matched_results.extend(available_matches[:needed])
+                next_cursor_to_return = f"{page_cursor or ':initial'}|{page_skip + needed}"
+                break
+
+            matched_results.extend(available_matches)
             next_cursor_to_return = getattr(paginated, "next_cursor", None)
-            if not next_cursor_to_return:
+            if (
+                not next_cursor_to_return
+                or not isinstance(next_cursor_to_return, str)
+                or not next_cursor_to_return.strip()
+            ):
                 break
             current_cursor = next_cursor_to_return
 
@@ -137,7 +247,7 @@ class ReadJourney(JourneyBase):
         result = {
             "results": transformed_results,
             "next_cursor": next_cursor_to_return,
-            "prev_cursor": paginated.prev_cursor if hasattr(paginated, "prev_cursor") else None,
+            "prev_cursor": paginated.prev_cursor if paginated and hasattr(paginated, "prev_cursor") else None,
         }
         if unresolved_labels:
             result["warnings"] = [f"Label not found and filter was skipped: {', '.join(unresolved_labels)}"]
@@ -146,6 +256,7 @@ class ReadJourney(JourneyBase):
     def read_ticket(
         self, ticket_id: str, lod: Literal["summary", "standard", "full"] = "standard", comments: bool = False
     ) -> dict:
+        """Retrieve a single ticket by identifier with optional comments and LOD formatting."""
         work_item_id = self.resolver.resolve_ticket(ticket_id)
         project_identifier, _issue_sequence = self.parse_ticket_id(ticket_id)
         project_id = self.resolver.resolve_project(project_identifier)
@@ -197,6 +308,7 @@ class ReadJourney(JourneyBase):
 
 
 def register_read_tools(mcp: FastMCP) -> None:
+    """Register Journey ticket reading and searching tools on the FastMCP server."""
 
     def search_tickets(
         project_slug: str,
@@ -209,6 +321,7 @@ def register_read_tools(mcp: FastMCP) -> None:
         cursor: str | None = None,
         lod: Literal["summary", "standard", "full"] = "standard",
     ) -> dict:
+        """Search for issues using filters or a text query."""
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = ReadJourney(resolver)

@@ -30,6 +30,7 @@ from plane_mcp.yaml_formatter import InlineSafeDumper, format_as_yaml
 
 @pytest.fixture
 def mock_plane_context():
+    """Provide a mocked PlaneClient and workspace slug with sample projects, states, and labels."""
     mock_client = MagicMock()
     workspace_slug = "test-workspace"
 
@@ -71,6 +72,7 @@ class TestInMemoryHelpPath:
     """Remediation Task 1: Verify no /tmp/plane_mcp cache file is written."""
 
     def test_get_workspace_help_context_in_memory_only(self, mock_plane_context):
+        """Verify workspace help context is fetched in memory without writing to /tmp/plane_mcp."""
         mock_client, workspace_slug = mock_plane_context
         cache_dir = os.path.join(tempfile.gettempdir(), "plane_mcp")
 
@@ -94,6 +96,7 @@ class TestInMemoryHelpPath:
 
     @patch("plane_mcp.journey.tools.read.get_plane_client_context")
     def test_search_tickets_help_path_no_tmp_files(self, mock_get_ctx, mock_plane_context):
+        """Verify search_tickets help discovery returns in-memory metadata without creating temp files."""
         mock_client, workspace_slug = mock_plane_context
         mock_get_ctx.return_value = (mock_client, workspace_slug)
         resolver = EntityResolver(mock_client, workspace_slug)
@@ -110,6 +113,7 @@ class TestInMemoryHelpPath:
 
     @patch("plane_mcp.journey.tools.create_update.get_plane_client_context")
     def test_create_ticket_help_path_no_tmp_files(self, mock_get_ctx, mock_plane_context):
+        """Verify create_ticket help discovery returns in-memory metadata without creating temp files."""
         mock_client, workspace_slug = mock_plane_context
         mock_get_ctx.return_value = (mock_client, workspace_slug)
         resolver = EntityResolver(mock_client, workspace_slug)
@@ -125,6 +129,7 @@ class TestInMemoryHelpPath:
         assert not os.path.exists(cache_dir)
 
     def test_help_path_api_failure_graceful_fallback(self):
+        """Verify get_workspace_help_context returns a structured fallback dictionary when the API fails."""
         failing_client = MagicMock()
         failing_client.projects.list.side_effect = ConnectionError("Plane API unreachable")
 
@@ -140,6 +145,7 @@ class TestHtmlRegexStripping:
 
     @patch("plane_mcp.journey.tools.read.get_plane_client_context")
     def test_search_tickets_strips_html_cleanly(self, mock_get_ctx):
+        """Verify search_tickets strips nested HTML tags cleanly without leaving stray angle brackets."""
         mock_client = MagicMock()
         workspace_slug = "test-ws"
         mock_get_ctx.return_value = (mock_client, workspace_slug)
@@ -212,9 +218,11 @@ class TestErrorBoundaryInformationDisclosure:
     """Remediation Task 3: Verify stack traces and details are not disclosed to client (CWE-209)."""
 
     def test_error_boundary_suppresses_traceback_on_unhandled_exception(self, caplog):
+        """Verify unhandled exceptions return a generic error omitting internal paths and parameter values."""
+
         @mcp_error_boundary
         def sensitive_failing_tool(param: str) -> dict:
-            # Raise an unhandled error with simulated internal traceback
+            """Simulate a tool raising an unexpected exception containing sensitive details."""
             raise RuntimeError(f"Database query failed at /internal/secrets/db.py:42 with param={param}")
 
         with caplog.at_level(logging.ERROR):
@@ -222,32 +230,55 @@ class TestErrorBoundaryInformationDisclosure:
 
         assert isinstance(result, dict)
         assert result["tool"] == "sensitive_failing_tool"
-        assert "Database query failed" in result["error"]
+        assert "unexpected error" in result["error"].lower()
+        assert "secret-val" not in result["error"]
+        assert "/internal/secrets/db.py" not in result["error"]
         assert "details" not in result
         assert "error_details" not in result
         assert "Traceback" not in result.get("error", "")
 
-        # Verify stack trace is recorded on server logger securely
+        # Verify stack trace and full message are recorded on server logger securely
         assert any("Traceback" in record.message or record.exc_info for record in caplog.records)
+        assert any("secret-val" in record.getMessage() for record in caplog.records)
 
     def test_error_boundary_list_return_type_suppresses_traceback(self):
+        """Verify list-annotated tools return a generic error item without exposing internal keys."""
+
         @mcp_error_boundary
         def failing_list_tool() -> list:
+            """Simulate a list-returning tool raising an unexpected KeyError."""
             raise KeyError("missing_internal_key")
 
         result = failing_list_tool()
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0]["tool"] == "failing_list_tool"
-        assert "missing_internal_key" in result[0]["error"]
+        assert "unexpected error" in result[0]["error"].lower()
+        assert "missing_internal_key" not in result[0]["error"]
         assert "details" not in result[0]
         assert "error_details" not in result[0]
+
+    def test_error_boundary_preserves_safe_validation_errors(self):
+        """Verify safe validation errors keep their actionable message while scrubbing paths and key-values."""
+
+        @mcp_error_boundary
+        def validation_failing_tool(param: str) -> dict:
+            """Simulate a tool raising a ValueError with both safe text and sensitive path/param tokens."""
+            raise ValueError(f"Invalid ticket format at /internal/secrets/db.py:42 with param={param}")
+
+        result = validation_failing_tool(param="secret-val")
+        assert isinstance(result, dict)
+        assert result["tool"] == "validation_failing_tool"
+        assert "Invalid ticket format" in result["error"]
+        assert "secret-val" not in result["error"]
+        assert "/internal/secrets/db.py" not in result["error"]
 
 
 class TestInlineSafeDumperAliasSuppression:
     """Remediation Task 5: Verify InlineSafeDumper suppresses anchors and aliases."""
 
     def test_repeated_dict_references_suppressed(self):
+        """Verify shared dictionary references are serialized inline without YAML anchors or aliases."""
         shared_dict = {"status": "active", "code": 200}
         data = {
             "primary": shared_dict,
@@ -280,6 +311,7 @@ class TestFastMCPToolWrappers:
     """Remediation Task 6: Verify registration and invocation of all FastMCP journey tool wrappers."""
 
     def test_all_journey_tools_registered(self):
+        """Verify all seven journey tools are registered on the FastMCP server instance."""
         mcp = FastMCP("test-all-journey")
         register_tools(mcp)
 
@@ -303,6 +335,7 @@ class TestFastMCPToolWrappers:
     def test_journey_tool_wrappers_execute_with_yaml_output(
         self, mock_wf_ctx, mock_read_ctx, mock_cu_ctx, mock_plane_context
     ):
+        """Verify every registered journey tool executes end-to-end and returns valid YAML output."""
         mock_client, workspace_slug = mock_plane_context
         mock_wf_ctx.return_value = (mock_client, workspace_slug)
         mock_read_ctx.return_value = (mock_client, workspace_slug)

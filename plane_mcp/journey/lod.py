@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class LODProfile(Enum):
+    """Enumeration of Level of Detail (LOD) profiles for filtering ticket payloads."""
+
     SUMMARY = "summary"
     STANDARD = "standard"
     FULL = "full"
@@ -74,6 +76,7 @@ def _hydrate_state(data: dict[str, Any], project_identifier: str | None = None) 
 
 
 def _clean_html(html_str: str) -> str:
+    """Convert an HTML string into clean Markdown text."""
     if not html_str:
         return ""
     return markdownify(html_str, heading_style="ATX", bullet_list_marker="-").strip()
@@ -82,6 +85,7 @@ def _clean_html(html_str: str) -> str:
 def _apply_lod_to_dict(
     data: dict[str, Any], profile: LODProfile, project_identifier: str | None = None
 ) -> dict[str, Any]:
+    """Filter a single ticket dictionary according to the specified LOD profile."""
     inject_sequence_id(data, project_identifier)
     _hydrate_state(data, project_identifier)
 

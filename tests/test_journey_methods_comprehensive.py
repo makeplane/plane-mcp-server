@@ -1,3 +1,6 @@
+"""Comprehensive unit tests for ReadJourney, CreateUpdateJourney, and WorkflowJourney."""
+
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,14 +13,22 @@ from plane_mcp.resolver import EntityResolver
 
 @pytest.fixture
 def mock_client():
+    """Return a fresh MagicMock representing the Plane SDK client."""
     return MagicMock()
 
 
 @pytest.fixture
 def resolver(mock_client):
+    """Return an EntityResolver pre-populated with TEST project and work item cache entries."""
     res = EntityResolver(mock_client, "test-workspace")
-    res._project_cache = {"TEST": "proj-123"}
-    res._work_item_cache = {"TEST-1": "ticket-1", "TEST-2": "ticket-2"}
+    res._project_cache.clear()
+    res._project_cache.update({"TEST": "proj-123"})
+    res._work_item_cache.clear()
+    res._work_item_cache.update({"TEST-1": "ticket-1", "TEST-2": "ticket-2"})
+    res._state_cache.clear()
+    res._ts["projects"] = time.time()
+    res._ts["work_items"] = time.time()
+    res._ts["states"] = 0.0
     return res
 
 
@@ -28,6 +39,7 @@ def resolver(mock_client):
 
 @patch("plane_mcp.journey.tools.read.get_plane_client_context")
 def test_search_tickets_success(mock_get_context, resolver, mock_client):
+    """Verify search_tickets filters by query and priority and transforms results to LOD summary."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = ReadJourney(resolver)
 
@@ -70,6 +82,7 @@ def test_search_tickets_success(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.read.get_plane_client_context")
 def test_read_ticket_success(mock_get_context, resolver, mock_client):
+    """Verify read_ticket retrieves ticket details and strips HTML for standard LOD."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = ReadJourney(resolver)
 
@@ -107,6 +120,7 @@ def test_read_ticket_success(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.read.get_plane_client_context")
 def test_read_ticket_with_comments(mock_get_context, resolver, mock_client):
+    """Verify read_ticket appends formatted comments when comments=True."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = ReadJourney(resolver)
 
@@ -159,6 +173,7 @@ def test_read_ticket_with_comments(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.create_update.get_plane_client_context")
 def test_update_ticket_with_comment(mock_get_context, resolver, mock_client):
+    """Verify update_ticket updates fields and creates a sanitized HTML comment."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = CreateUpdateJourney(resolver)
 
@@ -185,6 +200,7 @@ def test_update_ticket_with_comment(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.create_update.get_plane_client_context")
 def test_update_ticket_empty_dict(mock_get_context, resolver, mock_client):
+    """Verify update_ticket returns a warning when no modification fields are provided."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = CreateUpdateJourney(resolver)
 
@@ -207,6 +223,7 @@ def test_update_ticket_empty_dict(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.create_update.get_plane_client_context")
 def test_create_ticket_with_all_params(mock_get_context, resolver, mock_client):
+    """Verify create_ticket resolves state, creates missing labels/cycles, and links the new ticket."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = CreateUpdateJourney(resolver)
 
@@ -288,6 +305,7 @@ def test_create_ticket_with_all_params(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.workflow.get_plane_client_context")
 def test_transition_ticket_success(mock_get_context, resolver, mock_client):
+    """Verify transition_ticket resolves state by name and updates the ticket."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = WorkflowJourney(resolver)
 
@@ -325,6 +343,7 @@ def test_transition_ticket_success(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.workflow.get_plane_client_context")
 def test_begin_work_success(mock_get_context, resolver, mock_client):
+    """Verify begin_work assigns tickets to a cycle and transitions them to In Progress."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = WorkflowJourney(resolver)
 
@@ -369,6 +388,7 @@ def test_begin_work_success(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.workflow.get_plane_client_context")
 def test_begin_work_cycles_disabled(mock_get_context, resolver, mock_client):
+    """Verify begin_work skips cycle creation gracefully on HTTP 400 and still transitions state."""
     from plane.errors.errors import HttpError
 
     mock_get_context.return_value = (mock_client, "test-workspace")
@@ -411,6 +431,7 @@ def test_begin_work_cycles_disabled(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.workflow.get_plane_client_context")
 def test_complete_work_success(mock_get_context, resolver, mock_client):
+    """Verify complete_work posts a comment and transitions the ticket to Done."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = WorkflowJourney(resolver)
 
@@ -442,6 +463,7 @@ def test_complete_work_success(mock_get_context, resolver, mock_client):
 
 @patch("plane_mcp.journey.tools.workflow.get_plane_client_context")
 def test_complete_work_no_done_state_returns_partial(mock_get_context, resolver, mock_client):
+    """Verify complete_work returns partial status when neither Done nor Completed state exists."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = WorkflowJourney(resolver)
 
@@ -456,6 +478,7 @@ def test_complete_work_no_done_state_returns_partial(mock_get_context, resolver,
     result = journey.complete_work("TEST-1", "Work is done")
 
     assert result["status"] == "partial"
+    assert result["comment_added"] is True
     assert "transition_ticket" in result["message"]
     mock_client.work_items.comments.create.assert_called_once()
     mock_client.work_items.update.assert_not_called()
@@ -463,6 +486,7 @@ def test_complete_work_no_done_state_returns_partial(mock_get_context, resolver,
 
 @patch("plane_mcp.journey.tools.read.get_plane_client_context")
 def test_search_tickets_unknown_label_returns_warning(mock_get_context, resolver, mock_client):
+    """Verify search_tickets returns a warning when some requested labels resolve and others do not."""
     mock_get_context.return_value = (mock_client, "test-workspace")
     journey = ReadJourney(resolver)
 
@@ -488,3 +512,166 @@ def test_search_tickets_unknown_label_returns_warning(mock_get_context, resolver
 
     assert "warnings" in result
     assert any("phantom" in w for w in result["warnings"])
+
+
+@patch("plane_mcp.journey.tools.read.get_plane_client_context")
+def test_search_tickets_preserves_excess_matches_across_pages(mock_get_context, resolver, mock_client):
+    """Verify search_tickets encodes an intra-page offset cursor so excess matches on a page are not lost."""
+    mock_get_context.return_value = (mock_client, "test-workspace")
+    journey = ReadJourney(resolver)
+
+    def make_item(seq: int) -> dict:
+        """Create a mock serialized work item dictionary for pagination tests."""
+        return {
+            "id": f"ticket-{seq}",
+            "name": f"Matching keyword item {seq}",
+            "sequence_id": seq,
+            "project_detail": {"identifier": "TEST"},
+            "project_id": "proj-123",
+            "state_detail": {"name": "Todo"},
+            "priority": "medium",
+            "assignees": [],
+        }
+
+    page1 = {
+        "results": [make_item(1)],
+        "next_cursor": "2:1:0",
+        "prev_cursor": "",
+        "total_count": 3,
+        "next_page_results": True,
+        "prev_page_results": False,
+        "count": 1,
+        "total_pages": 2,
+        "total_results": 3,
+    }
+    page2 = {
+        "results": [make_item(2), make_item(3)],
+        "next_cursor": "",
+        "prev_cursor": "2:0:1",
+        "total_count": 3,
+        "next_page_results": False,
+        "prev_page_results": True,
+        "count": 2,
+        "total_pages": 2,
+        "total_results": 3,
+    }
+
+    mock_client.work_items._get.side_effect = [page1, page2, page2]
+
+    first_batch = journey.search_tickets(project_slug="TEST", query="keyword", limit=2, lod="summary")
+    assert [r["issue_key"] for r in first_batch["results"]] == ["TEST-1", "TEST-2"]
+    assert first_batch["next_cursor"] == "2:1:0|1"
+
+    second_batch = journey.search_tickets(
+        project_slug="TEST", query="keyword", limit=2, cursor=first_batch["next_cursor"], lod="summary"
+    )
+    assert [r["issue_key"] for r in second_batch["results"]] == ["TEST-3"]
+    assert not second_batch["next_cursor"]
+
+
+@patch("plane_mcp.journey.tools.read.get_plane_client_context")
+def test_search_tickets_all_unknown_labels_returns_error(mock_get_context, resolver, mock_client):
+    """Verify search_tickets returns an error without querying work items when no requested labels resolve."""
+    mock_get_context.return_value = (mock_client, "test-workspace")
+    journey = ReadJourney(resolver)
+
+    existing_label = MagicMock()
+    existing_label.name = "bug"
+    existing_label.id = "lbl-1"
+    mock_client.labels.list.return_value = MagicMock(results=[existing_label])
+
+    result = journey.search_tickets(project_slug="TEST", labels=["nonexistent"])
+
+    assert result["status"] == "error"
+    assert "nonexistent" in result["error"]
+    assert result["results"] == []
+    mock_client.work_items._get.assert_not_called()
+
+
+@patch("plane_mcp.journey.tools.read.get_plane_client_context")
+def test_search_tickets_assignee_username_resolution_and_unknown_error(mock_get_context, resolver, mock_client):
+    """Verify search_tickets resolves member usernames to UUIDs and errors on unresolvable assignees."""
+    mock_get_context.return_value = (mock_client, "test-workspace")
+    journey = ReadJourney(resolver)
+
+    member = MagicMock()
+    member.id = "user-uuid-42"
+    member.username = "alice"
+    member.display_name = "Alice Smith"
+    mock_client.projects.get_members.return_value = MagicMock(results=[member])
+
+    mock_client.work_items._get.return_value = {
+        "results": [],
+        "next_cursor": "",
+        "prev_cursor": "",
+        "total_count": 0,
+        "next_page_results": False,
+        "prev_page_results": False,
+        "count": 0,
+        "total_pages": 1,
+        "total_results": 0,
+    }
+
+    ok_result = journey.search_tickets(project_slug="TEST", assignees=["alice"])
+    assert ok_result["results"] == []
+    _, kwargs = mock_client.work_items._get.call_args
+    assert kwargs["params"]["assignees"] == "user-uuid-42"
+
+    mock_client.work_items._get.reset_mock()
+    err_result = journey.search_tickets(project_slug="TEST", assignees=["unknown_user"])
+    assert err_result["status"] == "error"
+    assert "unknown_user" in err_result["error"]
+    mock_client.work_items._get.assert_not_called()
+
+
+@patch("plane_mcp.journey.tools.workflow.get_plane_client_context")
+def test_begin_work_partial_transition_failure_continues_and_reports(mock_get_context, resolver, mock_client):
+    """Verify begin_work continues updating remaining tickets when one transition fails and reports failures."""
+    mock_get_context.return_value = (mock_client, "test-workspace")
+    journey = WorkflowJourney(resolver)
+
+    mock_cycle = MagicMock()
+    mock_cycle.name = "Sprint 3"
+    mock_cycle.id = "cycle-3"
+    mock_client.cycles.list.return_value = MagicMock(results=[mock_cycle])
+
+    mock_state = MagicMock()
+    mock_state.name = "In Progress"
+    mock_state.id = "state-in-prog"
+    mock_client.states.list.return_value = MagicMock(results=[mock_state])
+
+    mock_updated = MagicMock()
+    mock_client.work_items.update.side_effect = [RuntimeError("API timeout"), mock_updated]
+
+    result = journey.begin_work(["TEST-1", "TEST-2"], "Sprint 3")
+
+    assert result["status"] == "success"
+    assert mock_client.work_items.update.call_count == 2
+    assert "failed_transitions" in result
+    assert result["failed_transitions"] == ["TEST-1"]
+    assert "TEST-1" in result["details"]["TEST"]
+
+
+@patch("plane_mcp.journey.tools.workflow.get_plane_client_context")
+def test_complete_work_update_failure_after_comment_returns_partial(mock_get_context, resolver, mock_client):
+    """Verify complete_work returns partial status with comment_added=True when state transition fails."""
+    mock_get_context.return_value = (mock_client, "test-workspace")
+    journey = WorkflowJourney(resolver)
+
+    mock_client.work_items.comments.create.return_value = {"id": "comment-1"}
+
+    mock_state = MagicMock()
+    mock_state.name = "Done"
+    mock_state.id = "state-done"
+    mock_client.states.list.return_value = MagicMock(results=[mock_state])
+
+    mock_client.work_items.update.side_effect = RuntimeError("502 Bad Gateway")
+
+    result = journey.complete_work("TEST-1", "Completed work")
+
+    assert result["status"] == "partial"
+    assert result["issue_key"] == "TEST-1"
+    assert result["comment_added"] is True
+    assert "transition_ticket" in result["message"]
+    mock_client.work_items.comments.create.assert_called_once()
+    mock_client.work_items.update.assert_called_once()

@@ -38,6 +38,7 @@ DEFAULT_ALLOWED_REDIRECT_URIS = [
 
 
 def get_allowed_client_redirect_uris() -> list[str]:
+    """Return the list of allowed OAuth client redirect URI patterns."""
     allowed = list(DEFAULT_ALLOWED_REDIRECT_URIS)
     extra = os.getenv("PLANE_OAUTH_ALLOWED_REDIRECT_URIS", "")
     for uri in extra.split(","):
@@ -50,7 +51,24 @@ def get_allowed_client_redirect_uris() -> list[str]:
 LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "true").lower() == "true"
 
 
+def _resolve_oauth_provider_base_url() -> str:
+    """Resolve the public OAuth provider base URL or raise if unconfigured."""
+    base_url = os.getenv("PLANE_OAUTH_PROVIDER_BASE_URL", "").strip().rstrip("/")
+    if base_url:
+        return base_url
+    local_dev_url = os.getenv("PLANE_MCP_LOCAL_DEV_URL", "").strip().rstrip("/")
+    if local_dev_url:
+        return local_dev_url
+    if os.getenv("PLANE_MCP_LOCAL_DEV", "").lower() in ("true", "1", "yes"):
+        return f"{'http'}://localhost:8211"
+    raise ValueError(
+        "PLANE_OAUTH_PROVIDER_BASE_URL is required for OAuth endpoints "
+        "(or set PLANE_MCP_LOCAL_DEV=true for local development)."
+    )
+
+
 def _get_surface_registrar(surface: SurfaceType) -> tuple[str, Callable[[FastMCP], None]]:
+    """Return the display name and tool registration callable for a valid surface."""
     if surface == "agent":
         from plane_mcp.journey.tools import register_tools as register_agent
 
@@ -59,17 +77,22 @@ def _get_surface_registrar(surface: SurfaceType) -> tuple[str, Callable[[FastMCP
         from plane_mcp.docs.tools import register_docs_tools
 
         return "Plane Docs MCP Server", register_docs_tools
-    return "Plane MCP Server", register_tools
+    if surface == "admin":
+        return "Plane MCP Server", register_tools
+    raise ValueError(f"Unsupported MCP surface: {surface!r}")
 
 
 def _configure(mcp: FastMCP, surface: SurfaceType = "admin") -> FastMCP:
+    """Attach middleware, transforms, and surface tools to a FastMCP server instance."""
+    _, registrar = _get_surface_registrar(surface)
+
     mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=LOG_PAYLOADS))
     mcp.add_middleware(CoerceArguments())
     mcp.add_middleware(ValidateActionArguments())
-    mcp.add_middleware(YamlOutputMiddleware())
+    if surface != "admin":
+        mcp.add_middleware(YamlOutputMiddleware())
     mcp.add_transform(StripOutputSchemas())
 
-    _, registrar = _get_surface_registrar(surface)
     registrar(mcp)
 
     for comp in getattr(getattr(mcp, "_local_provider", None), "_components", {}).values():
@@ -80,7 +103,14 @@ def _configure(mcp: FastMCP, surface: SurfaceType = "admin") -> FastMCP:
 
 
 def get_oauth_mcp(base_path: str = "/", surface: SurfaceType = "admin") -> FastMCP:
+    """Create a FastMCP instance configured with Plane OAuth authentication for a specific mount path."""
     name, _ = _get_surface_registrar(surface)
+    norm_path = "/" + base_path.strip("/") if base_path and base_path.strip("/") else ""
+    provider_base = _resolve_oauth_provider_base_url()
+    scoped_base_url = f"{provider_base}{norm_path or '/'}"
+    raw_issuer = os.getenv("PLANE_OAUTH_PROVIDER_ISSUER_URL", "").strip().rstrip("/")
+    scoped_issuer_url = f"{raw_issuer}{norm_path or '/'}" if raw_issuer else scoped_base_url
+
     oauth_mcp = FastMCP(
         name,
         instructions=SERVER_INSTRUCTIONS if surface == "admin" else None,
@@ -89,7 +119,8 @@ def get_oauth_mcp(base_path: str = "/", surface: SurfaceType = "admin") -> FastM
         auth=PlaneOAuthProvider(
             client_id=os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_ID", ""),
             client_secret=os.getenv("PLANE_OAUTH_PROVIDER_CLIENT_SECRET", ""),
-            base_url=f"{os.getenv('PLANE_OAUTH_PROVIDER_BASE_URL', 'http://localhost:8211')}{base_path}",
+            base_url=scoped_base_url,
+            issuer_url=scoped_issuer_url,
             plane_base_url=os.getenv("PLANE_BASE_URL", ""),
             plane_internal_base_url=os.getenv("PLANE_INTERNAL_BASE_URL", ""),
             enable_cimd=os.getenv("PLANE_OAUTH_PROVIDER_ENABLE_CIMD", "false").lower() == "true",
@@ -102,6 +133,7 @@ def get_oauth_mcp(base_path: str = "/", surface: SurfaceType = "admin") -> FastM
 
 
 def get_header_mcp(surface: SurfaceType = "admin") -> FastMCP:
+    """Create a FastMCP instance configured with Plane header/API-key authentication."""
     name, _ = _get_surface_registrar(surface)
     header_mcp = FastMCP(
         f"{name} (header-http)",
@@ -114,6 +146,7 @@ def get_header_mcp(surface: SurfaceType = "admin") -> FastMCP:
 
 
 def get_stdio_mcp(surface: SurfaceType = "admin") -> FastMCP:
+    """Create a FastMCP instance configured for local stdio transport."""
     name, _ = _get_surface_registrar(surface)
     stdio_mcp = FastMCP(
         f"{name} (stdio)",

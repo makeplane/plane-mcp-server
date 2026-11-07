@@ -1,16 +1,34 @@
 """Base classes and utilities for Journey-based AI tools."""
 
 import logging
+import re
 from collections.abc import Callable
 from functools import wraps
 from typing import Any, TypeVar, cast
 
+from pydantic import ValidationError
+
 from plane_mcp.journey.lod import LODProfile, apply_lod
-from plane_mcp.resolver import EntityResolver
+from plane_mcp.resolver import EntityResolutionError, EntityResolver
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=Callable[..., Any])
+
+_SAFE_ERROR_TYPES = (ValueError, EntityResolutionError)
+_PATH_PATTERN = re.compile(r"(?:/[\w.-]+)+(?::\d+)?")
+_KV_PATTERN = re.compile(r"\b[\w.-]+=[^\s,;)]+")
+
+
+def _sanitize_error_message(exc: Exception, func_name: str) -> str:
+    """Return a client-safe error message for tool responses without leaking internal details."""
+    if isinstance(exc, ValidationError):
+        return f"Invalid arguments or response format in {func_name}."
+    if isinstance(exc, _SAFE_ERROR_TYPES):
+        sanitized = _PATH_PATTERN.sub("[redacted-path]", str(exc))
+        sanitized = _KV_PATTERN.sub("[redacted]", sanitized)
+        return sanitized
+    return f"An unexpected error occurred in {func_name}."
 
 
 def get_workspace_help_context(client: Any = None, workspace_slug: str | None = None) -> dict[str, Any]:
@@ -70,6 +88,7 @@ class JourneyBase:
     """
 
     def __init__(self, resolver: EntityResolver):
+        """Initialize the JourneyBase helper with an EntityResolver instance."""
         self.resolver = resolver
 
     def get_workspace_help_context(self) -> dict[str, Any]:
@@ -108,8 +127,11 @@ def with_lod(profile: LODProfile = LODProfile.SUMMARY) -> Callable[[T], T]:
     """
 
     def decorator(func: T) -> T:
+        """Wrap the target function to apply LOD filtering to its return value."""
+
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            """Execute the wrapped function and filter its output using the configured LOD profile."""
             result = func(*args, **kwargs)
             # Try to get project_identifier from kwargs if available for sequence injection
             project_identifier = kwargs.get("project_identifier")
@@ -140,6 +162,7 @@ def mcp_error_boundary(func: T) -> T:
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        """Execute the tool function within a sanitizing error boundary."""
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -148,7 +171,7 @@ def mcp_error_boundary(func: T) -> T:
 
                 logger.error("Error in %s: %s", func.__name__, e, exc_info=True)
 
-                error_msg = str(e)
+                error_msg = _sanitize_error_message(e, func.__name__)
                 result: dict[str, Any] = {
                     "tool": func.__name__,
                     "error": error_msg,
@@ -165,6 +188,6 @@ def mcp_error_boundary(func: T) -> T:
                 return result
             except Exception as inner_e:
                 logger.error("CRITICAL: Error boundary failed for %s: %s", func.__name__, inner_e, exc_info=True)
-                return {"error": f"CRITICAL: Tool {func.__name__} failed, and error handler also crashed: {inner_e}"}
+                return {"error": f"CRITICAL: Tool {func.__name__} failed, and error handler also crashed."}
 
     return cast(T, wrapper)

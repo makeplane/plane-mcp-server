@@ -11,7 +11,7 @@ from plane.models.work_items import CreateWorkItem
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.journey.base import JourneyBase, mcp_error_boundary
 from plane_mcp.resolver import EntityResolver
-from plane_mcp.sanitize import sanitize_html
+from plane_mcp.sanitize import markdown_or_html_to_safe_html, sanitize_html
 from plane_mcp.yaml_formatter import with_yaml
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,15 @@ MAX_NEW_LABELS_PER_REQUEST = 3
 
 
 class CreateUpdateJourney(JourneyBase):
+    """Journey tool handler for creating and updating Plane work items."""
+
     def _resolve_or_create_labels(self, project_id: str, label_names: list[str]) -> list[str]:
+        """Resolve existing label names to IDs or auto-create up to MAX_NEW_LABELS_PER_REQUEST new labels."""
+        unique_names: dict[str, str] = {}
+        for name in label_names:
+            unique_names.setdefault(name.lower(), name)
+        label_names = list(unique_names.values())
+
         client, workspace_slug = get_plane_client_context()
         existing = client.labels.list(workspace_slug=workspace_slug, project_id=project_id).results
         name_to_id = {label.name.lower(): label.id for label in existing if label.name}
@@ -47,6 +55,7 @@ class CreateUpdateJourney(JourneyBase):
         return label_ids
 
     def _resolve_or_create_cycle(self, project_id: str, cycle_name: str) -> str | None:
+        """Resolve an existing cycle by name or create a new two-week cycle."""
         client, workspace_slug = get_plane_client_context()
         try:
             existing = client.cycles.list(workspace_slug=workspace_slug, project_id=project_id).results
@@ -87,7 +96,7 @@ class CreateUpdateJourney(JourneyBase):
         labels: list[str] | None = None,
         cycle_name: str | None = None,
     ) -> dict:
-
+        """Create a work item in Plane with automatic label, state, and cycle resolution."""
         if project_slug.lower() == "help":
             return self.get_workspace_help_context()
 
@@ -101,7 +110,12 @@ class CreateUpdateJourney(JourneyBase):
         if cycle_name:
             cycle_id = self._resolve_or_create_cycle(project_id, cycle_name)
 
-        data = CreateWorkItem(name=title, description_html=sanitize_html(description), state=state_id, labels=label_ids)
+        data = CreateWorkItem(
+            name=title,
+            description_html=markdown_or_html_to_safe_html(description),
+            state=state_id,
+            labels=label_ids,
+        )
 
         new_ticket = client.work_items.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
@@ -132,6 +146,7 @@ class CreateUpdateJourney(JourneyBase):
         replace_target_snippet: str | None = None,
         comment: str | None = None,
     ) -> dict:
+        """Update a work item's title, description via snippet edits, or add a comment."""
         work_item_id = self.resolver.resolve_ticket(ticket_id)
         project_identifier, _ = self.parse_ticket_id(ticket_id)
         project_id = self.resolver.resolve_project(project_identifier)
@@ -150,6 +165,9 @@ class CreateUpdateJourney(JourneyBase):
 
         desc_changed = False
         final_desc = current.get("description_html") or ""
+
+        if replace_text is not None and replace_target_snippet is None:
+            return {"status": "error", "message": "replace_target_snippet is required when replace_text is provided"}
 
         snippet_args = (append_text, replace_text, replace_target_snippet, append_after_snippet)
         if any(x is not None for x in snippet_args):
@@ -192,6 +210,8 @@ class CreateUpdateJourney(JourneyBase):
 
 
 def register_create_update_tools(mcp: FastMCP) -> None:
+    """Register the create_ticket and update_ticket MCP tools on the FastMCP server."""
+
     def create_ticket(
         title: str,
         project_slug: str,
@@ -200,6 +220,7 @@ def register_create_update_tools(mcp: FastMCP) -> None:
         labels: list[str] | None = None,
         cycle_name: str | None = None,
     ) -> dict:
+        """Create a new ticket in Plane with automatic resolution of labels and cycles."""
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = CreateUpdateJourney(resolver)

@@ -51,6 +51,7 @@ class InlineSafeDumper(yaml.SafeDumper):
 
 
 def _flow_list_representer(dumper: yaml.SafeDumper, data: FlowList) -> yaml.Node:
+    """Represent a FlowList instance as an inline YAML flow sequence."""
     return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=True)
 
 
@@ -151,6 +152,7 @@ def with_yaml(func: T) -> T:
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        """Execute wrapped tool function and format its output as YAML."""
         result = func(*args, **kwargs)
         return format_as_yaml(result)
 
@@ -161,6 +163,7 @@ class YamlOutputMiddleware(Middleware):
     """FastMCP Middleware that formats all tool call results as YAML across surfaces."""
 
     async def on_call_tool(self, context: MiddlewareContext, call_next: Any) -> Any:
+        """Intercept tool call execution and convert ToolResult payloads to YAML."""
         result = await call_next(context)
         if isinstance(result, ToolResult):
             new_content = []

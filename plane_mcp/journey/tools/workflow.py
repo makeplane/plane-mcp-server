@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowJourney(JourneyBase):
+    """Journey handler for ticket workflow state transitions, cycles, and work completion."""
+
     def _resolve_or_create_cycle(self, project_id: str, cycle_name: str) -> str | None:
+        """Resolve an existing cycle by name or create a new 14-day cycle if none exists."""
         client, workspace_slug = get_plane_client_context()
         try:
             existing = client.cycles.list(workspace_slug=workspace_slug, project_id=project_id).results
@@ -55,6 +58,7 @@ class WorkflowJourney(JourneyBase):
             raise
 
     def transition_ticket(self, ticket_id: str, state_name: str) -> dict:
+        """Transition a single ticket to the specified workflow state."""
         work_item_id = self.resolver.resolve_ticket(ticket_id)
         project_identifier, _ = self.parse_ticket_id(ticket_id)
         project_id = self.resolver.resolve_project(project_identifier)
@@ -76,13 +80,16 @@ class WorkflowJourney(JourneyBase):
         client, workspace_slug = get_plane_client_context()
 
         # Group tickets by project
-        project_to_tickets = defaultdict(list)
+        project_to_tickets: dict[str, list[str]] = defaultdict(list)
+        w_id_to_ticket: dict[str, str] = {}
         for t_id in ticket_ids:
             proj_id_str, _ = self.parse_ticket_id(t_id)
             w_id = self.resolver.resolve_ticket(t_id)
             project_to_tickets[proj_id_str].append(w_id)
+            w_id_to_ticket[w_id] = t_id
 
         results = {}
+        all_failed: list[str] = []
         for proj_identifier, w_ids in project_to_tickets.items():
             proj_id = self.resolver.resolve_project(proj_identifier)
             cycle_id = self._resolve_or_create_cycle(proj_id, cycle_name)
@@ -105,27 +112,53 @@ class WorkflowJourney(JourneyBase):
                 msg += " Note: Cycles are disabled for this project, skipped cycle assignment."
 
             # Optionally transition them to In Progress if such state exists
+            state_id = None
             try:
                 state_id = self.resolver.resolve_state(proj_identifier, "In Progress")
-                for w_id in w_ids:
-                    client.work_items.update(
-                        workspace_slug=workspace_slug,
-                        project_id=proj_id,
-                        work_item_id=w_id,
-                        data=UpdateWorkItem(state=state_id),
-                    )
             except EntityResolutionError:
                 # "In Progress" state not found in this project — skip silently, it's optional
-                pass
+                state_id = None
             except Exception as e:
-                # Unexpected API error — log but don't fail the whole batch
-                logger.warning("State transition to 'In Progress' failed for project %s: %s", proj_identifier, e)
+                logger.warning("State resolution for 'In Progress' failed for project %s: %s", proj_identifier, e)
+                state_id = None
+
+            if state_id:
+                failed_w_ids: list[str] = []
+                for w_id in w_ids:
+                    try:
+                        client.work_items.update(
+                            workspace_slug=workspace_slug,
+                            project_id=proj_id,
+                            work_item_id=w_id,
+                            data=UpdateWorkItem(state=state_id),
+                        )
+                    except Exception as e:
+                        ticket_label = w_id_to_ticket.get(w_id, w_id)
+                        logger.warning(
+                            "State transition to 'In Progress' failed for ticket %s (%s) in project %s: %s",
+                            ticket_label,
+                            w_id,
+                            proj_identifier,
+                            e,
+                        )
+                        failed_w_ids.append(ticket_label)
+                        all_failed.append(ticket_label)
+
+                if failed_w_ids:
+                    msg += (
+                        f" Warning: failed to transition {len(failed_w_ids)} ticket(s) "
+                        f"({', '.join(failed_w_ids)}) to 'In Progress'."
+                    )
 
             results[proj_identifier] = msg
 
-        return {"status": "success", "details": results}
+        response: dict[str, object] = {"status": "success", "details": results}
+        if all_failed:
+            response["failed_transitions"] = all_failed
+        return response
 
     def complete_work(self, ticket_id: str, comment: str) -> dict:
+        """Add a completion comment to a ticket and attempt to transition it to 'Done' or 'Completed'."""
         work_item_id = self.resolver.resolve_ticket(ticket_id)
         project_identifier, _ = self.parse_ticket_id(ticket_id)
         project_id = self.resolver.resolve_project(project_identifier)
@@ -141,27 +174,41 @@ class WorkflowJourney(JourneyBase):
             data=CreateWorkItemComment(comment_html=safe_comment),
         )
 
-        # Try to transition to Done or Completed
-        state_id = None
-        for state_name in ["Done", "Completed"]:
-            try:
-                state_id = self.resolver.resolve_state(project_identifier, state_name)
-                break
-            except ValueError:
-                continue
+        # Try to transition to Done or Completed; handle post-comment failures safely
+        try:
+            state_id = None
+            for state_name in ["Done", "Completed"]:
+                try:
+                    state_id = self.resolver.resolve_state(project_identifier, state_name)
+                    break
+                except ValueError:
+                    continue
 
-        if state_id:
-            updated = client.work_items.update(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                work_item_id=work_item_id,
-                data=UpdateWorkItem(state=state_id),
-            )
+            if state_id:
+                updated = client.work_items.update(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    work_item_id=work_item_id,
+                    data=UpdateWorkItem(state=state_id),
+                )
 
-            return self.apply_lod(updated, profile=LODProfile.SUMMARY, project_identifier=project_identifier)
+                return self.apply_lod(updated, profile=LODProfile.SUMMARY, project_identifier=project_identifier)
+        except Exception as e:
+            logger.warning("Failed to transition ticket %s after adding completion comment: %s", ticket_id, e)
+            return {
+                "issue_key": ticket_id,
+                "status": "partial",
+                "comment_added": True,
+                "message": (
+                    f"Completion comment was added to {ticket_id}, but transitioning state failed: {e}. "
+                    "Call transition_ticket directly to retry the state transition without duplicating the comment."
+                ),
+            }
 
         return {
+            "issue_key": ticket_id,
             "status": "partial",
+            "comment_added": True,
             "message": (
                 "No workflow states found indicating a 'Done' or 'Completed' state found. "
                 "Call transition_ticket explicitly to close this ticket."
@@ -170,7 +217,10 @@ class WorkflowJourney(JourneyBase):
 
 
 def register_workflow_tools(mcp: FastMCP) -> None:
+    """Register Journey workflow transition and cycle tools on the FastMCP server."""
+
     def transition_ticket(ticket_id: str, state_name: str) -> dict:
+        """Transition a ticket to a specified workflow state."""
         client, workspace_slug = get_plane_client_context()
         resolver = EntityResolver(client, workspace_slug)
         journey = WorkflowJourney(resolver)

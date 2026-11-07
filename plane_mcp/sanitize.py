@@ -78,6 +78,55 @@ def sanitize_html(html_str: str | None) -> str | None:
     )
 
 
+def _render_inline_markdown(text: str) -> str:
+    """Render common inline Markdown formatting on HTML-escaped text."""
+    escaped = html_lib.escape(text)
+    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"__(.+?)__", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", escaped)
+    escaped = re.sub(r"\b_(.+?)_\b", r"<em>\1</em>", escaped)
+    escaped = re.sub(r"~~(.+?)~~", r"<del>\1</del>", escaped)
+    escaped = re.sub(
+        r"\[([^\]]+)\]\((https?://[^\s)]+|mailto:[^\s)]+)\)",
+        r'<a href="\2">\1</a>',
+        escaped,
+    )
+    return escaped
+
+
+def _render_markdown_block(block: str) -> str:
+    """Render a non-fenced Markdown block (headings, lists, blockquotes, paragraphs) into HTML."""
+    lines = [line for line in block.strip().split("\n") if line.strip()]
+    if not lines:
+        return ""
+
+    if len(lines) == 1:
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", lines[0].strip())
+        if heading_match:
+            level = len(heading_match.group(1))
+            return f"<h{level}>{_render_inline_markdown(heading_match.group(2).strip())}</h{level}>"
+
+    if all(re.match(r"^[-*]\s+(.+)$", line.strip()) for line in lines):
+        ul_prefix = re.compile(r"^[-*]\s+")
+        items = [f"<li>{_render_inline_markdown(ul_prefix.sub('', line.strip()))}</li>" for line in lines]
+        return f"<ul>{''.join(items)}</ul>"
+
+    if all(re.match(r"^\d+\.\s+(.+)$", line.strip()) for line in lines):
+        ol_prefix = re.compile(r"^\d+\.\s+")
+        items = [f"<li>{_render_inline_markdown(ol_prefix.sub('', line.strip()))}</li>" for line in lines]
+        return f"<ol>{''.join(items)}</ol>"
+
+    if all(re.match(r"^>\s?(.*)$", line.strip()) for line in lines):
+        bq_prefix = re.compile(r"^>\s?")
+        quote_lines = [_render_inline_markdown(bq_prefix.sub("", line.strip())) for line in lines]
+        return f"<blockquote>{'<br/>'.join(quote_lines)}</blockquote>"
+
+    rendered_lines = [_render_inline_markdown(line) for line in block.strip().split("\n")]
+    p_clean = "<br/>".join(rendered_lines)
+    return f"<p>{p_clean}</p>" if p_clean else ""
+
+
 def markdown_or_html_to_safe_html(content: str | None) -> str | None:
     """Convert Markdown or HTML text to safe, sanitized HTML for Plane description fields."""
     if content is None:
@@ -90,14 +139,29 @@ def markdown_or_html_to_safe_html(content: str | None) -> str | None:
     if re.search(r"<(?:p|br|div|h[1-6]|ul|ol|li|table|pre|code|strong|em|b|i)[^>]*>", stripped, re.IGNORECASE):
         return sanitize_html(content)
 
-    # Otherwise format basic markdown paragraphs/lines to HTML paragraphs
-    paragraphs = re.split(r"\n\s*\n", stripped)
-    html_paragraphs = []
-    for p in paragraphs:
-        p_clean = html_lib.escape(p.strip()).replace("\n", "<br/>")
-        if p_clean:
-            html_paragraphs.append(f"<p>{p_clean}</p>")
-    html_result = "".join(html_paragraphs)
+    # Render fenced code blocks and basic Markdown blocks/inline formatting to HTML
+    fenced_pattern = re.compile(r"```(?:[a-zA-Z0-9_-]*\n)?(.*?)```", re.DOTALL)
+    html_parts: list[str] = []
+    last_idx = 0
+    for match in fenced_pattern.finditer(stripped):
+        before = stripped[last_idx : match.start()].strip()
+        if before:
+            for p in re.split(r"\n\s*\n", before):
+                rendered = _render_markdown_block(p)
+                if rendered:
+                    html_parts.append(rendered)
+        code_body = html_lib.escape(match.group(1).strip("\n"))
+        html_parts.append(f"<pre><code>{code_body}</code></pre>")
+        last_idx = match.end()
+
+    remaining = stripped[last_idx:].strip()
+    if remaining:
+        for p in re.split(r"\n\s*\n", remaining):
+            rendered = _render_markdown_block(p)
+            if rendered:
+                html_parts.append(rendered)
+
+    html_result = "".join(html_parts)
     return sanitize_html(html_result)
 
 
@@ -110,6 +174,43 @@ def html_to_clean_markdown(html_str: str | None) -> str:
         return converted.strip()
     except Exception:
         return html_str.strip()
+
+
+def _resolve_unique_snippet(working_html: str, snippet: str) -> tuple[str, int]:
+    """Resolve a target or anchor snippet against stored HTML across HTML-encoding levels."""
+    direct_count = working_html.count(snippet)
+    if direct_count > 0:
+        return snippet, direct_count
+
+    candidates: list[str] = []
+
+    def _add_candidate(val: str) -> None:
+        """Add a non-empty deduplicated candidate snippet variant."""
+        if val and val not in candidates:
+            candidates.append(val)
+
+    _add_candidate(snippet)
+    curr = snippet
+    for _ in range(3):
+        curr = html_lib.unescape(curr)
+        _add_candidate(curr)
+
+    raw = curr
+    curr_esc = raw
+    curr_esc_no_quote = raw
+    for _ in range(3):
+        curr_esc = html_lib.escape(curr_esc)
+        curr_esc_no_quote = html_lib.escape(curr_esc_no_quote, quote=False)
+        _add_candidate(curr_esc)
+        _add_candidate(curr_esc_no_quote)
+
+    matched_variants = [v for v in candidates if working_html.count(v) > 0]
+    total = sum(working_html.count(v) for v in matched_variants)
+    if total == 1:
+        return matched_variants[0], 1
+    if total > 1:
+        return matched_variants[0], total
+    return snippet, 0
 
 
 def apply_snippet_edits(
@@ -127,6 +228,9 @@ def apply_snippet_edits(
     """
     working_html = current_html or ""
 
+    if replace_text is not None and replace_target_snippet is None:
+        return None, "replace_target_snippet is required when replace_text is provided"
+
     # 1. Validation for replace_target_snippet
     if replace_target_snippet is not None:
         if not replace_target_snippet.strip():
@@ -134,14 +238,8 @@ def apply_snippet_edits(
         if replace_text is None:
             return None, "replace_text is required when replace_target_snippet is provided"
 
-        # Check occurrences in HTML
-        occurrences = working_html.count(replace_target_snippet)
-        if occurrences == 0:
-            # Try matching with stripped text or unescaped HTML entities
-            unescaped_snippet = html_lib.unescape(replace_target_snippet)
-            if unescaped_snippet != replace_target_snippet and working_html.count(unescaped_snippet) == 1:
-                replace_target_snippet = unescaped_snippet
-                occurrences = 1
+        # Check occurrences in HTML across encoding variants
+        resolved_target, occurrences = _resolve_unique_snippet(working_html, replace_target_snippet)
 
         if occurrences == 0:
             return None, (
@@ -156,7 +254,7 @@ def apply_snippet_edits(
 
         # Sanitize replacement text
         safe_replace = sanitize_html(replace_text) or ""
-        working_html = working_html.replace(replace_target_snippet, safe_replace, 1)
+        working_html = working_html.replace(resolved_target, safe_replace, 1)
 
     # 2. Validation for append_after_snippet
     if append_text is not None:
@@ -165,12 +263,7 @@ def apply_snippet_edits(
             if not append_after_snippet.strip():
                 return None, "append_after_snippet cannot be empty or whitespace only"
 
-            occurrences = working_html.count(append_after_snippet)
-            if occurrences == 0:
-                unescaped_snippet = html_lib.unescape(append_after_snippet)
-                if unescaped_snippet != append_after_snippet and working_html.count(unescaped_snippet) == 1:
-                    append_after_snippet = unescaped_snippet
-                    occurrences = 1
+            resolved_anchor, occurrences = _resolve_unique_snippet(working_html, append_after_snippet)
 
             if occurrences == 0:
                 return None, (
@@ -183,8 +276,8 @@ def apply_snippet_edits(
                     "Anchor snippet must be unique."
                 )
 
-            idx = working_html.find(append_after_snippet)
-            insert_pos = idx + len(append_after_snippet)
+            idx = working_html.find(resolved_anchor)
+            insert_pos = idx + len(resolved_anchor)
             working_html = working_html[:insert_pos] + safe_append + working_html[insert_pos:]
         else:
             # Append to end

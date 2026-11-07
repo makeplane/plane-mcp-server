@@ -34,7 +34,10 @@ def sanitize_prefix(prefix: str | None) -> str:
     """
     if not prefix:
         return ""
-    cleaned = prefix.strip().rstrip("/")
+    cleaned = prefix.strip()
+    if "//" in cleaned:
+        raise ValueError(f"Security Violation: Invalid MCP_PATH_PREFIX '{prefix}': double slashes are not allowed.")
+    cleaned = cleaned.rstrip("/")
     if not cleaned:
         return ""
     if not PREFIX_REGEX.match(cleaned):
@@ -102,6 +105,7 @@ class SurfaceRegistry:
         surfaces: Sequence[SurfaceSpec] = DEFAULT_SURFACES,
         prefix: str | None = None,
     ):
+        """Initialize the surface registry with declarative surface specs and optional path prefix."""
         self.surfaces = list(surfaces)
         self.prefix = sanitize_prefix(prefix)
         self._compiled_routes: list[BaseRoute] | None = None
@@ -114,7 +118,7 @@ class SurfaceRegistry:
         1. Exact RFC 8414/9728 .well-known routes (highest precedence)
         2. Specific /api-key mounts (prevents greedy prefix matching by base mounts)
         3. Base surface mounts (OAuth Streamable HTTP)
-        4. Fallback SSE mount on root (lowest precedence)
+        4. Fallback SSE mount on root when an OAuth-enabled admin surface is present (lowest precedence)
         """
         if self._compiled_routes is not None and self._lifecycle_apps is not None:
             return self._compiled_routes, self._lifecycle_apps
@@ -128,42 +132,38 @@ class SurfaceRegistry:
         seen_route_signatures: set[tuple[str, tuple[str, ...]]] = set()
 
         def _track_app(app: Starlette) -> None:
+            """Register a Starlette sub-application for combined lifespan management."""
             if app not in lifecycle_apps:
                 lifecycle_apps.append(app)
 
+        def _collect_well_known(mcp_instance: object, label: str, mcp_path: str) -> None:
+            """Extract and deduplicate RFC 8414/9728 well-known routes from an OAuth-enabled MCP instance."""
+            auth = getattr(mcp_instance, "auth", None)
+            if not auth:
+                return
+            try:
+                routes = auth.get_well_known_routes(mcp_path=mcp_path)
+                for r in routes:
+                    if isinstance(r, Route):
+                        sig = (r.path, tuple(sorted(r.methods or ())))
+                        if sig in seen_route_signatures:
+                            continue
+                        seen_route_signatures.add(sig)
+                    well_known_routes.append(r)
+            except Exception as exc:
+                logger.warning("Failed to get well-known routes for %s: %s", label, exc)
+
         for surface in self.surfaces:
             all_names = [surface.name, *surface.aliases]
-            oauth_app: Starlette | None = None
             header_app: Starlette | None = None
 
-            # 1. Instantiate OAuth MCP & App
-            if surface.enable_oauth:
-                base_path = normalize_route_path(self.prefix, surface.name)
-                oauth_mcp = get_oauth_mcp(base_path=base_path, surface=surface.surface_type)
-                oauth_app = oauth_mcp.http_app(stateless_http=True)
-                _track_app(oauth_app)
-
-                # Collect well-known routes (mcp_path="/mcp" relative to base_path)
-                if hasattr(oauth_mcp, "auth") and oauth_mcp.auth:
-                    try:
-                        routes = oauth_mcp.auth.get_well_known_routes(mcp_path="/mcp")
-                        for r in routes:
-                            if isinstance(r, Route):
-                                sig = (r.path, tuple(sorted(r.methods or ())))
-                                if sig in seen_route_signatures:
-                                    continue
-                                seen_route_signatures.add(sig)
-                            well_known_routes.append(r)
-                    except Exception as exc:
-                        logger.warning("Failed to get well-known routes for %s: %s", surface.name, exc)
-
-            # 2. Instantiate Header/API-Key MCP & App
+            # 1. Instantiate Header/API-Key MCP & App (shared across aliases for this surface)
             if surface.enable_header_auth:
                 header_mcp = get_header_mcp(surface=surface.surface_type)
                 header_app = header_mcp.http_app(stateless_http=True)
                 _track_app(header_app)
 
-            # 3. Mounts generation for primary name and all aliases
+            # 2. Mounts generation for primary name and all aliases
             for name_segment in all_names:
                 # Specific /api-key mounts (highest mount precedence)
                 if header_app:
@@ -176,8 +176,8 @@ class SurfaceRegistry:
                             seen_mount_paths.add(p)
                             specific_mounts.append(Mount(p, app=header_app))
 
-                # Base OAuth mounts
-                if oauth_app:
+                # Base OAuth mounts (dedicated OAuth MCP & metadata per mounted path)
+                if surface.enable_oauth:
                     base_paths = [
                         normalize_route_path(self.prefix, name_segment),
                         normalize_route_path(self.prefix, "mcp", name_segment),
@@ -185,29 +185,22 @@ class SurfaceRegistry:
                     for p in base_paths:
                         if p not in seen_mount_paths:
                             seen_mount_paths.add(p)
+                            oauth_mcp = get_oauth_mcp(base_path=p, surface=surface.surface_type)
+                            oauth_app = oauth_mcp.http_app(stateless_http=True)
+                            _track_app(oauth_app)
+                            _collect_well_known(oauth_mcp, f"{surface.name}:{p}", mcp_path="/mcp")
                             base_mounts.append(Mount(p, app=oauth_app))
 
-        # 4. SSE Fallback (Mounted at root "/" or prefix)
-        sse_base_path = self.prefix or "/"
-        sse_mcp = get_oauth_mcp(base_path=sse_base_path, surface="admin")
-        sse_app = sse_mcp.http_app(transport="sse")
-        _track_app(sse_app)
-
-        if hasattr(sse_mcp, "auth") and sse_mcp.auth:
-            try:
-                sse_routes = sse_mcp.auth.get_well_known_routes(mcp_path="/sse")
-                for r in sse_routes:
-                    if isinstance(r, Route):
-                        sig = (r.path, tuple(sorted(r.methods or ())))
-                        if sig in seen_route_signatures:
-                            continue
-                        seen_route_signatures.add(sig)
-                    well_known_routes.append(r)
-            except Exception as exc:
-                logger.warning("Failed to get well-known routes for SSE: %s", exc)
-
-        root_mount_path = self.prefix or "/"
-        terminal_mounts = [Mount(root_mount_path, app=sse_app)]
+        # 3. SSE Fallback (Mounted at root "/" or prefix only when an OAuth admin surface is configured)
+        terminal_mounts: list[Mount] = []
+        if any(s.surface_type == "admin" and s.enable_oauth for s in self.surfaces):
+            sse_base_path = self.prefix or "/"
+            sse_mcp = get_oauth_mcp(base_path=sse_base_path, surface="admin")
+            sse_app = sse_mcp.http_app(transport="sse")
+            _track_app(sse_app)
+            _collect_well_known(sse_mcp, "SSE", mcp_path="/sse")
+            root_mount_path = self.prefix or "/"
+            terminal_mounts = [Mount(root_mount_path, app=sse_app)]
 
         # Ordered route list guaranteeing precedence
         compiled = [*well_known_routes, *specific_mounts, *base_mounts, *terminal_mounts]
@@ -221,6 +214,7 @@ class SurfaceRegistry:
 
         @asynccontextmanager
         async def combined_lifespan(app: Starlette) -> AsyncIterator[None]:
+            """Manage the combined lifespan contexts of all mounted Starlette sub-applications."""
             async with AsyncExitStack() as stack:
                 for sub_app in lifecycle_apps:
                     await stack.enter_async_context(sub_app.router.lifespan_context(sub_app))

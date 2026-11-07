@@ -18,7 +18,10 @@ LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
 
 
 class UserContextFilter(logging.Filter):
+    """Logging filter that enriches log records with Plane user and workspace context."""
+
     def filter(self, record: logging.LogRecord) -> bool:
+        """Populate user_id, display_name, and workspace_slug on the log record."""
         user_id = None
         display_name = None
         workspace_slug = None
@@ -38,7 +41,10 @@ class UserContextFilter(logging.Filter):
 
 
 class JSONFormatter(logging.Formatter):
+    """Structured JSON log formatter for FastMCP and Uvicorn logs."""
+
     def format(self, record: logging.LogRecord) -> str:
+        """Serialize the log record as a JSON string."""
         log_entry = {
             "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,
@@ -71,7 +77,8 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry)
 
 
-def configure_json_logging():
+def configure_json_logging() -> None:
+    """Configure the root FastMCP logger with structured JSON formatting and user context filtering."""
     fastmcp_logger = logging.getLogger("fastmcp")
     for handler in fastmcp_logger.handlers[:]:
         fastmcp_logger.removeHandler(handler)
@@ -89,6 +96,8 @@ logger = logging.getLogger("fastmcp.plane_mcp")
 
 
 class ServerMode(Enum):
+    """Supported transport modes for launching the Plane MCP Server."""
+
     STDIO = "stdio"
     SSE = "sse"
     HTTP = "http"
@@ -101,6 +110,7 @@ def create_app() -> Starlette:
 
 
 def get_app() -> Starlette:
+    """Return the cached Starlette application instance, creating it if needed."""
     global _cached_app
     if _cached_app is None:
         _cached_app = create_app()
@@ -111,6 +121,7 @@ _cached_app = None
 
 
 def main() -> None:
+    """Parse CLI arguments and launch the Plane MCP Server in stdio or HTTP mode."""
     server_mode = ServerMode.STDIO
     if len(sys.argv) > 1:
         server_mode = ServerMode(sys.argv[1])
