@@ -3,7 +3,7 @@
 Selects and verifies the storage backing the OAuth token cache used by the
 HTTP / SSE transports. Priority order (highest first):
 
-0. ``REDIS_SENTINELS`` (non-empty) → Redis behind a customer-run Sentinel.
+0. ``REDIS_SENTINELS`` (non-empty) → Redis behind a Redis Sentinel you run.
    ``REDIS_SENTINEL_MASTER`` names the master and is required. The client asks
    the sentinels for the current primary on every (re)connect, so it follows a
    failover. Wins over everything below; ``REDIS_URL`` and
@@ -465,7 +465,7 @@ def build_token_store() -> Any:
     password = os.getenv("REDIS_PASSWORD")
     secret_arn = os.getenv("ELASTICACHE_SECRET_ARN")
 
-    # 0. Redis behind a customer-run Sentinel
+    # 0. Redis behind a Redis Sentinel
     raw_sentinels = _env_str("REDIS_SENTINELS")
     if raw_sentinels:
         cfg = _sentinel_config(raw_sentinels)

@@ -909,6 +909,7 @@ dependencies = [
     { name = "plane-sdk" },
     { name = "py-key-value-aio", extra = ["redis"] },
     { name = "pyjwt" },
+    { name = "redis" },
 ]
 
 [package.optional-dependencies]
@@ -929,6 +930,7 @@ requires-dist = [
     { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4,<0.5.0" },
     { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "redis", specifier = ">=6.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
 ]
 provides-extras = ["dev"]
