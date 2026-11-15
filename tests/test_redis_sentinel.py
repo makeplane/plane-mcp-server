@@ -224,23 +224,33 @@ def test_one_try_per_sentinel(monkeypatch, no_ping, sentinel_env):
     assert _sentinel_kwargs(build_token_store())["retry"] is None
 
 
-def test_a_vanished_sentinel_costs_one_timeout(monkeypatch):
-    import asyncio
-    import time
+def test_a_sentinel_that_times_out_gets_one_attempt(monkeypatch):
+    """redis-py's lookup with a connect that times out, no network: one attempt per sentinel.
 
+    The default retry made about ten attempts per sentinel on redis-py 8.1, each a full timeout.
+    """
+    import asyncio
+
+    import redis.asyncio.connection
     from redis.asyncio.sentinel import MasterNotFoundError, Sentinel
 
+    attempts = []
+
+    async def connect_times_out(self):
+        attempts.append((self.host, self.port))
+        raise TimeoutError("no answer")
+
+    monkeypatch.setattr(redis.asyncio.connection.Connection, "_connect", connect_times_out)
     monkeypatch.setenv("REDIS_SENTINEL_MASTER", "plane-master")
-    cfg = storage._sentinel_config("10.255.255.1:26379")
-    kwargs = storage._sentinel_node_kwargs(cfg, 0.3)
+    cfg = storage._sentinel_config("sentinel-a:26379,sentinel-b:26379")
+    kwargs = storage._sentinel_node_kwargs(cfg, storage._SENTINEL_SOCKET_TIMEOUT_SECONDS)
 
     async def lookup():
         with pytest.raises(MasterNotFoundError):
             await Sentinel(list(cfg.sentinels), sentinel_kwargs=kwargs).discover_master(cfg.master)
 
-    start = time.perf_counter()
     asyncio.run(lookup())
-    assert time.perf_counter() - start < 1.5
+    assert attempts == [("sentinel-a", 26379), ("sentinel-b", 26379)]
 
 
 def test_no_sentinel_auth_by_default(monkeypatch, no_ping, sentinel_env):
