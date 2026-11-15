@@ -336,6 +336,9 @@ def _sentinel_node_kwargs(cfg: _SentinelConfig, timeout_seconds: float) -> dict[
         "password": cfg.sentinel_password,
         "socket_connect_timeout": timeout_seconds,
         "socket_timeout": timeout_seconds,
+        # One try per sentinel, then the next one. redis-py's default retry (10 tries on 8.1, which
+        # the image installs) made a sentinel whose host vanished cost about a minute per lookup.
+        "retry": None,
         **_tls_kwargs(cfg.sentinel_ssl, cfg.ssl_verify),
     }
 

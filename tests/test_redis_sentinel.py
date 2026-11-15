@@ -219,6 +219,30 @@ def test_sentinel_credentials_stay_on_the_sentinels(monkeypatch, no_ping, sentin
     assert _pool(store).connection_kwargs["password"] == "data-pw"
 
 
+def test_one_try_per_sentinel(monkeypatch, no_ping, sentinel_env):
+    """A sentinel whose host vanished must cost one timeout, not redis-py's default retries."""
+    assert _sentinel_kwargs(build_token_store())["retry"] is None
+
+
+def test_a_vanished_sentinel_costs_one_timeout(monkeypatch):
+    import asyncio
+    import time
+
+    from redis.asyncio.sentinel import MasterNotFoundError, Sentinel
+
+    monkeypatch.setenv("REDIS_SENTINEL_MASTER", "plane-master")
+    cfg = storage._sentinel_config("10.255.255.1:26379")
+    kwargs = storage._sentinel_node_kwargs(cfg, 0.3)
+
+    async def lookup():
+        with pytest.raises(MasterNotFoundError):
+            await Sentinel(list(cfg.sentinels), sentinel_kwargs=kwargs).discover_master(cfg.master)
+
+    start = time.perf_counter()
+    asyncio.run(lookup())
+    assert time.perf_counter() - start < 1.5
+
+
 def test_no_sentinel_auth_by_default(monkeypatch, no_ping, sentinel_env):
     """The data-node password is not sent to the sentinels unless asked for."""
     monkeypatch.setenv("REDIS_PASSWORD", "data-pw")
