@@ -56,7 +56,7 @@ _WORKITEMS_NEED_NATIVE = (
 )
 
 ACTIONS = (
-    Action("list", (), note="returns every initiative; this endpoint does not paginate", read=True),
+    Action("list", (), ("cursor", "per_page"), read=True),
     Action("retrieve", ("initiative_id",), read=True),
     Action("create", ("name",), ("description_html", "start_date", "end_date", "state", "lead")),
     Action(
@@ -163,11 +163,13 @@ def register(mcp: FastMCP) -> None:
             _require_native(client, workspace_slug, _WORK_ITEM_FALLBACK)
 
         if action == "list":
-            # No cursor or per_page: PaginatedInitiativeResponse carries `results`
-            # and nothing else, so a page size could only truncate the answer with
-            # no way to ask for the rest.
-            response: PaginatedInitiativeResponse = client.initiatives.list(workspace_slug=workspace_slug)
-            return response.results
+            # Plane pages this list (20 by default). The envelope carries next_cursor,
+            # so a caller can tell page one from the whole set and ask for the rest.
+            response: PaginatedInitiativeResponse = client.initiatives.list(
+                workspace_slug=workspace_slug,
+                params=page_params(cursor, per_page),
+            )
+            return envelope(response)
 
         if action == "create":
             return client.initiatives.create(

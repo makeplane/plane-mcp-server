@@ -23,7 +23,7 @@ NEXT = "CURSOR-NEXT"
 # Endpoints Plane does not paginate. The SDK response model carries no cursor
 # fields at all, so the action must not advertise `cursor`/`per_page` either --
 # claiming to page and then silently truncating is the bug this test exists for.
-NOT_PAGINATED = {("initiative", "list")}
+NOT_PAGINATED: set[tuple[str, str]] = set()
 
 
 class _Page:
