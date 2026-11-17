@@ -30,6 +30,7 @@ SAMPLES: dict[str, object] = {
     # page and project take the numeric level; collection names it.
     "access": {"page": 1, "project": 1, "collection": "private", "dashboard": "private"},
     "member_access": "edit",
+    "role_slug": {"member": "contributor"},
     "network": 2,
     "timezone": "UTC",
     "workitem_identifier": "ENG-42",
