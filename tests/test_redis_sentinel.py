@@ -7,13 +7,15 @@ never connected — redis-py resolves the master lazily on first use.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 import pytest
 from key_value.aio.stores.memory import MemoryStore
 from key_value.aio.stores.redis import RedisStore
-from redis.asyncio.sentinel import SentinelConnectionPool
+from redis.asyncio.sentinel import SentinelConnectionPool, SentinelManagedConnection, SentinelManagedSSLConnection
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from plane_mcp import storage
 from plane_mcp.storage import build_token_store
@@ -59,15 +61,30 @@ def sentinel_env(monkeypatch):
     monkeypatch.setenv("REDIS_SENTINEL_MASTER", "mymaster")
 
 
+class _RecordList(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
 @pytest.fixture
-def storage_log(caplog):
-    """Every record from the storage logger (``fastmcp`` does not propagate)."""
+def storage_log():
+    """Every record from the storage logger, each once.
+
+    A handler of its own rather than caplog's: ``fastmcp`` doesn't propagate, and pytest 9.2 also
+    attaches its capture handlers there (and swaps them between test phases), so adding caplog's
+    handler counted records twice on 9.2 and once on 9.0.
+    """
     target = logging.getLogger("fastmcp.plane_mcp.storage")
-    target.addHandler(caplog.handler)
+    handler = _RecordList()
+    target.addHandler(handler)
     previous = target.level
     target.setLevel(logging.DEBUG)
-    yield caplog
-    target.removeHandler(caplog.handler)
+    yield handler
+    target.removeHandler(handler)
     target.setLevel(previous)
 
 
@@ -75,6 +92,16 @@ def _pool(store: RedisStore) -> SentinelConnectionPool:
     pool = store._client.connection_pool
     assert isinstance(pool, SentinelConnectionPool)
     return pool
+
+
+def _data_node_class(pool: SentinelConnectionPool) -> str:
+    """The redis-py class a data-node connection builds on, under the failover-following subclass."""
+    cls = pool.connection_class
+    assert issubclass(cls, SentinelManagedConnection)
+    assert cls.__name__.startswith("FollowPrimary")
+    return (
+        "SentinelManagedSSLConnection" if issubclass(cls, SentinelManagedSSLConnection) else "SentinelManagedConnection"
+    )
 
 
 def _sentinel_kwargs(store: RedisStore) -> dict[str, Any]:
@@ -138,7 +165,7 @@ def test_sentinel_mode_builds_a_master_for_client(monkeypatch, no_ping, sentinel
     kwargs = pool.connection_kwargs
     assert kwargs["db"] == 0
     assert kwargs["decode_responses"] is True
-    assert pool.connection_class.__name__ == "SentinelManagedConnection"
+    assert _data_node_class(pool) == "SentinelManagedConnection"
 
 
 def test_redis_store_keeps_the_client_it_is_given(monkeypatch, no_ping, sentinel_env):
@@ -294,7 +321,7 @@ def test_no_warning_without_overrides(monkeypatch, no_ping, sentinel_env, storag
 
 def test_tls_off_by_default(monkeypatch, no_ping, sentinel_env):
     store = build_token_store()
-    assert _pool(store).connection_class.__name__ == "SentinelManagedConnection"
+    assert _data_node_class(_pool(store)) == "SentinelManagedConnection"
     assert _pool(store).sentinel_manager.sentinels[0].connection_pool.connection_class.__name__ == "Connection"
 
 
@@ -303,7 +330,7 @@ def test_redis_ssl_turns_on_tls_for_both_hops_without_verification(monkeypatch, 
     store = build_token_store()
 
     pool = _pool(store)
-    assert pool.connection_class.__name__ == "SentinelManagedSSLConnection"
+    assert _data_node_class(pool) == "SentinelManagedSSLConnection"
     assert pool.connection_kwargs["ssl_cert_reqs"] == "none"
     assert pool.connection_kwargs["ssl_check_hostname"] is False
 
@@ -326,13 +353,13 @@ def test_sentinel_ssl_set_independently(monkeypatch, no_ping, sentinel_env):
     monkeypatch.setenv("REDIS_SSL", "true")
     monkeypatch.setenv("REDIS_SENTINEL_SSL", "false")
     store = build_token_store()
-    assert _pool(store).connection_class.__name__ == "SentinelManagedSSLConnection"
+    assert _data_node_class(_pool(store)) == "SentinelManagedSSLConnection"
     assert _pool(store).sentinel_manager.sentinels[0].connection_pool.connection_class.__name__ == "Connection"
 
     monkeypatch.setenv("REDIS_SSL", "false")
     monkeypatch.setenv("REDIS_SENTINEL_SSL", "ON")
     store = build_token_store()
-    assert _pool(store).connection_class.__name__ == "SentinelManagedConnection"
+    assert _data_node_class(_pool(store)) == "SentinelManagedConnection"
     assert _pool(store).sentinel_manager.sentinels[0].connection_pool.connection_class.__name__ == "SSLConnection"
 
 
@@ -557,3 +584,34 @@ def test_password_path_without_username_is_unchanged(monkeypatch, no_ping):
     monkeypatch.setenv("REDIS_PORT", "6379")
     monkeypatch.setenv("REDIS_PASSWORD", "pw")
     assert build_token_store()._client.connection_pool.connection_kwargs["username"] is None
+
+
+@pytest.mark.parametrize("ssl", [False, True])
+def test_a_retry_after_failover_reconnects_through_the_sentinels(monkeypatch, no_ping, sentinel_env, ssl):
+    # A pooled connection to the old primary: READONLY (or a timeout) disconnects it, and the retry resends on it.
+    # redis-py's own reconnect reuses the host it had; this one must ask the sentinels for the new primary.
+    if ssl:
+        monkeypatch.setenv("REDIS_SSL", "true")
+    pool = _pool(build_token_store())
+    connection = pool.make_connection()
+    connection.host, connection.port = "old-primary", 6379
+    dialled: list[tuple[str, int]] = []
+
+    async def new_primary() -> tuple[str, int]:
+        return ("new-primary", 6380)
+
+    class Stop(Exception):
+        pass
+
+    async def dial(self: Any) -> None:
+        dialled.append((self.host, self.port))
+        raise Stop
+
+    monkeypatch.setattr(pool, "get_master_address", new_primary)
+    monkeypatch.setattr(type(connection).__mro__[1], "_connect", dial)
+    connection.retry = type(connection.retry)(connection.retry._backoff, 0)
+
+    with pytest.raises(RedisConnectionError):
+        asyncio.run(connection.send_packed_command(b"*1\r\n$4\r\nPING\r\n"))
+
+    assert dialled == [("new-primary", 6380)]

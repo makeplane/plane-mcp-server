@@ -42,6 +42,7 @@ eagerly with a synchronous PING.
 
 from __future__ import annotations
 
+import functools
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -420,13 +421,38 @@ def _ping_redis_sentinel(cfg: _SentinelConfig, *, timeout_seconds: float = 5.0) 
     logger.info("Redis connection verified via Sentinel (PING succeeded)")
 
 
+@functools.cache
+def _sentinel_connection_class(ssl: bool) -> type:
+    """The data-node connection class: redis-py's Sentinel-managed one, with retries that follow a failover.
+
+    A command retry resends on the same connection, and redis-py (7.1 and others) reconnects it
+    through ``connect_check_health()``, which reuses the host it had instead of asking the sentinels:
+    after a ``READONLY`` from a demoted primary, or a timeout to a dead one, every retry went back to
+    the old node and the command failed while the new primary was up. A connection without a socket
+    now reconnects through the sentinels before it sends.
+    """
+    from redis.asyncio.sentinel import SentinelManagedConnection, SentinelManagedSSLConnection
+
+    base = SentinelManagedSSLConnection if ssl else SentinelManagedConnection
+
+    class FollowPrimaryConnection(base):  # type: ignore[valid-type, misc]
+        async def send_packed_command(self, command: Any, check_health: bool = True) -> None:
+            if not self.is_connected:
+                await self.connect()
+            await super().send_packed_command(command, check_health)
+
+    FollowPrimaryConnection.__name__ = FollowPrimaryConnection.__qualname__ = f"FollowPrimary{base.__name__}"
+    return FollowPrimaryConnection
+
+
 def _sentinel_client(cfg: _SentinelConfig) -> Any:
     """The async client the Sentinel token store connects with.
 
     ``master_for`` returns a ``redis.asyncio.Redis`` over a
     ``SentinelConnectionPool``: every new connection asks the sentinels for the
     current primary, and a ``READONLY`` reply from a demoted primary drops the
-    connection so the retry lands on the new one. The pool is built from the
+    connection, and the retry reconnects through the sentinels to the new one
+    (``_sentinel_connection_class``). The pool is built from the
     caller's kwargs, not the ``Redis()`` defaults, so the retry policy has to
     be passed explicitly — without it a failover surfaces as an error on the
     first request that hits it.
@@ -444,6 +470,7 @@ def _sentinel_client(cfg: _SentinelConfig) -> Any:
         cfg.master,
         decode_responses=True,
         retry=Retry(ExponentialWithJitterBackoff(base=1, cap=10), retries=3),
+        connection_class=_sentinel_connection_class(cfg.ssl),
     )
 
 
