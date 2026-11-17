@@ -11,7 +11,8 @@ HTTP / SSE transports. Priority order (highest first):
 1. ``REDIS_URL`` → Redis from a single connection URL. The URL carries host,
    port, db, credentials and TLS (``rediss://``) in one value; ``REDIS_SSL``
    is ignored here because the scheme already decides. ``REDIS_PASSWORD``
-   applies only when the URL itself carries no password.
+   and ``REDIS_USERNAME`` apply only when the URL carries no password or
+   username of its own.
 2. ``REDIS_PASSWORD`` + ``REDIS_HOST``/``REDIS_PORT`` → Redis with a static
    password (and ``REDIS_USERNAME`` for an ACL user, when set).
 3. ``ELASTICACHE_SECRET_ARN`` + IRSA (``AWS_ROLE_ARN``) or EKS Pod Identity
@@ -133,19 +134,26 @@ def _redact_url(url: str) -> str:
     return urlunparse(parsed._replace(netloc=netloc))
 
 
-def _url_password_override(url: str, password: str | None) -> dict[str, str]:
+def _url_password_override(url: str, password: str | None, username: str | None = None) -> dict[str, str]:
     """Extra client kwargs for a URL-configured connection.
 
-    The URL's own credentials win; ``REDIS_PASSWORD`` fills in only when the
-    URL carries none. Returned as kwargs rather than a value so an absent
-    override cannot clobber a URL-embedded password with ``None``.
+    The URL's own credentials win; ``REDIS_PASSWORD`` and ``REDIS_USERNAME``
+    fill in only when the URL carries none of its own. Returned as kwargs
+    rather than values so an absent override cannot clobber a URL-embedded
+    credential with ``None``.
     """
-    if password and not urlparse(url).password:
-        return {"password": password}
-    return {}
+    parsed = urlparse(url)
+    override: dict[str, str] = {}
+    if password and not parsed.password:
+        override["password"] = password
+    if username and not parsed.username:
+        override["username"] = username
+    return override
 
 
-def _ping_redis_url(url: str, *, password: str | None = None, timeout_seconds: float = 5.0) -> None:
+def _ping_redis_url(
+    url: str, *, password: str | None = None, username: str | None = None, timeout_seconds: float = 5.0
+) -> None:
     """Verify Redis reachability from a connection URL with a one-shot PING.
 
     ``redis.Redis.from_url`` honours the scheme (``rediss://`` enables TLS)
@@ -157,7 +165,7 @@ def _ping_redis_url(url: str, *, password: str | None = None, timeout_seconds: f
         url,
         socket_connect_timeout=timeout_seconds,
         socket_timeout=timeout_seconds,
-        **_url_password_override(url, password),
+        **_url_password_override(url, password, username),
     )
     try:
         client.ping()
@@ -497,7 +505,9 @@ def build_token_store() -> Any:
         if redis_host or redis_port:
             logger.warning("Both REDIS_URL and REDIS_HOST/REDIS_PORT set — the URL wins, host/port ignored.")
 
-        _ping_redis_url(redis_url, password=password)
+        # REDIS_USERNAME fills in an ACL user the URL doesn't name, as on the host/port path.
+        username = _env_str("REDIS_USERNAME")
+        _ping_redis_url(redis_url, password=password, username=username)
 
         # Not RedisStore(url=...): its own URL parser keeps host/port/db but
         # drops the scheme, silently downgrading rediss:// to plaintext.
@@ -507,7 +517,7 @@ def build_token_store() -> Any:
         async_client = AsyncRedis.from_url(
             redis_url,
             decode_responses=True,
-            **_url_password_override(redis_url, password),
+            **_url_password_override(redis_url, password, username),
         )
         store = RedisStore(client=async_client)
         logger.info("Token store: Redis (url=%s)", _redact_url(redis_url))

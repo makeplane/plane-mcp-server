@@ -505,6 +505,53 @@ def test_password_path_passes_redis_username(monkeypatch, no_ping):
     assert kwargs["password"] == "pw"
 
 
+def test_url_path_passes_redis_username(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("REDIS_PASSWORD", "pw")
+    monkeypatch.setenv("REDIS_USERNAME", "plane")
+    kwargs = build_token_store()._client.connection_pool.connection_kwargs
+    assert kwargs["username"] == "plane"
+    assert kwargs["password"] == "pw"
+
+
+def test_url_path_username_in_url_wins(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_URL", "redis://urluser:urlpw@localhost:6379/0")
+    monkeypatch.setenv("REDIS_PASSWORD", "pw")
+    monkeypatch.setenv("REDIS_USERNAME", "plane")
+    kwargs = build_token_store()._client.connection_pool.connection_kwargs
+    assert kwargs["username"] == "urluser"
+    assert kwargs["password"] == "urlpw"
+
+
+def test_url_path_without_username_is_unchanged(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("REDIS_PASSWORD", "pw")
+    assert build_token_store()._client.connection_pool.connection_kwargs.get("username") is None
+
+
+def test_url_ping_passes_redis_username(monkeypatch):
+    seen = {}
+
+    class FakeRedis:
+        @classmethod
+        def from_url(cls, url, **kwargs):
+            seen.update(kwargs)
+            return cls()
+
+        def ping(self):
+            return True
+
+        def close(self):
+            pass
+
+    import redis
+
+    monkeypatch.setattr(redis, "Redis", FakeRedis)
+    storage._ping_redis_url("redis://localhost:6379/0", password="pw", username="plane")
+    assert seen["username"] == "plane"
+    assert seen["password"] == "pw"
+
+
 def test_password_path_without_username_is_unchanged(monkeypatch, no_ping):
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
