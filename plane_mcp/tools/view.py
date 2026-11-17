@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastmcp import FastMCP
 from plane.models.v2.views import CreateView, UpdateView, View
@@ -53,7 +53,7 @@ def register(mcp: FastMCP) -> None:
         description: str = "",
         pql: str = "",
         access: str = "",
-    ) -> View | list[View] | str | None:
+    ) -> View | list[dict[str, Any]] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if error := one_of("access", access, tuple(ACCESS)):
@@ -65,7 +65,8 @@ def register(mcp: FastMCP) -> None:
         pql_filters = {"stripped": pql} if pql else None
 
         if action == "list":
-            return list(views.iterate(*scope, fields=LIST_FIELDS))
+            # exclude_unset: the model would pad every field the listing left out with null.
+            return [row.model_dump(exclude_unset=True) for row in views.iterate(*scope, fields=LIST_FIELDS)]
 
         if action == "create":
             if not name:
