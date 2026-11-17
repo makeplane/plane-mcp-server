@@ -15,6 +15,7 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from plane_mcp.toolkit.spec import action_names
 
@@ -230,10 +231,14 @@ def test_action_literal_covers_every_declared_action(mod, action, registered):
 )
 def test_an_unrecognised_workitem_value_is_refused_not_dropped(args, named, registered, spy):
     """Dropping it created the item minus the field and reported success."""
-    result = registered["workitem"].fn(**args)
-
-    assert isinstance(result, str) and result.startswith("Error:"), result
-    assert named in result, result
+    if named in ("group_by", "sub_group_by"):
+        with pytest.raises(ToolError) as exc_info:
+            registered["workitem"].fn(**args)
+        assert named in str(exc_info.value)
+    else:
+        result = registered["workitem"].fn(**args)
+        assert isinstance(result, str) and result.startswith("Error:"), result
+        assert named in result, result
     assert not spy.recorder.calls, f"reached the SDK with an invalid {named}"
 
 
