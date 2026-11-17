@@ -97,17 +97,13 @@ RELATION FUNCTIONS   (standalone — argument is work item id or UUID)
   childOf("WEB-5")     parentOf("WEB-5")    linkedTo("WEB-5")
   blockedBy("WEB-5")   blocks("WEB-5")      duplicateOf("WEB-5")
 
-LIMITS
-  Max 5 conditions. Each field comparison, predicate, or relation call = 1 condition.
-  IN(...) and BETWEEN...AND... each count as 1.
-
 EXAMPLES
   priority = "high" AND assignee = currentUser()
   isOverdue()
   stateGroup IN openStates() AND updatedAt < daysAgo(30)
   cycle IN activeCycle() AND stateGroup IN closedStates()
   title ~ "capex" AND priority IN ("high","urgent")
-  dueDate BETWEEN (daysAgo(7), today())
+  dueDate BETWEEN daysAgo(7) AND today()
   createdAt >= startOfWeek()
   hasNoAssignee() AND priority = "urgent"
   isEpic() AND hasChildren()
@@ -173,7 +169,7 @@ _FULL_REFERENCE_TEMPLATE = """\
 | IS NOT NULL           | assignee IS NOT NULL                             |
 | IS EMPTY              | label IS EMPTY                                   |
 | IS NOT EMPTY          | label IS NOT EMPTY                               |
-| BETWEEN val AND val   | dueDate BETWEEN (daysAgo(7), today())            |
+| BETWEEN val AND val   | dueDate BETWEEN daysAgo(7) AND today()           |
 | AND  OR  NOT          | priority = "high" AND NOT isArchived = true      |
 
 Precedence: NOT > AND > OR. Use parentheses to override.
@@ -277,14 +273,6 @@ cf["<property-uuid>"] IS NOT NULL
 - DATETIME: quoted string or date function — `cf["uuid"] >= daysAgo(7)`
 - Do NOT use IN/NOT IN on TEXT, URL, DECIMAL, DATETIME, or BOOLEAN properties
 
-### Limits
-
-- **Max 5 conditions** per query
-- Each field comparison = 1 condition
-- Each IN(...) = 1 condition (not one per value)
-- Each BETWEEN...AND... = 1 condition
-- Each predicate/relation function call = 1 condition
-
 ### UUID Fields — How to get UUIDs
 
 UUID fields (assignee, state, label, cycle, module, project, createdBy, type, milestone,
@@ -326,7 +314,7 @@ isOverdue()
 stateGroup IN openStates() AND updatedAt < daysAgo(30)
 cycle IN activeCycle() AND stateGroup IN closedStates()
 title ~ "capex" AND priority IN ("high","urgent")
-dueDate BETWEEN (daysAgo(7), today())
+dueDate BETWEEN daysAgo(7) AND today()
 hasNoAssignee() AND priority = "urgent"
 isEpic() AND hasChildren()
 isSubWorkItem() AND hasStartAndDueDates()
