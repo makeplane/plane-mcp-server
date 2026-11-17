@@ -44,6 +44,18 @@ htmlcov/
 .tox/
 .hypothesis/
 
+# Eval harness output
+evals/output/
+# Keep earlier local runs ignored after the default directory rename.
+evals/results/
+evals/.env-pids
+evals/.api_runserver.log
+evals/.mock_flags.log
+
+# Booting a local Plane to run evals against is each developer's own setup,
+# not part of this repo. The harness itself only needs the EVAL_PLANE_* vars.
+localdev/
+
 # Mypy
 .mypy_cache/
 .dmypy.json
