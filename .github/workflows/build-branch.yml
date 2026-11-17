@@ -20,6 +20,10 @@ on:
         type: boolean
         default: false
         required: true
+      pin_prod:
+        description: "Open a fleet-deployments PR deploying this release to mcp.plane.so (Release builds on main only)"
+        type: boolean
+        default: true
 
 env:
   TARGET_BRANCH: ${{ github.ref_name }}
@@ -95,7 +99,7 @@ jobs:
         name: Checkout Files
         uses: actions/checkout@v4
       - name: Plane MCP Server Build and Push
-        uses: makeplane/actions/build-push@v1.0.0
+        uses: makeplane/actions/build-push@v1.5.1
         with:
           build-release: ${{ needs.release_build_setup.outputs.build_release }}
           build-prerelease: ${{ needs.release_build_setup.outputs.build_prerelease }}
@@ -137,3 +141,153 @@ jobs:
           draft: false
           prerelease: ${{ env.IS_PRERELEASE }}
           generate_release_notes: true
+
+  # A non-prerelease Release on main opens the PR that deploys it to mcp.plane.so: Fleet bundle
+  # prod/plane-app/plane-mcp-server in makeplane/fleet-deployments, on plane-eks-prodx. Merging that PR is the
+  # deploy. Same flow as plane-ee's pin_prod_plane (makeplane/plane-ee#11333). Untick pin_prod on the
+  # dispatch to build a release without proposing it for prod.
+  pin_prod:
+    name: Open the prod deploy PR for this release
+    if: >-
+      ${{ github.repository == 'makeplane/plane-mcp-server'
+          && github.ref_name == 'main'
+          && needs.release_build_setup.outputs.build_release == 'true'
+          && needs.release_build_setup.outputs.build_prerelease != 'true'
+          && github.event.inputs.pin_prod != 'false' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    needs:
+      [
+        release_build_setup,
+        build_and_push,
+      ]
+    env:
+      REL_VERSION: ${{ needs.release_build_setup.outputs.release_version }}
+      VALUES: prod/plane-app/plane-mcp-server/values.yaml
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Check this run built the release images
+        env:
+          IMAGES: >-
+            ${{ needs.release_build_setup.outputs.dh_img_name }}
+        run: |
+          set -euo pipefail
+          # The version tag is mutable: a later Release dispatch with the same releaseVersion
+          # overwrites it. Prod must only get images this run built.
+          RUN="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/"
+          for img in ${IMAGES}; do
+            ref="makeplane/${img}"
+            digest=$(docker buildx imagetools inspect "${ref}:${REL_VERSION}" --format '{{json .Manifest}}' | jq -r .digest) \
+              || { echo "::error::${ref}:${REL_VERSION} is missing or could not be read from Docker Hub."; exit 1; }
+            builder=$(docker buildx imagetools inspect "${ref}@${digest}" --format '{{json .Provenance}}' \
+              | jq -r '.SLSA.runDetails.builder.id // empty')
+            if [[ "${builder}" != "${RUN}"* ]]; then
+              echo "::error::${ref}:${REL_VERSION} is now ${digest}, built by ${builder:-an unknown run}, not this run. Re-run all jobs to rebuild and pin."
+              exit 1
+            fi
+          done
+
+      - name: Check out fleet-deployments
+        uses: actions/checkout@v6
+        with:
+          repository: makeplane/fleet-deployments
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: fleet-deployments
+
+      - id: prod
+        name: Check prod is behind this release
+        working-directory: fleet-deployments
+        run: |
+          set -euo pipefail
+          # The chart takes the server image from dockerRegistry.default_tag, the only default_tag in
+          # the file.
+          [ -f "${VALUES}" ] || { echo "::error::${VALUES} does not exist in fleet-deployments"; exit 1; }
+          [ "$(grep -cE '^  default_tag:' "${VALUES}")" = 1 ] \
+            || { echo "::error::expected exactly one dockerRegistry.default_tag in ${VALUES}"; exit 1; }
+          # Unquoted, "double" or 'single' quoted, with or without a trailing comment.
+          CURRENT=$(sed -nE "s/^  default_tag:[[:space:]]*[\"']?([^\"'[:space:]#]*).*/\1/p" "${VALUES}")
+          [ -n "${CURRENT}" ] || { echo "::error::dockerRegistry.default_tag in ${VALUES} is empty"; exit 1; }
+
+          if [ "${CURRENT}" = "${REL_VERSION}" ]; then
+            echo "::notice::prod is already on ${REL_VERSION}; nothing to open."
+            exit 0
+          fi
+          # A re-run of an older release must not open a PR that rolls prod back.
+          if [[ "${CURRENT}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            NEWEST=$(printf '%s\n' "${CURRENT#v}" "${REL_VERSION#v}" | sort -V | tail -n1)
+            if [ "${NEWEST}" != "${REL_VERSION#v}" ]; then
+              echo "::warning::prod is on ${CURRENT}, newer than ${REL_VERSION}; not opening a rollback."
+              exit 0
+            fi
+          fi
+          echo "from=${CURRENT}" >> "$GITHUB_OUTPUT"
+          echo "behind=true" >> "$GITHUB_OUTPUT"
+
+      - id: pr
+        name: Open the fleet-deployments PR
+        if: steps.prod.outputs.behind == 'true'
+        working-directory: fleet-deployments
+        env:
+          GH_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          FROM: ${{ steps.prod.outputs.from }}
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.release_build_setup.outputs.release_version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Only the value changes: the quotes and any trailing comment stay as they are.
+          sed -i -E "s/^(  default_tag:[[:space:]]*[\"']?)[^\"'[:space:]#]*/\1${REL_VERSION}/" "${VALUES}"
+          if git diff --quiet; then
+            echo "::error::could not set dockerRegistry.default_tag to ${REL_VERSION} in ${VALUES}"
+            exit 1
+          fi
+
+          # Run ID and attempt keep a re-run off a branch an earlier attempt already pushed.
+          PREFIX="ci/pin-prod-plane-mcp-server/"
+          BRANCH="${PREFIX}${REL_VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          TITLE="chore(prod/plane-mcp-server): deploy ${REL_VERSION} to mcp.plane.so"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          git commit -qam "${TITLE}"
+          git push -q origin "${BRANCH}"
+
+          if [[ "${FROM}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            CHANGES="Changes since prod's \`${FROM}\`: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${FROM}...${REL_VERSION}"
+          else
+            CHANGES="Prod is on \`${FROM}\`, which is not a release tag, so there is no compare link."
+          fi
+          BODY=$(printf '%s\n' \
+            "Deploys release [\`${REL_VERSION}\`](${RELEASE_URL}) to mcp.plane.so: the images built from ${SOURCE_URL}." \
+            "" \
+            "${CHANGES}" \
+            "" \
+            "Merging deploys it: Fleet runs \`helm upgrade\` on plane-eks-prodx and every pod rolls onto this release." \
+            "" \
+            "Opened by ${RUN_URL}.")
+          URL=$(gh pr create --base main --head "${BRANCH}" --title "${TITLE}" --body "${BODY}")
+          echo "pr_url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Opened ${URL}"
+
+          # Supersede older pins only now that the new PR exists: only the newest release is
+          # worth deploying, and a failed create must not leave nothing to merge.
+          OPEN=$(gh pr list --state open --limit 200 --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"${PREFIX}\")) | \"\(.number) \(.headRefName)\"")
+          while read -r n head; do
+            [ -n "${n}" ] && [ "${head}" != "${BRANCH}" ] || continue
+            gh pr close "${n}" --delete-branch --comment "Superseded by ${URL}."
+          done <<< "${OPEN}"
+
+          # Drop branches a cancelled run pushed but never opened a PR for.
+          git ls-remote --heads origin | sed -n "s|.*refs/heads/\(${PREFIX}.*\)|\1|p" \
+          | while read -r b; do
+              [ "${b}" != "${BRANCH}" ] || continue
+              cut -d' ' -f2 <<< "${OPEN}" | grep -qxF "${b}" || git push -q origin --delete "${b}"
+            done
