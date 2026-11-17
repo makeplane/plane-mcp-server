@@ -1,6 +1,6 @@
 # The tool surface
 
-**30 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 208 actions in total.
+**31 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 222 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")
@@ -8,7 +8,7 @@ workitem(action="list", project_id=..., pql='state__group = "started"')
 cycle(action="archive", project_id=..., cycle_id=...)
 ```
 
-A compact catalogue — 30 tools, ~67k characters — loads fully in every MCP client and leaves the context budget to the conversation.
+A compact catalogue — 31 tools, ~70k characters — loads fully in every MCP client and leaves the context budget to the conversation.
 
 Five parts, in this order:
 
@@ -46,6 +46,7 @@ def register(mcp):                                # 5. dispatch
 | Declare every parameter an action takes, and only those | `ValidateActionArguments` checks calls against it. `query` is a real `workitem` parameter but useless to `count` — sent there it used to validate cleanly and answer a different question |
 | Use `needs()` for multi-parameter guards | It names only what is absent. `if not a or not b` blames both, so a caller that supplied `a` is told to send it again |
 | An action accepting `cursor` must return `envelope(response)` | Returning `response.results` lets a caller page in but never page on |
+| A v2 list (`client.v2`) asks for `paginate="cursor"` and returns `cursor_page(page)` | v2 answers `data`/`has_more`/`next_cursor`, not v1's envelope; only the keyset style carries a cursor |
 | Match the SDK's `params` type: `page_params` vs `as_params` | Some endpoints take a `Mapping`, others a Pydantic model they call `.model_dump()` on. The wrong one raises at call time |
 | Declare the type you mean | `CoerceArguments` repairs `'["uuid"]'` before validation, so type a list as a list. `coerce_list` is for parameters genuinely declared `str`, where a comma separates |
 | `@plan_gated("<feature>")` on a plan-gated resource | Turns a 402 into a message naming the feature. The argument is a fallback — where the refusal names the feature, that wins |
@@ -96,6 +97,7 @@ Where the workspace owns a resource outright, both directions of wrong-scope wri
 | `customer_property` | `list` · `retrieve` · `create` · `update` · `delete` · `get_values` · `set_values` |
 | `customer_request` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `cycle` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` · `transfer_workitems` · `complete` · `archive` · `unarchive` |
+| `dashboard` | `list` · `retrieve` · `create` · `update` · `delete` · `copy` · `list_widget_types` · `list_widgets` · `retrieve_widget` · `create_widget` · `update_widget` · `delete_widget` · `get_chart` · `get_charts` |
 | `get_pql_reference` | *(no action parameter)* |
 | `initiative` | `list` · `retrieve` · `create` · `update` · `delete` · `list_projects` · `add_projects` · `remove_projects` · `list_workitems` · `manage_workitems` |
 | `intake` | `list` · `retrieve` · `create` · `update` · `delete` |
@@ -157,3 +159,4 @@ caught here rather than at runtime.
 | `test_governance.py` | Project-vs-workspace scope pinned to its namespace and id keyword |
 | `test_workitem_property.py` | Values reach the SDK in the type the property expects; malformed option JSON and absent scopes are reported, not swallowed |
 | `test_attachments.py` | The image-versus-text return channel, size limits, and the SSRF guard |
+| `test_dashboard.py` | Widget fields reach the v2 SDK as set, cleared or left out; v2 validation and plan refusals are answered, naming the fields |

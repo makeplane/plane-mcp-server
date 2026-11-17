@@ -36,6 +36,9 @@ class _Page:
     prev_cursor = "CURSOR-PREV"
     next_page_results = True
     prev_page_results = False
+    # The v2 keyset envelope, read by `cursor_page`.
+    data = results
+    has_more = True
 
 
 def _paginated_actions():

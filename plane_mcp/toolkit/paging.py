@@ -76,6 +76,20 @@ def envelope(response: Any, fields: str | None = None) -> dict[str, Any]:
     }
 
 
+def cursor_page(page: Any, fields: str | None = None) -> dict[str, Any]:
+    """`envelope` for a v2 list, fetched with `paginate="cursor"`.
+
+    v2 answers a different envelope -- `data`, `has_more`, `next_cursor` -- and
+    only the keyset one carries a cursor, so a resource that takes `cursor` must
+    request that style or it hands back an offset page a caller cannot page on.
+    """
+    return {
+        "results": dump_results(page.data, fields),
+        "next_cursor": page.next_cursor,
+        "has_more": page.has_more,
+    }
+
+
 def workitem_page(
     tool: str,
     action: str,

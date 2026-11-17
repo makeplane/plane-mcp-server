@@ -28,13 +28,15 @@ SAMPLES: dict[str, object] = {
     "relation_type": "blocked_by",
     "property_type": "TEXT",
     # page and project take the numeric level; collection names it.
-    "access": {"page": 1, "project": 1, "collection": "private"},
+    "access": {"page": 1, "project": 1, "collection": "private", "dashboard": "private"},
     "member_access": "edit",
     "network": 2,
     "timezone": "UTC",
     "workitem_identifier": "ENG-42",
     "kind": "workitem",
     "template_data": '{"name": "Spec"}',
+    "chart_type": "BAR_CHART",
+    "chart_model": "BASIC",
 }
 
 # Actions that require *one of* several optional parameters -- a condition the
@@ -65,6 +67,8 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
     ("release", "update_changelog"): {"description_html": "<p>notes</p>"},
     ("release", "manage_workitems"): {"add_ids": "id-1"},
     ("release_label", "list"): {},
+    ("dashboard", "update"): {"name": "Renamed"},
+    ("dashboard", "update_widget"): {"name": "Renamed"},
 }
 
 # Actions whose guard clause legitimately answers without calling the SDK.

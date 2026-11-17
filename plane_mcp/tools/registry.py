@@ -22,6 +22,7 @@ from plane_mcp.tools import (
     customer_property,
     customer_request,
     cycle,
+    dashboard,
     get_pql_reference,
     initiative,
     intake,
@@ -80,6 +81,7 @@ RESOURCES: tuple[ModuleType, ...] = (
     workspace,
     template,
     collection,
+    dashboard,
 )
 
 
