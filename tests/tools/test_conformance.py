@@ -67,6 +67,7 @@ CATALOGUE = [
     "template",
     "collection",
     "dashboard",
+    "view",
 ]
 
 

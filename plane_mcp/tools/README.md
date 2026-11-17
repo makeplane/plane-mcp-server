@@ -113,6 +113,7 @@ Where the workspace owns a resource outright, both directions of wrong-scope wri
 | `release_tag` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `state` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `template` | `list` · `create` · `update` · `delete` |
+| `view` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `work_log` | `list` · `create` · `update` · `delete` |
 | `workitem` | `list` · `list_archived` · `retrieve` · `retrieve_by_identifier` · `search` · `count` · `create` · `update` · `delete` · `archive` · `manage_assignee` · `manage_label` · `read_description_image` |
 | `workitem_activity` | `list` · `retrieve` |
