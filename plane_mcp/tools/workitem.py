@@ -148,8 +148,8 @@ FOOTER = (
     "resource first if you only have a name.\n"
     "description_stripped is plain text and is wrapped into HTML on save; description_html wins "
     "if both are given.\n"
-    "To clear a field on update: assignees=[] or labels=[], and start_date=null or "
-    "target_date=null. A field you leave out is not changed.\n"
+    "To clear a field on update: assignees=[] or labels=[], and start_date=null, "
+    "target_date=null or parent=null. A field you leave out is not changed.\n"
     "fields is a sparse fieldset: use `project`, not project_id, and `description_html`, not "
     "description.\n"
     f"count group_by and sub_group_by accept: {', '.join(GROUP_BY_VALUES)}. These are grouping "
@@ -170,6 +170,20 @@ LEGACY = {
     "manage_work_item_assignee": "manage_assignee",
     "manage_work_item_label": "manage_label",
 }
+
+
+def _null_if_spelled(value: str | None) -> str | None:
+    """None for a null that arrived as text ("null", "None").
+
+    Clients that encode every argument as a string send `parent="null"` meaning
+    null. The coercion middleware leaves it alone because the field accepts
+    strings, and Plane then rejects it as an invalid UUID or date -- so the clear
+    never happens. None of these fields can hold that text, so reading it as null
+    loses nothing.
+    """
+    if isinstance(value, str) and value.strip().lower() in ("null", "none"):
+        return None
+    return value
 
 
 def _scoped_pql(pql: str, project_id: str) -> str:
@@ -219,7 +233,7 @@ def register(mcp: FastMCP) -> None:
         start_date: str | None = "",
         target_date: str | None = "",
         sort_order: float = 0,
-        parent: str = "",
+        parent: str | None = "",
         state: str = "",
         estimate_point: str = "",
         add_user_id: str = "",
@@ -246,6 +260,8 @@ def register(mcp: FastMCP) -> None:
         if error := one_of("sub_group_by", sub_group_by, GROUP_BY_VALUES):
             raise ToolError(error)
 
+        clearable_args = (start_date, target_date, parent)
+
         def retrieve_params() -> RetrieveQueryParams:
             return RetrieveQueryParams(
                 expand=opt(expand),
@@ -257,6 +273,7 @@ def register(mcp: FastMCP) -> None:
 
         def write_payload() -> dict[str, Any]:
             """The fields the caller supplied, and no others."""
+            start_date, target_date, parent = map(_null_if_spelled, clearable_args)
             payload = {
                 "name": opt(name),
                 "assignees": coerce_list(assignees),
@@ -276,8 +293,9 @@ def register(mcp: FastMCP) -> None:
                 "estimate_point": opt(estimate_point),
             }
             supplied = {field: value for field, value in payload.items() if value is not None}
-            dates = {"start_date": start_date, "target_date": target_date}
-            return supplied | {field: None for field, value in dates.items() if value is None}
+            # null clears these; "" (the default) leaves them alone.
+            clearable = {"start_date": start_date, "target_date": target_date, "parent": parent}
+            return supplied | {field: None for field, value in clearable.items() if value is None}
 
         if action in ("list", "list_archived"):
             if action == "list_archived" and not project_id:

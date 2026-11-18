@@ -445,11 +445,27 @@ def _update_sent(spy):
     return spy.recorder.only().kwargs["data"].model_dump(exclude_unset=True)
 
 
-@pytest.mark.parametrize("field", ["start_date", "target_date"])
-def test_a_date_set_to_null_is_cleared(field, registered, spy):
+@pytest.mark.parametrize("field", ["start_date", "target_date", "parent"])
+def test_a_field_set_to_null_is_cleared(field, registered, spy):
     registered["workitem"].fn(action="update", project_id="p", workitem_id="w", **{field: None})
 
     assert _update_sent(spy) == {field: None}
+
+
+@pytest.mark.parametrize("spelled", ["null", "NULL", "None", " null "])
+@pytest.mark.parametrize("field", ["start_date", "target_date", "parent"])
+def test_a_null_sent_as_text_is_cleared(field, spelled, registered, spy):
+    """A client that stringifies every argument sends "null". Forwarded as text it
+    fails Plane's UUID/date check and nothing is cleared (PAI-2135)."""
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", **{field: spelled})
+
+    assert _update_sent(spy) == {field: None}
+
+
+def test_setting_a_parent_still_sends_its_id(registered, spy):
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", parent="uuid-1")
+
+    assert _update_sent(spy) == {"parent": "uuid-1"}
 
 
 def test_an_update_sends_only_what_it_was_given(registered, spy):
@@ -467,6 +483,12 @@ def test_clearing_one_date_leaves_the_other_alone(registered, spy):
     )
 
     assert _update_sent(spy) == {"start_date": "2026-01-01", "target_date": None}
+
+
+def test_a_parent_left_at_its_default_is_not_sent(registered, spy):
+    registered["workitem"].fn(action="update", project_id="p", workitem_id="w", name="x", parent="")
+
+    assert "parent" not in _update_sent(spy)
 
 
 def test_a_date_left_at_its_default_is_not_sent(registered, spy):
@@ -487,9 +509,10 @@ def test_argument_repair_keeps_the_default_distinct_from_null(sent, arrives, reg
     would arrive as null and clear the date."""
     from plane_mcp.coercion import coerce_arguments
 
-    repaired, _ = coerce_arguments({"target_date": sent}, registered["workitem"].parameters)
+    for field in ("target_date", "parent"):
+        repaired, _ = coerce_arguments({field: sent}, registered["workitem"].parameters)
 
-    assert repaired["target_date"] == arrives
+        assert repaired[field] == arrives
 
 
 def test_retrieving_the_workspace_asks_plane_nothing(registered, spy, monkeypatch):
