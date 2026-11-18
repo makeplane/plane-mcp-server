@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from plane.errors import HttpError
 from plane.models.modules import (
     CreateModule,
     Module,
@@ -15,7 +17,8 @@ from plane.models.modules import (
 from plane.models.query_params import LiteListQueryParams
 from pydantic import Field
 
-from plane_mcp.client import get_plane_client_context
+from plane_mcp.ce_cycle_module import list_modules_ce
+from plane_mcp.client import current_workspace, get_plane_client_context
 from plane_mcp.pql_reference import PQL_FIELD_HINT
 from plane_mcp.toolkit import (
     Action,
@@ -136,6 +139,8 @@ def register(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
 
         if not project_id:
+            if action == "list":
+                raise ToolError(missing(action, "project_id"))
             return missing(action, "project_id")
 
         if error := one_of("status", status, STATUSES):
@@ -149,7 +154,21 @@ def register(mcp: FastMCP) -> None:
                     project_id=project_id,
                     params=params.model_dump(exclude_none=True),
                 )
-            return client.modules.list_lite(workspace_slug=workspace_slug, project_id=project_id, params=params)
+            try:
+                return client.modules.list_lite(workspace_slug=workspace_slug, project_id=project_id, params=params)
+            except HttpError as exc:
+                if exc.status_code != 404:
+                    raise
+                return list_modules_ce(
+                    client,
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    cursor=cursor,
+                    per_page=per_page or 100,
+                    order_by=order_by,
+                    status=status,
+                    workspace_id=current_workspace().get("id"),
+                )
 
         if action == "create":
             if not name:

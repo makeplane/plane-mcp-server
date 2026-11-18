@@ -6,6 +6,8 @@ from datetime import date, datetime
 from typing import Annotated, Any, Literal, get_args
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from plane.errors import HttpError
 from plane.models.cycles import (
     CreateCycle,
     Cycle,
@@ -18,7 +20,8 @@ from plane.models.enums import CycleStatusEnum
 from plane.models.query_params import CycleLiteListQueryParams, LiteListQueryParams
 from pydantic import Field
 
-from plane_mcp.client import get_plane_client_context
+from plane_mcp.ce_cycle_module import list_cycles_ce
+from plane_mcp.client import current_workspace, get_plane_client_context
 from plane_mcp.pql_reference import PQL_FIELD_HINT
 from plane_mcp.toolkit import (
     Action,
@@ -154,6 +157,8 @@ def register(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context()
 
         if not project_id:
+            if action == "list":
+                raise ToolError(missing(action, "project_id"))
             return missing(action, "project_id")
 
         if action == "list":
@@ -166,16 +171,30 @@ def register(mcp: FastMCP) -> None:
                 )
             if error := one_of("status", status, STATUSES):
                 return error
-            return client.cycles.list_lite(
-                workspace_slug=workspace_slug,
-                project_id=project_id,
-                params=CycleLiteListQueryParams(
-                    cursor=opt(cursor),
-                    per_page=opt(per_page),
-                    order_by=opt(order_by),
-                    status=opt(status),
-                ),
-            )
+            try:
+                return client.cycles.list_lite(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    params=CycleLiteListQueryParams(
+                        cursor=opt(cursor),
+                        per_page=opt(per_page),
+                        order_by=opt(order_by),
+                        status=opt(status),
+                    ),
+                )
+            except HttpError as exc:
+                if exc.status_code != 404:
+                    raise
+                return list_cycles_ce(
+                    client,
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    cursor=cursor,
+                    per_page=per_page or 100,
+                    status=status,
+                    order_by=order_by,
+                    workspace_id=current_workspace().get("id"),
+                )
 
         if action == "create":
             if error := needs(action, name=name, owned_by=owned_by):
