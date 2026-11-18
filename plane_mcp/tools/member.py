@@ -39,6 +39,11 @@ ACTIONS = (
     Action("add_to_project", ("project_id", "user_id"), ("role_slug",)),
     Action("change_project_role", ("project_id", "user_id", "role_slug")),
     Action("remove_from_project", ("project_id", "user_id"), destructive=True),
+    Action(
+        "change_workspace_role",
+        ("user_id", "role_slug"),
+        note="a guest also becomes a guest in every project and leaves every teamspace",
+    ),
 )
 
 FOOTER = (
@@ -74,6 +79,7 @@ def register(mcp: FastMCP) -> None:
             "add_to_project",
             "change_project_role",
             "remove_from_project",
+            "change_workspace_role",
         ],
         project_id: str = "",
         user_id: str = "",
@@ -139,6 +145,13 @@ def register(mcp: FastMCP) -> None:
                 return members.update(workspace_slug, project_id, membership.id, UpdateProjectMember(role=role_slug))
             members.delete(workspace_slug, project_id, membership.id)
             return None
+
+        if action == "change_workspace_role":
+            if error := needs(action, user_id=user_id, role_slug=role_slug):
+                return error
+            return client.workspaces.update_member_role(
+                workspace_slug=workspace_slug, member_id=user_id, role_slug=role_slug
+            )
 
         if action == "list_roles":
             return client.roles.list(
