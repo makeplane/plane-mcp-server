@@ -32,7 +32,7 @@ Add this to your MCP client's configuration:
 }
 ```
 
-`uvx` needs no install step. Requires Python 3.10+.
+`uvx` needs no install step. Requires Python 3.11+.
 
 For a self-hosted Plane, add `"PLANE_BASE_URL": "https://plane.example.com"`.
 

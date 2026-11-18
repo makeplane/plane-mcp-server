@@ -39,7 +39,7 @@ This helps us triage and manage issues more efficiently.
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (fast Python package installer)
 - A Plane instance (cloud or self-hosted) with an API key for testing
 
