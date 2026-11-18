@@ -7,7 +7,7 @@ work items, cycles, modules, releases, customers and more.
 Built on [FastMCP](https://github.com/jlowin/fastmcp) and the official
 [`plane-sdk`](https://pypi.org/project/plane-sdk/).
 
-- **31 tools**, one per Plane resource, covering 222 operations
+- **32 tools**, one per Plane resource, covering 227 operations
 - **Local or remote** — stdio, streamable HTTP, SSE
 - **OAuth or API key** authentication
 
@@ -98,7 +98,7 @@ HTTP transport instead.
 
 ## Tools
 
-The server advertises 31 tools, one per resource. Each takes an `action`
+The server advertises 32 tools, one per resource. Each takes an `action`
 parameter that selects the operation:
 
 ```python

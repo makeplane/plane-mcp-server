@@ -38,6 +38,7 @@ from plane_mcp.tools import (
     release_tag,
     state,
     template,
+    view,
     work_log,
     workitem,
     workitem_activity,
@@ -82,6 +83,7 @@ RESOURCES: tuple[ModuleType, ...] = (
     template,
     collection,
     dashboard,
+    view,
 )
 
 

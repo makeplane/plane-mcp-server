@@ -577,3 +577,14 @@ def test_no_description_warns_about_a_failure_the_caller_cannot_avoid(resource_m
         if phrase in registered[mod.NAME].description.lower()
     ]
     assert not offenders, f"descriptions predicting a refusal instead of letting the API report it: {offenders}"
+
+
+@pytest.mark.parametrize(
+    ("pql", "sent"),
+    [(None, {"stripped": ""}), ("", None), ('priority = "high"', {"stripped": 'priority = "high"'})],
+)
+def test_a_view_query_set_to_null_is_cleared(pql, sent, registered, spy):
+    """Plane switches a view back to its rich filters when its query is empty."""
+    registered["view"].fn(action="update", view_id="v", name="Renamed", pql=pql)
+
+    assert spy.recorder.only().kwargs["data"].pql_filters == sent
