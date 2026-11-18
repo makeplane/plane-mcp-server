@@ -35,6 +35,7 @@ from plane_mcp.tools import (
     release,
     release_label,
     release_tag,
+    role,
     state,
     template,
     work_log,
@@ -80,6 +81,7 @@ RESOURCES: tuple[ModuleType, ...] = (
     workspace,
     template,
     collection,
+    role,
 )
 
 

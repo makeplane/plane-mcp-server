@@ -35,6 +35,8 @@ SAMPLES: dict[str, object] = {
     "workitem_identifier": "ENG-42",
     "kind": "workitem",
     "template_data": '{"name": "Spec"}',
+    "namespace": "project",
+    "permissions": ["workitem:view"],
 }
 
 # Actions that require *one of* several optional parameters -- a condition the
