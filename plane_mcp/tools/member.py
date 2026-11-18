@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastmcp import FastMCP
-from plane.models.query_params import MemberListQueryParams
+from plane.models.query_params import MemberListQueryParams, MemberQueryParams
 from plane.models.v2.members import CreateProjectMember, UpdateProjectMember
 
 from plane_mcp.client import get_plane_client_context
@@ -117,7 +117,10 @@ def register(mcp: FastMCP) -> None:
         if action == "list_project":
             if not project_id:
                 return missing(action, "project_id")
-            return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id)
+            # Removed members keep an inactive row; the roster is who is on the project now.
+            return client.projects.get_members(
+                workspace_slug=workspace_slug, project_id=project_id, params=MemberQueryParams(is_active=True)
+            )
 
         if action in ("add_to_project", "change_project_role", "remove_from_project"):
             if error := needs(action, project_id=project_id, user_id=user_id):

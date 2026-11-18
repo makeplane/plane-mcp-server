@@ -589,3 +589,12 @@ def test_a_view_query_set_to_null_is_cleared(pql, sent, registered, spy):
     registered["view"].fn(action="update", view_id="v", name="Renamed", pql=pql)
 
     assert spy.recorder.only().kwargs["data"].pql_filters == sent
+
+
+def test_the_project_roster_leaves_out_removed_members(registered, spy):
+    """remove_from_project keeps an inactive row, so an unfiltered list would still show the person."""
+    registered["member"].fn(action="list_project", project_id="p-1")
+
+    call = spy.recorder.calls[-1]
+    assert call.method == "projects.get_members"
+    assert call.kwargs["params"].is_active is True
