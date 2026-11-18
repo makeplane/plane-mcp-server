@@ -102,7 +102,8 @@ def _wants_model(annotation: Any) -> bool:
 
 
 def _validate(method: str, param: inspect.Parameter, annotation: Any, value: Any) -> None:
-    if annotation is inspect.Parameter.empty or annotation is Any:
+    # A string is an annotation that could not be resolved; it is not a validator.
+    if annotation is inspect.Parameter.empty or annotation is Any or isinstance(annotation, str):
         return
 
     # Pydantic happily coerces a dict into a model, but the SDK calls
@@ -132,6 +133,26 @@ def _validate(method: str, param: inspect.Parameter, annotation: Any, value: Any
         raise TypeError(f"{method}(): argument {param.name}={value!r} does not satisfy {annotation}: {exc}") from exc
 
 
+def _parameter_hints(fn: Any) -> dict[str, Any]:
+    """Each parameter's annotation, resolved on its own.
+
+    `get_type_hints` is all-or-nothing: one unresolvable annotation loses every
+    parameter's. Every v2 list returns `Page[T]`, a union alias that cannot be
+    subscripted at runtime, so without this a v2 list's arguments went unchecked
+    -- or worse, were checked against bare strings pydantic cannot build.
+    """
+    target = inspect.unwrap(getattr(fn, "__func__", fn))
+    hints: dict[str, Any] = {}
+    for name, annotation in inspect.get_annotations(target).items():
+        if name == "return":
+            continue
+        try:
+            hints[name] = eval(annotation, target.__globals__) if isinstance(annotation, str) else annotation
+        except Exception:  # left out, and so left unchecked, like any unresolvable annotation
+            continue
+    return hints
+
+
 class _Method:
     def __init__(self, spy: SpyClient, path: str, fn: Any) -> None:
         self._spy = spy
@@ -141,7 +162,7 @@ class _Method:
         try:
             self._hints = get_type_hints(fn)
         except Exception:
-            self._hints = {}
+            self._hints = _parameter_hints(fn)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         bound = self._signature.bind(*args, **kwargs)

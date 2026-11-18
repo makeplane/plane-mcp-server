@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+from plane.api.v2 import PlaneAPIError
 from plane.errors.errors import HttpError
 
 WORKSPACE_MANAGED = "workspace_managed"
@@ -100,7 +101,7 @@ def migration_in_progress(exc: HttpError) -> bool:
     return _body(exc).get("code") == MIGRATION_IN_PROGRESS
 
 
-def plan_required(exc: HttpError, feature: str) -> str | None:
+def plan_required(exc: HttpError | PlaneAPIError, feature: str) -> str | None:
     """A message naming the gated feature when the plan does not include it, else None."""
     if exc.status_code == 402 or (exc.status_code == 400 and PLAN_GATE_PROSE in str(exc).lower()):
         named = _gated_feature(exc) or feature
@@ -108,7 +109,7 @@ def plan_required(exc: HttpError, feature: str) -> str | None:
     return None
 
 
-def _gated_feature(exc: HttpError) -> str | None:
+def _gated_feature(exc: HttpError | PlaneAPIError) -> str | None:
     """The feature the refusal named, so the answer matches the gate that actually fired."""
     match = _PLAN_GATE_FEATURE.search(str(exc.response) if exc.response else str(exc))
     return match.group("feature").strip() if match else None
@@ -122,7 +123,8 @@ def plan_gated(feature: str) -> Callable[[F], F]:
         def guarded(*args: Any, **kwargs: Any) -> Any:
             try:
                 return fn(*args, **kwargs)
-            except HttpError as exc:
+            # v1 and v2 refuse with different exceptions; both carry `status_code` and `response`.
+            except (HttpError, PlaneAPIError) as exc:
                 if message := plan_required(exc, feature):
                     return message
                 raise
