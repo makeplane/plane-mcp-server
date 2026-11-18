@@ -42,7 +42,7 @@ from plane_mcp.toolkit.mentions import (
     tokenize_mentions,
     unmentionable,
 )
-from plane_mcp.toolkit.paging import dump_results, envelope, pql_failure, workitem_page
+from plane_mcp.toolkit.paging import cursor_page, dump_results, envelope, pql_failure, workitem_page
 from plane_mcp.toolkit.runtime import (
     as_params,
     coerce_list,
@@ -73,6 +73,7 @@ __all__ = [
     "build_annotations",
     "build_description",
     "coerce_list",
+    "cursor_page",
     "dump_results",
     "envelope",
     "ids_of",
