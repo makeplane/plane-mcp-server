@@ -1,6 +1,6 @@
 # The tool surface
 
-**32 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 227 actions in total.
+**32 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 230 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")

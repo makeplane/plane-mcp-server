@@ -598,3 +598,11 @@ def test_the_project_roster_leaves_out_removed_members(registered, spy):
     call = spy.recorder.calls[-1]
     assert call.method == "projects.get_members"
     assert call.kwargs["params"].is_active is True
+
+
+@pytest.mark.parametrize("role", ["commenter", "qa-lead"])
+def test_any_project_role_slug_reaches_plane(role, registered, spy):
+    """Commenter and custom project roles are Plane's to accept or refuse, not the tool's."""
+    registered["member"].fn(action="add_to_project", project_id="p-1", user_id="u-1", role_slug=role)
+
+    assert spy.recorder.calls[-1].kwargs["data"].role == role

@@ -9,7 +9,7 @@ from plane.models.query_params import MemberListQueryParams, MemberQueryParams
 from plane.models.v2.members import CreateProjectMember, UpdateProjectMember
 
 from plane_mcp.client import get_plane_client_context
-from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, one_of, opt
+from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs, opt
 
 NAME = "member"
 TITLE = "Members and roles"
@@ -41,13 +41,12 @@ ACTIONS = (
     Action("remove_from_project", ("project_id", "user_id"), destructive=True),
 )
 
-PROJECT_ROLES = ("admin", "contributor", "guest")
-
 FOOTER = (
     "namespace is 'workspace' (Owner/Admin/Member/Guest) or 'project' "
     "(Admin/Contributor/Commenter/Guest); omit for both. A role slug is stable but not "
     "globally unique -- key on (namespace, slug). user_id is a person's id from list_workspace. "
-    "A project role is admin, contributor or guest; a workspace guest can only be a project guest."
+    "A project role is any slug list_roles gives for namespace 'project', custom roles included; "
+    "a workspace guest can only be a project guest or commenter."
 )
 
 LEGACY = {
@@ -127,8 +126,6 @@ def register(mcp: FastMCP) -> None:
                 return error
             if action == "change_project_role" and not role_slug:
                 return missing(action, "role_slug")
-            if error := one_of("role_slug", role_slug, PROJECT_ROLES):
-                return error
             members = client.v2.workspaces.projects.members
             if action == "add_to_project":
                 return members.create(
