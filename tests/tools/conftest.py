@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastmcp import FastMCP
@@ -27,6 +28,12 @@ class _AllFeaturesOn:
 
     def model_dump(self):
         return {"initiatives": True, "customers": True, "releases": True, "epics": True}
+
+
+class _OneProjectMember:
+    """A project roster page holding the person a membership write looks up."""
+
+    data = [SimpleNamespace(id="membership-id")]
 
 
 @pytest.fixture(scope="session")
@@ -75,6 +82,7 @@ def spy(monkeypatch):
     # Resources gated on a workspace feature probe it first; answer yes so the
     # dispatch under test is what gets exercised.
     client.returns["workspaces.get_features"] = _AllFeaturesOn()
+    client.returns["v2.workspaces.projects.members.list"] = _OneProjectMember()
     for mod in RESOURCES:
         if hasattr(mod, "get_plane_client_context"):
             monkeypatch.setattr(mod, "get_plane_client_context", lambda: (client, "acme"))

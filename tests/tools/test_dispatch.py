@@ -30,6 +30,7 @@ SAMPLES: dict[str, object] = {
     # page and project take the numeric level; collection names it.
     "access": {"page": 1, "project": 1, "collection": "private", "dashboard": "private"},
     "member_access": "edit",
+    "role_slug": {"member": "contributor"},
     "network": 2,
     "timezone": "UTC",
     "workitem_identifier": "ENG-42",
@@ -588,3 +589,20 @@ def test_a_view_query_set_to_null_is_cleared(pql, sent, registered, spy):
     registered["view"].fn(action="update", view_id="v", name="Renamed", pql=pql)
 
     assert spy.recorder.only().kwargs["data"].pql_filters == sent
+
+
+def test_the_project_roster_leaves_out_removed_members(registered, spy):
+    """remove_from_project keeps an inactive row, so an unfiltered list would still show the person."""
+    registered["member"].fn(action="list_project", project_id="p-1")
+
+    call = spy.recorder.calls[-1]
+    assert call.method == "projects.get_members"
+    assert call.kwargs["params"].is_active is True
+
+
+@pytest.mark.parametrize("role", ["commenter", "qa-lead"])
+def test_any_project_role_slug_reaches_plane(role, registered, spy):
+    """Commenter and custom project roles are Plane's to accept or refuse, not the tool's."""
+    registered["member"].fn(action="add_to_project", project_id="p-1", user_id="u-1", role_slug=role)
+
+    assert spy.recorder.calls[-1].kwargs["data"].role == role
