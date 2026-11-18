@@ -28,7 +28,8 @@ ACTIONS = (
 
 FOOTER = (
     "Pass project_id for a project's views; omit it for workspace views. pql is the view's "
-    "work-item query, in the syntax get_pql_reference describes. access is private or public."
+    "work-item query, in the syntax get_pql_reference describes; pql=null on update drops it. "
+    "access is private or public."
 )
 
 LEGACY: dict[str, str] = {}
@@ -51,7 +52,7 @@ def register(mcp: FastMCP) -> None:
         view_id: str = "",
         name: str = "",
         description: str = "",
-        pql: str = "",
+        pql: str | None = "",
         access: str = "",
     ) -> View | list[dict[str, Any]] | str | None:
         client, workspace_slug = get_plane_client_context()
@@ -62,7 +63,8 @@ def register(mcp: FastMCP) -> None:
         workspace = client.v2.workspaces
         views = workspace.projects.views if project_id else workspace.views
         scope = (workspace_slug, project_id) if project_id else (workspace_slug,)
-        pql_filters = {"stripped": pql} if pql else None
+        # null sends an empty query, which switches the view back to its rich filters.
+        pql_filters = None if pql == "" else {"stripped": pql or ""}
 
         if action == "list":
             # exclude_unset: the model would pad every field the listing left out with null.

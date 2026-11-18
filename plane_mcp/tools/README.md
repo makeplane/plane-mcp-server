@@ -1,6 +1,6 @@
 # The tool surface
 
-**31 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 222 actions in total.
+**32 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 227 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")
@@ -8,7 +8,7 @@ workitem(action="list", project_id=..., pql='state__group = "started"')
 cycle(action="archive", project_id=..., cycle_id=...)
 ```
 
-A compact catalogue — 31 tools, ~70k characters — loads fully in every MCP client and leaves the context budget to the conversation.
+A compact catalogue — 32 tools, ~72k characters — loads fully in every MCP client and leaves the context budget to the conversation.
 
 Five parts, in this order:
 
