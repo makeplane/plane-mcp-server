@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Literal
 
 from fastmcp import FastMCP
+from plane.errors import HttpError
 from plane.models.query_params import MemberListQueryParams
 
+from plane_mcp.ce_list import list_workspace_members_ce
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.toolkit import Action, build_annotations, build_description, missing, opt
 
@@ -81,21 +83,39 @@ def register(mcp: FastMCP) -> None:
             return client.users.get_me()
 
         if action == "list_workspace":
-            return client.workspaces.get_members_lite(
-                workspace_slug=workspace_slug,
-                params=MemberListQueryParams(
-                    first_name=opt(first_name),
-                    last_name=opt(last_name),
-                    email=opt(email),
-                    display_name=opt(display_name),
-                    role_slug=opt(role_slug),
+            try:
+                return client.workspaces.get_members_lite(
+                    workspace_slug=workspace_slug,
+                    params=MemberListQueryParams(
+                        first_name=opt(first_name),
+                        last_name=opt(last_name),
+                        email=opt(email),
+                        display_name=opt(display_name),
+                        role_slug=opt(role_slug),
+                        is_active=is_active,
+                        is_bot=is_bot,
+                        cursor=opt(cursor),
+                        per_page=per_page or 100,
+                        order_by=opt(order_by),
+                    ),
+                )
+            except HttpError as exc:
+                if exc.status_code != 404:
+                    raise
+                return list_workspace_members_ce(
+                    client,
+                    workspace_slug,
+                    cursor=cursor,
+                    per_page=per_page or 100,
+                    order_by=order_by,
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    display_name=display_name,
+                    role_slug=role_slug,
                     is_active=is_active,
                     is_bot=is_bot,
-                    cursor=opt(cursor),
-                    per_page=per_page or 100,
-                    order_by=opt(order_by),
-                ),
-            )
+                )
 
         if action == "list_project":
             if not project_id:
