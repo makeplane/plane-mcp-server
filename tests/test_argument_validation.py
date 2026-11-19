@@ -14,15 +14,32 @@ transform are FastMCP details, so they are tested rather than assumed.
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
+import requests
 
 from plane_mcp.middleware import ValidateActionArguments
 from plane_mcp.tools.registry import action_arguments
 
-os.environ.setdefault("PLANE_API_KEY", "test")
-os.environ.setdefault("PLANE_WORKSPACE_SLUG", "test")
+
+@pytest.fixture(autouse=True)
+def isolate_plane_env(monkeypatch):
+    """Isolate Plane environment and mock transport to prevent external network calls and leakage."""
+    monkeypatch.setenv("PLANE_BASE_URL", "https://api.plane.so")
+    monkeypatch.delenv("PLANE_INTERNAL_BASE_URL", raising=False)
+    monkeypatch.setenv("PLANE_API_KEY", "test")
+    monkeypatch.setenv("PLANE_WORKSPACE_SLUG", "test")
+
+    def mock_send(self, request, **kwargs):
+        resp = requests.Response()
+        resp.status_code = 403
+        resp._content = b'{"detail": "Forbidden: Given API token is not valid"}'
+        resp.headers["content-type"] = "application/json"
+        resp.url = request.url
+        resp.request = request
+        return resp
+
+    monkeypatch.setattr(requests.Session, "send", mock_send)
 
 
 @pytest.fixture(scope="module")

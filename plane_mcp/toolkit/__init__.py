@@ -42,7 +42,15 @@ from plane_mcp.toolkit.mentions import (
     tokenize_mentions,
     unmentionable,
 )
-from plane_mcp.toolkit.paging import dump_results, envelope, pql_failure, workitem_page
+from plane_mcp.toolkit.paging import (
+    check_pql_capability,
+    dump_results,
+    envelope,
+    pql_failure,
+    reject_ce_pql,
+    reset_pql_capability_cache,
+    workitem_page,
+)
 from plane_mcp.toolkit.runtime import (
     as_params,
     coerce_list,
@@ -72,6 +80,7 @@ __all__ = [
     "as_params",
     "build_annotations",
     "build_description",
+    "check_pql_capability",
     "coerce_list",
     "dump_results",
     "envelope",
@@ -89,8 +98,10 @@ __all__ = [
     "plan_required",
     "project_owns",
     "pql_failure",
+    "reject_ce_pql",
     "render_mentions",
     "require",
+    "reset_pql_capability_cache",
     "scoped",
     "tokenize_mentions",
     "unmentionable",

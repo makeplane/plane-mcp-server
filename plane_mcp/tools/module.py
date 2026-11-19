@@ -209,6 +209,7 @@ def register(mcp: FastMCP) -> None:
                 per_page=per_page,
                 expand=expand,
                 fields=fields,
+                client=client,
                 workspace_slug=workspace_slug,
                 project_id=project_id,
                 module_id=module_id,
