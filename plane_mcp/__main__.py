@@ -15,6 +15,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
 
 from plane_mcp.server import get_header_mcp, get_oauth_mcp, get_stdio_mcp
+from plane_mcp.tls import pin_ca_bundle
 
 LOG_USER_INFO: bool = os.getenv("LOG_USER_INFO", "").lower() == "true"
 
@@ -139,6 +140,8 @@ def main() -> None:
         if not os.getenv("PLANE_WORKSPACE_SLUG"):
             raise ValueError("PLANE_WORKSPACE_SLUG is not set")
 
+        # uvx runs stdio from uv's cache, which can be pruned under a running server.
+        pin_ca_bundle()
         get_stdio_mcp().run()
         return
 
