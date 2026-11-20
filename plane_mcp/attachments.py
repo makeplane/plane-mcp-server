@@ -16,7 +16,7 @@ import requests
 import urllib3
 from requests.structures import CaseInsensitiveDict
 
-from plane_mcp.tls import ca_bundle_path
+from plane_mcp.tls import ca_pool_kwargs
 
 # ── Limits ────────────────────────────────────────────────────────────────────
 IMAGE_READ_LIMIT = 5 * 1024 * 1024  # 5 MB
@@ -175,7 +175,7 @@ def _fetch_one_hop_via_proxy(url: str, proxy_url: str, max_bytes: int) -> tuple[
         use_forwarding_for_https=False,
         timeout=timeout,
         cert_reqs="CERT_REQUIRED",
-        ca_certs=ca_bundle_path(),
+        **ca_pool_kwargs(),
     )
     try:
         try:
@@ -265,7 +265,7 @@ def _fetch_one_hop(url: str, max_bytes: int) -> tuple[str | None, FetchedRespons
             server_hostname=hostname,
             assert_hostname=hostname,
             cert_reqs="CERT_REQUIRED",
-            ca_certs=ca_bundle_path(),
+            **ca_pool_kwargs(),
         )
     else:
         pool_cls = urllib3.HTTPConnectionPool

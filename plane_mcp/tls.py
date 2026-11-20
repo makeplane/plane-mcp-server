@@ -65,3 +65,16 @@ def pin_ca_bundle(cache_dir: Path | None = None) -> Path | None:
 def ca_bundle_path() -> str:
     """The CA bundle for code that builds urllib3 pools directly."""
     return os.environ.get("REQUESTS_CA_BUNDLE") or requests.utils.DEFAULT_CA_BUNDLE_PATH
+
+
+def ca_pool_kwargs() -> dict[str, str]:
+    """urllib3 pool kwargs for the CA bundle, matching how requests treats it.
+
+    requests accepts REQUESTS_CA_BUNDLE as a file or as a hashed CA directory
+    and passes a directory through ca_cert_dir. urllib3's ca_certs only takes a
+    file, so a directory goes through ca_cert_dir here too.
+    """
+    path = ca_bundle_path()
+    if os.path.isdir(path):
+        return {"ca_cert_dir": path}
+    return {"ca_certs": path}

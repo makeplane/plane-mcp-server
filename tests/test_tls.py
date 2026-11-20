@@ -73,3 +73,55 @@ def test_requests_survives_deleted_certifi(clean_env, tmp_path):
     # Raises "Could not find a suitable TLS CA certificate bundle" without the pin.
     adapter.cert_verify(conn, "https://api.plane.so", settings["verify"], None)
     assert conn.ca_certs == os.environ["REQUESTS_CA_BUNDLE"]
+
+
+def test_ca_pool_kwargs_uses_ca_certs_for_a_file(clean_env, tmp_path):
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_bytes(Path(certifi.where()).read_bytes())
+    os.environ["REQUESTS_CA_BUNDLE"] = str(bundle)
+    assert tls.ca_pool_kwargs() == {"ca_certs": str(bundle)}
+
+
+def test_ca_pool_kwargs_uses_ca_cert_dir_for_a_directory(clean_env, tmp_path):
+    os.environ["REQUESTS_CA_BUNDLE"] = str(tmp_path)
+    assert tls.ca_pool_kwargs() == {"ca_cert_dir": str(tmp_path)}
+
+
+class _Captured(Exception):
+    """Raised by the fake pool once it has recorded its kwargs."""
+
+
+@pytest.mark.parametrize("as_dir", [False, True], ids=["file", "directory"])
+def test_attachment_pools_pass_the_ca_path_in_the_right_kwarg(clean_env, tmp_path, as_dir):
+    from plane_mcp import attachments
+
+    if as_dir:
+        ca = tmp_path
+        expected = {"ca_cert_dir": str(tmp_path)}
+    else:
+        ca = tmp_path / "bundle.pem"
+        ca.write_bytes(Path(certifi.where()).read_bytes())
+        expected = {"ca_certs": str(ca)}
+    os.environ["REQUESTS_CA_BUNDLE"] = str(ca)
+
+    seen = []
+
+    def fake_pool(*_args, **kwargs):
+        seen.append(kwargs)
+        raise _Captured
+
+    # Direct path: skip DNS and the private-IP check, capture the pool kwargs.
+    clean_env.setattr(attachments, "_select_proxy_url", lambda _url: None)
+    clean_env.setattr(attachments, "_resolve_and_validate", lambda _host, _port: "93.184.216.34")
+    clean_env.setattr(attachments.urllib3, "HTTPSConnectionPool", fake_pool)
+    with pytest.raises(_Captured):
+        attachments._fetch_one_hop("https://example.com/a.png", 1024)
+
+    # Proxy path: capture the ProxyManager kwargs.
+    clean_env.setattr(attachments.urllib3, "ProxyManager", fake_pool)
+    with pytest.raises(_Captured):
+        attachments._fetch_one_hop_via_proxy("https://example.com/a.png", "http://proxy.invalid:3128", 1024)
+
+    assert len(seen) == 2
+    for kwargs in seen:
+        assert {k: kwargs[k] for k in ("ca_certs", "ca_cert_dir") if k in kwargs} == expected
