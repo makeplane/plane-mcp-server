@@ -105,6 +105,7 @@ Shared building blocks for the tool surface, split by *when* they act:
 | `runtime.py` | call | `missing`, `needs`, `require`, `one_of`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
 | `mentions.py` | call | `render_mentions`, `tokenize_mentions`, `mention_user_ids`, `project_mention_error` |
 | `paging.py` | response | `envelope`, `dump_results`, `pql_failure`, `workitem_page` |
+| `scan.py` | call | `scan_work_items`: work items across projects, filtered here (CE has no workspace list, no PQL) |
 | `governance.py` | policy | `workspace_owns_resource`, `GOVERNED_BY`, `workspace_owns`, `migration_in_progress`, `plan_gated` |
 | `transforms.py` | listing | `StripOutputSchemas` |
 

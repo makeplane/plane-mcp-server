@@ -55,6 +55,7 @@ from plane_mcp.toolkit.runtime import (
     require,
     rich_text,
 )
+from plane_mcp.toolkit.scan import scan_work_items
 from plane_mcp.toolkit.spec import (
     Action,
     action_names,
@@ -64,6 +65,7 @@ from plane_mcp.toolkit.spec import (
 from plane_mcp.toolkit.transforms import StripOutputSchemas
 
 __all__ = [
+    "scan_work_items",
     "MENTION_TOKEN",
     "WORK_ITEM_TYPES",
     "Action",
