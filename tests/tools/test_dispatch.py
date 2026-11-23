@@ -70,6 +70,8 @@ CONDITIONAL: dict[tuple[str, str], dict[str, object]] = {
     ("release_label", "list"): {},
     ("dashboard", "update"): {"name": "Renamed"},
     ("dashboard", "update_widget"): {"name": "Renamed"},
+    ("workitem_subscriber", "list"): {"workitem_identifier": "ENG-42"},
+    ("workitem_subscriber", "manage"): {"workitem_identifier": "ENG-42", "add_user_id": "id-1"},
 }
 
 # Actions whose guard clause legitimately answers without calling the SDK.
