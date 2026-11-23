@@ -47,6 +47,7 @@ from plane_mcp.tools import (
     workitem_link,
     workitem_property,
     workitem_relation,
+    workitem_subscriber,
     workitem_type,
     workspace,
 )
@@ -84,6 +85,7 @@ RESOURCES: tuple[ModuleType, ...] = (
     collection,
     dashboard,
     view,
+    workitem_subscriber,
 )
 
 
