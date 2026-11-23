@@ -12,6 +12,7 @@ signature, and type-checks each argument with the genuine annotation.
 from __future__ import annotations
 
 import inspect
+import sys
 import typing
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -132,12 +133,24 @@ def _validate(method: str, param: inspect.Parameter, annotation: Any, value: Any
         raise TypeError(f"{method}(): argument {param.name}={value!r} does not satisfy {annotation}: {exc}") from exc
 
 
+def _signature(fn: Any) -> inspect.Signature:
+    # Python 3.14 evaluates annotations lazily. An SDK method named `list` that
+    # is annotated `list[...]` then resolves `list` to the method itself, and
+    # inspect.signature raises TypeError. FORWARDREF keeps the unresolvable part
+    # as a ForwardRef instead; earlier Pythons evaluate eagerly and are unchanged.
+    if sys.version_info >= (3, 14):
+        import annotationlib
+
+        return inspect.signature(fn, annotation_format=annotationlib.Format.FORWARDREF)
+    return inspect.signature(fn)
+
+
 class _Method:
     def __init__(self, spy: SpyClient, path: str, fn: Any) -> None:
         self._spy = spy
         self._path = path
         self._fn = fn
-        self._signature = inspect.signature(fn)
+        self._signature = _signature(fn)
         try:
             self._hints = get_type_hints(fn)
         except Exception:
