@@ -12,7 +12,8 @@ HTTP / SSE transports. Priority order (highest first):
    port, db, credentials and TLS (``rediss://``) in one value; ``REDIS_SSL``
    is ignored here because the scheme already decides. ``REDIS_PASSWORD``
    and ``REDIS_USERNAME`` apply only when the URL carries no password or
-   username of its own.
+   username of its own, and ``REDIS_USERNAME`` only with a password (from the
+   URL or ``REDIS_PASSWORD``); on its own it is ignored with a warning.
 2. ``REDIS_PASSWORD`` + ``REDIS_HOST``/``REDIS_PORT`` → Redis with a static
    password (and ``REDIS_USERNAME`` for an ACL user, when set).
 3. ``ELASTICACHE_SECRET_ARN`` + IRSA (``AWS_ROLE_ARN``) or EKS Pod Identity
@@ -532,8 +533,14 @@ def build_token_store() -> Any:
         if redis_host or redis_port:
             logger.warning("Both REDIS_URL and REDIS_HOST/REDIS_PORT set — the URL wins, host/port ignored.")
 
-        # REDIS_USERNAME fills in an ACL user the URL doesn't name, as on the host/port path.
+        # REDIS_USERNAME fills in an ACL user the URL doesn't name, as on the host/port path,
+        # but only when a password goes with it: a username alone would send AUTH <user> ""
+        # and fail the startup check of an install that set REDIS_USERNAME and never used it.
         username = _env_str("REDIS_USERNAME")
+        parsed_url = urlparse(redis_url)
+        if username and not parsed_url.username and not (parsed_url.password or password):
+            logger.warning("REDIS_USERNAME is set but no password is: ignoring it (set REDIS_PASSWORD to use it).")
+            username = None
         _ping_redis_url(redis_url, password=password, username=username)
 
         # Not RedisStore(url=...): its own URL parser keeps host/port/db but

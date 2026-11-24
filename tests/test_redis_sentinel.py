@@ -550,6 +550,39 @@ def test_url_path_username_in_url_wins(monkeypatch, no_ping):
     assert kwargs["password"] == "urlpw"
 
 
+def test_url_path_ignores_a_username_without_a_password(monkeypatch, no_ping, caplog):
+    # Sending AUTH <user> "" would fail the startup check of an install that left
+    # REDIS_USERNAME set; without a password the URL path behaves as before.
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("REDIS_USERNAME", "plane")
+    with caplog.at_level("WARNING"):
+        kwargs = build_token_store()._client.connection_pool.connection_kwargs
+    assert kwargs.get("username") is None
+    assert kwargs.get("password") is None
+    assert "REDIS_USERNAME is set but no password is" in caplog.text
+
+
+def test_url_path_ping_ignores_a_username_without_a_password(monkeypatch):
+    seen = {}
+
+    def fake_ping(url, *, password=None, username=None, timeout_seconds=5.0):
+        seen.update(password=password, username=username)
+
+    monkeypatch.setattr(storage, "_ping_redis_url", fake_ping)
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("REDIS_USERNAME", "plane")
+    build_token_store()
+    assert seen == {"password": None, "username": None}
+
+
+def test_url_path_uses_a_username_with_the_urls_password(monkeypatch, no_ping):
+    monkeypatch.setenv("REDIS_URL", "redis://:urlpw@localhost:6379/0")
+    monkeypatch.setenv("REDIS_USERNAME", "plane")
+    kwargs = build_token_store()._client.connection_pool.connection_kwargs
+    assert kwargs["username"] == "plane"
+    assert kwargs["password"] == "urlpw"
+
+
 def test_url_path_without_username_is_unchanged(monkeypatch, no_ping):
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     monkeypatch.setenv("REDIS_PASSWORD", "pw")
