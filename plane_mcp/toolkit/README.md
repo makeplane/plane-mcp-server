@@ -7,7 +7,7 @@ Shared building blocks for the tool surface, split by *when* they act. All re-ex
 | `spec.py` | declaration | `Action`, `build_description`, `build_annotations` |
 | `runtime.py` | call | `missing`, `needs`, `require`, `one_of`, `opt`, `coerce_list`, `page_params`, `as_params`, `ids_of` |
 | `mentions.py` | call | `render_mentions`, `tokenize_mentions`, `mention_user_ids`, `project_mention_error` |
-| `paging.py` | response | `envelope`, `dump_results`, `pql_failure`, `workitem_page` |
+| `paging.py` | response | `envelope`, `cursor_page`, `dump_results`, `pql_failure`, `workitem_page` |
 | `governance.py` | policy | `workspace_owns_resource`, `workspace_owns`, `scoped`, `plan_gated` |
 | `transforms.py` | listing | `StripOutputSchemas` |
 
@@ -51,4 +51,4 @@ A workspace can own one and not the other, so never read one flag for the other 
 
 ## Plan gates
 
-`@plan_gated("<feature>")` turns a 402 — or a 400 whose prose says "upgrade your plan" — into a message naming the feature, rather than an error a caller will retry. The argument is the fallback label: where the refusal names the feature itself, that wins, since one resource can trip several gates (`project` trips five).
+`@plan_gated("<feature>")` turns a 402 — or a 400 whose prose says "upgrade your plan" — into a message naming the feature, rather than an error a caller will retry. The argument is the fallback label: where the refusal names the feature itself, that wins, since one resource can trip several gates (`project` trips five). It recognises both SDK refusals: v1's `HttpError` and v2's `PlaneAPIError`.

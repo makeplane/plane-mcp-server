@@ -22,6 +22,7 @@ from plane_mcp.tools import (
     customer_property,
     customer_request,
     cycle,
+    dashboard,
     get_pql_reference,
     initiative,
     intake,
@@ -37,6 +38,7 @@ from plane_mcp.tools import (
     release_tag,
     state,
     template,
+    view,
     work_log,
     workitem,
     workitem_activity,
@@ -45,6 +47,7 @@ from plane_mcp.tools import (
     workitem_link,
     workitem_property,
     workitem_relation,
+    workitem_subscriber,
     workitem_type,
     workspace,
 )
@@ -80,6 +83,9 @@ RESOURCES: tuple[ModuleType, ...] = (
     workspace,
     template,
     collection,
+    dashboard,
+    view,
+    workitem_subscriber,
 )
 
 

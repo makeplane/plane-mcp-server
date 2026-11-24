@@ -7,11 +7,15 @@ merging them teaches the model to filter on a field the API rejects.
 
 from __future__ import annotations
 
+import mimetypes
+from html.parser import HTMLParser
 from typing import Annotated, Any, Literal, get_args
 
+import requests
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.types import Image
 from plane.errors.errors import HttpError
 from plane.models.enums import PriorityEnum
 from plane.models.query_params import (
@@ -29,6 +33,7 @@ from plane.models.work_items import (
 )
 from pydantic import Field
 
+from plane_mcp.attachments import HTTP_TIMEOUT, IMAGE_READ_LIMIT, READABLE_IMAGE_TYPES
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.pql_reference import PQL_FIELD_HINT
 from plane_mcp.toolkit import (
@@ -123,6 +128,13 @@ ACTIONS = (
         ("add_label_id", "remove_label_id"),
         note="each takes one id or several; the list is merged, not replaced, and removals apply first",
     ),
+    Action(
+        "read_description_image",
+        ("project_id", "workitem_id", "asset_id"),
+        note="returns an image embedded in the description inline; asset_id is the src of an "
+        "<image-component> tag in description_html",
+        read=True,
+    ),
 )
 
 GROUP_BY_VALUES = (
@@ -148,12 +160,14 @@ FOOTER = (
     "resource first if you only have a name.\n"
     "description_stripped is plain text and is wrapped into HTML on save; description_html wins "
     "if both are given.\n"
-    "To clear a field on update: assignees=[] or labels=[], and start_date=null or "
-    "target_date=null. A field you leave out is not changed.\n"
+    "To clear a field on update: assignees=[] or labels=[], and start_date=null, "
+    "target_date=null or parent=null. A field you leave out is not changed.\n"
     "fields is a sparse fieldset: use `project`, not project_id, and `description_html`, not "
     "description.\n"
     f"count group_by and sub_group_by accept: {', '.join(GROUP_BY_VALUES)}. These are grouping "
-    "keys only -- they are not PQL filter fields, and filtering on state__group is rejected."
+    "keys only -- they are not PQL filter fields, and filtering on state__group is rejected.\n"
+    f"read_description_image supports PNG/JPEG/GIF/WEBP up to {IMAGE_READ_LIMIT // 1024 // 1024} MB. "
+    "These images are not work item attachments, so workitem_attachment cannot list or read them."
 )
 
 LEGACY = {
@@ -172,12 +186,111 @@ LEGACY = {
 }
 
 
+def _null_if_spelled(value: str | None) -> str | None:
+    """None for a null that arrived as text ("null", "None").
+
+    Clients that encode every argument as a string send `parent="null"` meaning
+    null. The coercion middleware leaves it alone because the field accepts
+    strings, and Plane then rejects it as an invalid UUID or date -- so the clear
+    never happens. None of these fields can hold that text, so reading it as null
+    loses nothing.
+    """
+    if isinstance(value, str) and value.strip().lower() in ("null", "none"):
+        return None
+    return value
+
+
 def _scoped_pql(pql: str, project_id: str) -> str:
     """Narrow a PQL filter to one project, since the count endpoint is workspace-wide."""
     if not project_id:
         return pql
     scope = f'project = "{project_id}"'
     return f"({pql}) AND {scope}" if pql else scope
+
+
+class _ImageAssetIds(HTMLParser):
+    """Collects the `src` of every `<image-component>` in a description."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "image-component":
+            src = dict(attrs).get("src")
+            if src:
+                self.ids.append(src)
+
+
+def _description_image_ids(description_html: str | None) -> list[str]:
+    parser = _ImageAssetIds()
+    parser.feed(description_html or "")
+    return parser.ids
+
+
+def _download(url: str, name: str) -> bytes:
+    """Stream a Plane-issued storage URL, stopping once it passes the image limit.
+
+    The URL comes from Plane's own API, not from the caller, so this does not
+    use the SSRF-guarded fetch that rejects private addresses -- self-hosted
+    storage (MinIO) is normally reachable only on one.
+    """
+    chunks: list[bytes] = []
+    size = 0
+    try:
+        with requests.get(url, timeout=HTTP_TIMEOUT, stream=True) as response:
+            response.raise_for_status()
+            for chunk in response.iter_content(64 * 1024):
+                size += len(chunk)
+                if size > IMAGE_READ_LIMIT:
+                    raise ValueError(f"{name!r} exceeds the {IMAGE_READ_LIMIT // 1024 // 1024} MB image limit.")
+                chunks.append(chunk)
+    except requests.RequestException as exc:
+        raise ValueError(f"Failed to fetch image {name!r}: {exc}") from exc
+    return b"".join(chunks)
+
+
+def _read_description_image(client, workspace_slug: str, project_id: str, workitem_id: str, asset_id: str) -> Image:
+    """Fetch an editor-embedded image.
+
+    The asset endpoint authorises on the workspace, not the work item, so the
+    caller's access to the work item is proven first and the asset must be one
+    its description actually embeds.
+    """
+    try:
+        workitem = client.work_items.retrieve(
+            workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id
+        )
+    except HttpError as exc:
+        raise ValueError(f"Failed to fetch work item {workitem_id!r}: HTTP {exc.status_code} - {exc.response}") from exc
+
+    embedded = _description_image_ids(workitem.description_html)
+    if asset_id not in embedded:
+        found = ", ".join(dict.fromkeys(embedded)) or "none"
+        raise ValueError(
+            f"Asset {asset_id!r} is not an image in the description of work item {workitem_id!r}. "
+            f"Images in the description: {found}."
+        )
+
+    try:
+        asset = client.workspaces.get_asset(workspace_slug=workspace_slug, asset_id=asset_id)
+    except HttpError as exc:
+        raise ValueError(f"Failed to get image {asset_id!r}: HTTP {exc.status_code} - {exc.response}") from exc
+
+    name = asset.asset_name or asset_id
+    content_type = (asset.asset_type or mimetypes.guess_type(name)[0] or "").split(";")[0].strip().lower()
+    if content_type not in READABLE_IMAGE_TYPES:
+        raise ValueError(
+            f"Unsupported content type {content_type or 'unknown'!r} for image {name!r}. Supported: PNG/JPEG/GIF/WEBP."
+        )
+
+    if not asset.asset_url:
+        raise ValueError(f"Plane returned no download URL for image {name!r}; the file may be missing from storage.")
+
+    payload = _download(asset.asset_url, name)
+
+    # FastMCP Image(format=X) sets the MIME type to "image/X", so strip the prefix.
+    return Image(data=payload, format=content_type.removeprefix("image/"))
 
 
 def register(mcp: FastMCP) -> None:
@@ -200,6 +313,7 @@ def register(mcp: FastMCP) -> None:
             "archive",
             "manage_assignee",
             "manage_label",
+            "read_description_image",
         ],
         project_id: str = "",
         workitem_id: str = "",
@@ -219,7 +333,7 @@ def register(mcp: FastMCP) -> None:
         start_date: str | None = "",
         target_date: str | None = "",
         sort_order: float = 0,
-        parent: str = "",
+        parent: str | None = "",
         state: str = "",
         estimate_point: str = "",
         add_user_id: str = "",
@@ -236,7 +350,8 @@ def register(mcp: FastMCP) -> None:
         # Tri-state: False publishes a draft, unset leaves the flag alone.
         is_draft: bool | None = None,
         archive: bool | None = None,
-    ) -> WorkItem | WorkItemDetail | WorkItemSearch | dict[str, Any] | list[Any] | str | None:
+        asset_id: str = "",
+    ) -> WorkItem | WorkItemDetail | WorkItemSearch | Image | dict[str, Any] | list[Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
         if error := one_of("priority", priority, PRIORITIES):
@@ -245,6 +360,8 @@ def register(mcp: FastMCP) -> None:
             raise ToolError(error)
         if error := one_of("sub_group_by", sub_group_by, GROUP_BY_VALUES):
             raise ToolError(error)
+
+        clearable_args = (start_date, target_date, parent)
 
         def retrieve_params() -> RetrieveQueryParams:
             return RetrieveQueryParams(
@@ -257,6 +374,7 @@ def register(mcp: FastMCP) -> None:
 
         def write_payload() -> dict[str, Any]:
             """The fields the caller supplied, and no others."""
+            start_date, target_date, parent = map(_null_if_spelled, clearable_args)
             payload = {
                 "name": opt(name),
                 "assignees": coerce_list(assignees),
@@ -276,8 +394,9 @@ def register(mcp: FastMCP) -> None:
                 "estimate_point": opt(estimate_point),
             }
             supplied = {field: value for field, value in payload.items() if value is not None}
-            dates = {"start_date": start_date, "target_date": target_date}
-            return supplied | {field: None for field, value in dates.items() if value is None}
+            # null clears these; "" (the default) leaves them alone.
+            clearable = {"start_date": start_date, "target_date": target_date, "parent": parent}
+            return supplied | {field: None for field, value in clearable.items() if value is None}
 
         if action in ("list", "list_archived"):
             if action == "list_archived" and not project_id:
@@ -361,6 +480,11 @@ def register(mcp: FastMCP) -> None:
 
         if not workitem_id:
             return missing(action, "workitem_id")
+
+        if action == "read_description_image":
+            if not asset_id:
+                return missing(action, "asset_id")
+            return _read_description_image(client, workspace_slug, project_id, workitem_id, asset_id)
 
         if action == "retrieve":
             return client.work_items.retrieve(
