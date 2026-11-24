@@ -284,10 +284,12 @@ def register(mcp: FastMCP) -> None:
                 if exc.status_code != 404:
                     raise
                 raise ToolError(
-                    "Removing a dependency relation is not supported on this Plane "
-                    "server: the relation-removal endpoint (makeplane/plane#10091) "
-                    "is not registered here. This is a Plane CE server limitation, "
-                    "not an MCP bug -- remove the relation from the Plane UI instead."
+                    "Removing a dependency relation failed with 404 on this Plane "
+                    "server. Either the relation-removal endpoint "
+                    "(makeplane/plane#10091) is not registered here -- a Plane CE "
+                    "server limitation, not an MCP bug -- or project_id, "
+                    "workitem_id or related_workitem_id does not exist. If the ids "
+                    "are valid, remove the relation from the Plane UI instead."
                 ) from exc
             return None
         client.work_items.custom_relations.remove(

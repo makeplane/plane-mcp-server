@@ -168,15 +168,16 @@ def test_delete_dependency_sends_related_issue_in_the_body(registered, spy):
     assert sent.model_dump(exclude_none=True) == {"related_issue": "t1"}
 
 
-def test_delete_dependency_404_raises_unsupported_operation_error(registered, spy):
-    """No released Plane version registers the relations/remove route yet
+def test_delete_dependency_404_names_both_missing_route_and_bad_ids(registered, spy):
+    """A 404 on relations/delete has two possible causes, so name both.
 
-    (makeplane/plane#10091 adds it). A 404 there must surface as a clear,
-    actionable error -- not the raw SDK HttpError -- so the caller knows this
-    is a server limitation, not something wrong with the request.
+    No released Plane version registers the relations/remove route yet
+    (makeplane/plane#10091 adds it), but a nonexistent project_id, workitem_id
+    or related_workitem_id 404s on the same path. Blaming only the server
+    would send a caller with a typo to the Plane UI for no reason.
     """
     spy.returns["work_items.relations.delete"] = HttpError("nope", status_code=404)
-    with pytest.raises(ToolError, match="not supported on this Plane server"):
+    with pytest.raises(ToolError) as caught:
         _call(
             registered,
             action="delete",
@@ -185,6 +186,15 @@ def test_delete_dependency_404_raises_unsupported_operation_error(registered, sp
             related_workitem_id="t1",
             is_dependency=True,
         )
+
+    message = str(caught.value)
+    # cause 1: the route itself is absent from this server
+    assert "makeplane/plane#10091" in message
+    assert "not registered" in message
+    # cause 2: an id in the request does not exist
+    for name in ("project_id", "workitem_id", "related_workitem_id"):
+        assert name in message
+    assert "does not exist" in message
 
 
 def test_delete_dependency_propagates_non_404_errors(registered, spy):
