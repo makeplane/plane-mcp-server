@@ -46,3 +46,18 @@ def test_a_customer_type_reaches_the_sdk_in_the_customer_enum(registered, spy):
     data = spy.recorder.only().kwargs["data"]
     assert data.property_type is CustomerPropertyType.RELATION
     assert data.relation_type is CustomerRelationType.USER
+
+
+@pytest.mark.parametrize("is_multi", [True, False])
+def test_update_passes_is_multi_to_the_sdk(is_multi, registered, spy):
+    registered["customer_property"].fn(action="update", property_id="prop-1", is_multi=is_multi)
+
+    data = spy.recorder.only().kwargs["data"]
+    assert data.is_multi is is_multi
+
+
+def test_update_leaves_is_multi_alone_when_it_is_not_passed(registered, spy):
+    registered["customer_property"].fn(action="update", property_id="prop-1", display_name="Tier")
+
+    data = spy.recorder.only().kwargs["data"]
+    assert data.is_multi is None
