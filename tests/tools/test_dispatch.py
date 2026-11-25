@@ -165,6 +165,8 @@ def test_missing_required_params_are_reported(mod, action, registered, spy):
 # sentinel helper silently drops it and the write looks like it succeeded.
 MEANINGFUL_ZEROS = [
     ("project", dict(action="update", project_id="p", network=0), "network"),
+    ("project", dict(action="update", project_id="p", archive_in=0), "archive_in"),
+    ("project", dict(action="update", project_id="p", close_in=0), "close_in"),
     ("label", dict(action="update", project_id="p", label_id="l", sort_order=0), "sort_order"),
     ("state", dict(action="update", project_id="p", state_id="s", sequence=0), "sequence"),
     (
