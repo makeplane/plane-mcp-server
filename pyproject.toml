@@ -15,6 +15,9 @@ dependencies = [
     "fastmcp==3.4.11",
     "plane-sdk==0.3.3",
     "py-key-value-aio[redis]>=0.4.4,<0.5.0",
+    # The Sentinel client uses redis.backoff.ExponentialWithJitterBackoff (5.3.0+), and its
+    # tests Retry.get_retries() (6.0.0+). The image installs without uv.lock, so set the floor here.
+    "redis>=6.0.0",
     "mcp==1.30.0",
     "PyJWT>=2.15.0",
     "authlib>=1.9.1",
