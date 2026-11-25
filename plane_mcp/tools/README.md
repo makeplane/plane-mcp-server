@@ -1,6 +1,6 @@
 # The tool surface
 
-**31 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 219 actions in total.
+**34 tools**, one per Plane resource, each taking an `action` parameter that selects the operation. 245 actions in total.
 
 ```python
 workitem(action="create", project_id=..., name="Fix login")
@@ -8,7 +8,7 @@ workitem(action="list", project_id=..., pql='state__group = "started"')
 cycle(action="archive", project_id=..., cycle_id=...)
 ```
 
-A compact catalogue — 31 tools, ~69k characters — loads fully in every MCP client and leaves the context budget to the conversation.
+A compact catalogue — 34 tools, ~76k characters — loads fully in every MCP client and leaves the context budget to the conversation.
 
 Five parts, in this order:
 
@@ -46,6 +46,7 @@ def register(mcp):                                # 5. dispatch
 | Declare every parameter an action takes, and only those | `ValidateActionArguments` checks calls against it. `query` is a real `workitem` parameter but useless to `count` — sent there it used to validate cleanly and answer a different question |
 | Use `needs()` for multi-parameter guards | It names only what is absent. `if not a or not b` blames both, so a caller that supplied `a` is told to send it again |
 | An action accepting `cursor` must return `envelope(response)` | Returning `response.results` lets a caller page in but never page on |
+| A v2 list (`client.v2`) asks for `paginate="cursor"` and returns `cursor_page(page)` | v2 answers `data`/`has_more`/`next_cursor`, not v1's envelope; only the keyset style carries a cursor |
 | Match the SDK's `params` type: `page_params` vs `as_params` | Some endpoints take a `Mapping`, others a Pydantic model they call `.model_dump()` on. The wrong one raises at call time |
 | Declare the type you mean | `CoerceArguments` repairs `'["uuid"]'` before validation, so type a list as a list. `coerce_list` is for parameters genuinely declared `str`, where a comma separates |
 | `@plan_gated("<feature>")` on a plan-gated resource | Turns a 402 into a message naming the feature. The argument is a fallback — where the refusal names the feature, that wins |
@@ -96,11 +97,12 @@ Where the workspace owns a resource outright, both directions of wrong-scope wri
 | `customer_property` | `list` · `retrieve` · `create` · `update` · `delete` · `get_values` · `set_values` |
 | `customer_request` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `cycle` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` · `transfer_workitems` · `complete` · `archive` · `unarchive` |
+| `dashboard` | `list` · `retrieve` · `create` · `update` · `delete` · `copy` · `list_widget_types` · `list_widgets` · `retrieve_widget` · `create_widget` · `update_widget` · `delete_widget` · `get_chart` · `get_charts` |
 | `get_pql_reference` | *(no action parameter)* |
 | `initiative` | `list` · `retrieve` · `create` · `update` · `delete` · `list_projects` · `add_projects` · `remove_projects` · `list_workitems` · `manage_workitems` |
 | `intake` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `label` | `list` · `retrieve` · `create` · `update` · `delete` |
-| `member` | `me` · `list_workspace` · `list_project` · `list_roles` · `retrieve_role` |
+| `member` | `me` · `list_workspace` · `list_project` · `list_roles` · `retrieve_role` · `add_to_project` · `change_project_role` · `remove_from_project` · `change_workspace_role` |
 | `milestone` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` |
 | `module` | `list` · `retrieve` · `create` · `update` · `delete` · `list_workitems` · `manage_workitems` · `archive` · `unarchive` |
 | `page` | `list` · `retrieve` · `create` · `update` · `archive` · `delete` · `set_collection` · `list_workitem_pages` · `attach_to_workitem` · `detach_from_workitem` |
@@ -112,14 +114,16 @@ Where the workspace owns a resource outright, both directions of wrong-scope wri
 | `role` | `list` · `retrieve` · `create` · `update` · `delete` · `list_schemes` · `retrieve_scheme` · `create_scheme` · `update_scheme` · `delete_scheme` · `get_scheme_impact` · `list_permissions` |
 | `state` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `template` | `list` · `create` · `update` · `delete` |
+| `view` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `work_log` | `list` · `create` · `update` · `delete` |
-| `workitem` | `list` · `list_archived` · `retrieve` · `retrieve_by_identifier` · `search` · `count` · `create` · `update` · `delete` · `archive` · `manage_assignee` · `manage_label` |
+| `workitem` | `list` · `list_archived` · `retrieve` · `retrieve_by_identifier` · `search` · `count` · `create` · `update` · `delete` · `archive` · `manage_assignee` · `manage_label` · `read_description_image` |
 | `workitem_activity` | `list` · `retrieve` |
 | `workitem_attachment` | `list` · `read` · `download_url` · `upload_from_url` · `delete` |
 | `workitem_comment` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `workitem_link` | `list` · `retrieve` · `create` · `update` · `delete` |
 | `workitem_property` | `list` · `retrieve` · `create` · `update` · `delete` · `manage_type_properties` · `list_options` · `retrieve_option` · `create_option` · `update_option` · `delete_option` · `get_value` · `set_value` · `delete_value` |
 | `workitem_relation` | `list` · `create` · `delete` · `list_definitions` · `create_definition` · `update_definition` · `delete_definition` |
+| `workitem_subscriber` | `list` · `manage` |
 | `workitem_type` | `list` · `retrieve` · `resolve` · `create` · `update` · `delete` · `import_to_project` |
 | `workspace` | `retrieve` · `get_features` · `update_features` |
 
@@ -158,3 +162,4 @@ caught here rather than at runtime.
 | `test_governance.py` | Project-vs-workspace scope pinned to its namespace and id keyword |
 | `test_workitem_property.py` | Values reach the SDK in the type the property expects; malformed option JSON and absent scopes are reported, not swallowed |
 | `test_attachments.py` | The image-versus-text return channel, size limits, and the SSRF guard |
+| `test_dashboard.py` | Widget fields reach the v2 SDK as set, cleared or left out; v2 validation and plan refusals are answered, naming the fields |

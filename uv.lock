@@ -938,7 +938,7 @@ requires-dist = [
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.1,<2.35.0" },
     { name = "fastmcp", specifier = "==3.4.11" },
     { name = "mcp", specifier = "==1.30.0" },
-    { name = "plane-sdk", specifier = "==0.3.1" },
+    { name = "plane-sdk", specifier = "==0.3.3" },
     { name = "py-key-value-aio", extras = ["redis"], specifier = ">=0.4.4,<0.5.0" },
     { name = "pyjwt", specifier = ">=2.15.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -948,16 +948,17 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "plane-sdk"
-version = "0.3.1"
+version = "0.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "certifi" },
     { name = "pydantic" },
     { name = "requests" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/04/dd/d8c276025ba66cc37c719b141f24edeb6bb9319298bd5656c62c980d0dd7/plane_sdk-0.3.1.tar.gz", hash = "sha256:e093f0d6cc83a155cc9e1670d26da14e8f57f4dc33fed9672aa785f70662ec64", size = 232255, upload-time = "2026-09-22T11:33:48.391Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5f/72/4275efdc0c68a48587fdaa5edbe6eedf485e4ec3b65a32e73b76dd41d09e/plane_sdk-0.3.3.tar.gz", hash = "sha256:dac91a4c45dd47b445921a3bcd67f17c3e21539a0785c296c656b1d65c16f7ee", size = 250416, upload-time = "2026-11-24T14:38:38.006Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/e4/0065760d5bfe2444f7912324f9fb85ed817872ba4f98c4b5572a4039f06a/plane_sdk-0.3.1-py3-none-any.whl", hash = "sha256:c7794876403af6b790fc1d9d594357a02163b353d38eb8c3eb6fcc157256e827", size = 355304, upload-time = "2026-09-22T11:33:46.581Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/4c/5046405494f45b7bde3b1302379935fc5677cace08b5e400fd662ddd3d35/plane_sdk-0.3.3-py3-none-any.whl", hash = "sha256:fc6752f40942369044f89047f1a4f8ef30eb200a82a193ff8ba33c0f2be8d42c", size = 377065, upload-time = "2026-11-24T14:38:36.613Z" },
 ]
 
 [[package]]
