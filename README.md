@@ -145,6 +145,7 @@ unchanged.
 | `PLANE_API_KEY` | stdio | API key |
 | `PLANE_WORKSPACE_SLUG` | stdio | Target workspace |
 | `PLANE_BASE_URL` | optional | Plane API URL (default `https://api.plane.so`) |
+| `PLANE_COMMUNITY_EDITION` | optional | `true` for self-hosted Community Edition: `workitem_relation` then uses the one relations route it serves, `/work-items/{id}/relations/`, and refuses the actions it has no endpoint for |
 
 The remote transports carry credentials in the connection — the OAuth flow or the
 PAT headers — and need none of these.
