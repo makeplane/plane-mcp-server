@@ -36,6 +36,7 @@ from plane_mcp.tools import (
     release,
     release_label,
     release_tag,
+    role,
     state,
     template,
     view,
@@ -86,6 +87,7 @@ RESOURCES: tuple[ModuleType, ...] = (
     dashboard,
     view,
     workitem_subscriber,
+    role,
 )
 
 

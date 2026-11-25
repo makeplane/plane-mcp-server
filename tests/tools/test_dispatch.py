@@ -36,6 +36,8 @@ SAMPLES: dict[str, object] = {
     "workitem_identifier": "ENG-42",
     "kind": "workitem",
     "template_data": '{"name": "Spec"}',
+    "namespace": "project",
+    "permissions": ["workitem:view"],
     "chart_type": "BAR_CHART",
     "chart_model": "BASIC",
 }
