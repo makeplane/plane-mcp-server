@@ -37,6 +37,10 @@ CLIENT_REDIRECT_URIS = {
         "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-116109532806053202916-mcp_plane_so"
     ),
     "grok-web": "https://grok.com/connectors-oauth-exchange-code/",
+    "keycard-production": "https://acme.keycard.cloud/oauth/2/redirect",
+    "keycard-staging": "https://acme.keycard-stage.cloud/oauth/2/redirect",
+    "keycard-development": "https://acme.keycard-dev.cloud/oauth/2/redirect",
+    "keycard-local-development": "https://acme.localdev.keycard.sh/oauth/2/redirect",
 }
 
 
@@ -59,6 +63,16 @@ LOOKALIKE_URIS = {
     "grok-other-path": "https://grok.com/anything-else",
     "claude-host-suffix": "https://claude.ai.evil.com/api/mcp/auth_callback",
     "chatgpt-path-suffix": "https://chatgpt.com/connector_platform_oauth_redirect_evil",
+    "keycard-apex-domain": "https://keycard.cloud/oauth/2/redirect",
+    "keycard-host-suffix": "https://acme.keycard.cloud.evil.com/oauth/2/redirect",
+    "keycard-host-prefix": "https://acme.evilkeycard.cloud/oauth/2/redirect",
+    "keycard-path-in-attacker-url": "https://evil.com/.keycard.cloud/oauth/2/redirect",
+    "keycard-query-in-attacker-url": "https://evil.com?x=.keycard.cloud/oauth/2/redirect",
+    "keycard-userinfo": "https://acme.keycard.cloud@evil.com/oauth/2/redirect",
+    "keycard-scheme-downgrade": "http://acme.keycard.cloud/oauth/2/redirect",
+    "keycard-other-path": "https://acme.keycard.cloud/oauth/2/other",
+    "keycard-path-suffix": "https://acme.keycard.cloud/oauth/2/redirect/evil",
+    "keycard-staging-host-suffix": "https://acme.keycard-stage.cloud.evil.com/oauth/2/redirect",
     "cursor-unregistered-scheme": "myapp://callback",
     "javascript-scheme": "javascript:alert(document.cookie)",
 }

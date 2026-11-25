@@ -36,6 +36,12 @@ DEFAULT_ALLOWED_REDIRECT_URIS = [
     # Gemini custom apps (Spark) — the path carries a per-user, per-connector id
     "https://oauth-redirect.googleusercontent.com/r/*",
     "https://grok.com/connectors-oauth-exchange-code/",
+    # Keycard MCP gateway — one zone subdomain per customer, fixed callback path.
+    # Production, staging, development and local-development environments.
+    "https://*.keycard.cloud/oauth/2/redirect",
+    "https://*.keycard-stage.cloud/oauth/2/redirect",
+    "https://*.keycard-dev.cloud/oauth/2/redirect",
+    "https://*.localdev.keycard.sh/oauth/2/redirect",
 ]
 
 
