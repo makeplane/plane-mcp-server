@@ -91,6 +91,9 @@ def get_plane_client_context() -> PlaneClientContext:
         client = PlaneClient(
             base_url=base_url,
             api_key=api_key,
+            # Header that carries the key. Plane reads X-Api-Key; an API gateway in front
+            # of Plane may expect its own consumer-key header (e.g. X-Gravitee-Api-Key).
+            api_key_header=os.getenv("PLANE_API_KEY_HEADER") or "X-Api-Key",
         )
 
     return PlaneClientContext(
