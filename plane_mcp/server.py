@@ -9,7 +9,12 @@ from mcp.types import Icon
 
 from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
 from plane_mcp.instructions import SERVER_INSTRUCTIONS
-from plane_mcp.middleware import CoerceArguments, PlaneLoggingMiddleware, ValidateActionArguments
+from plane_mcp.middleware import (
+    CoerceArguments,
+    PlaneLoggingMiddleware,
+    PlaneReadOnlyMiddleware,
+    ValidateActionArguments,
+)
 from plane_mcp.storage import build_token_store
 from plane_mcp.tools import register_tools
 
@@ -54,11 +59,31 @@ def get_allowed_client_redirect_uris() -> list[str]:
 LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "true").lower() == "true"
 
 
+def is_read_only() -> bool:
+    """True when read-only mode is explicitly enabled by environment variable.
+
+    Defaults to False (writable) when unset or empty.
+
+    Raises:
+        ValueError: If PLANE_READ_ONLY is set to an unrecognised value.
+    """
+    raw = os.getenv("PLANE_READ_ONLY", "").strip().lower()
+    if not raw or raw in ("false", "0", "no", "off"):
+        return False
+    if raw in ("true", "1", "yes"):
+        return True
+    raise ValueError(
+        f"Invalid PLANE_READ_ONLY value {raw!r}. Expected boolean: 'true', 'false', '1', '0', 'yes', 'no'."
+    )
+
+
 def _configured(mcp: FastMCP) -> FastMCP:
-    """The middleware stack and tools every transport shares."""
+    """Configure the shared middleware stack and register tools on the server instance."""
     mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=LOG_PAYLOADS))
     mcp.add_middleware(CoerceArguments())
     mcp.add_middleware(ValidateActionArguments())
+    if is_read_only():
+        mcp.add_middleware(PlaneReadOnlyMiddleware())
     register_tools(mcp)
     return mcp
 
@@ -85,7 +110,8 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
     return _configured(oauth_mcp)
 
 
-def get_header_mcp():
+def get_header_mcp() -> FastMCP:
+    """Build the FastMCP instance for the header-authenticated HTTP transport."""
     header_mcp = FastMCP(
         "Plane MCP Server (header-http)",
         instructions=SERVER_INSTRUCTIONS,
@@ -96,7 +122,8 @@ def get_header_mcp():
     return _configured(header_mcp)
 
 
-def get_stdio_mcp():
+def get_stdio_mcp() -> FastMCP:
+    """Build the FastMCP instance for the stdio transport."""
     stdio_mcp = FastMCP(
         "Plane MCP Server (stdio)",
         instructions=SERVER_INSTRUCTIONS,

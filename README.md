@@ -145,9 +145,33 @@ unchanged.
 | `PLANE_API_KEY` | stdio | API key |
 | `PLANE_WORKSPACE_SLUG` | stdio | Target workspace |
 | `PLANE_BASE_URL` | optional | Plane API URL (default `https://api.plane.so`) |
+| `PLANE_READ_ONLY` | optional | When `true`, restrict operations strictly to read actions (default `false`) |
 
 The remote transports carry credentials in the connection — the OAuth flow or the
 PAT headers — and need none of these.
+
+### Read-only mode
+
+To prevent tools from creating, mutating or deleting records (e.g. for audit, monitoring or untrusted agent sessions), enable `PLANE_READ_ONLY`:
+
+```bash
+export PLANE_READ_ONLY=true
+```
+
+When enabled, operations marked `read=True` (e.g. `list`, `retrieve`, `count`, `search`, `worklog_summary`) execute normally, while any mutation, write or deletion action (e.g. `create`, `update`, `delete`, `archive`) is refused before invoking the Plane SDK. Refusals return an explicit message without modifying advertised tool definitions or invalidating client prompt caches:
+
+```
+Error: Plane MCP read-only mode blocks workitem.create.
+```
+
+#### Security boundaries and limitations
+
+- **Enforcement layer**: Refusals are enforced by server-side middleware prior to Plane SDK dispatch, raising a genuine MCP `ToolError` (`isError=true`) to block write operations at the protocol level.
+- **Fail-fast configuration**: `PLANE_READ_ONLY` strictly validates configured values at startup. Malformed or unrecognized values (e.g. `ture` or `enabled`) raise an immediate error to prevent starting in an unintended writable state, while leaving write capabilities enabled by default when the variable is unset.
+- **Process-wide scope**: `PLANE_READ_ONLY` applies server-wide to the entire running process and all sessions connected to it. It is not a per-user or per-request control.
+- **Authorization boundaries**: Read-only mode restricts tool mutations at the MCP layer, but does not replace Plane's workspace permissions or OAuth scopes. Read requests still execute using the supplied Plane credentials and remain subject to Plane's backend access controls.
+- **Idempotency**: Enforcement relies on Plane's read endpoints being non-mutating on the backend.
+
 
 ### Outbound proxy for attachment uploads
 
