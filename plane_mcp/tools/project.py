@@ -100,6 +100,7 @@ ACTIONS = (
 FOOTER = (
     "identifier is the short work item prefix, such as ENG. network is 0 for secret or 2 for public. "
     "project_lead and default_assignee are member ids -- get them from `member list_workspace`. "
+    "archive_in or close_in of 0 turns that automation off. "
     "Feature toggles are booleans; omitted ones are left as they are."
 )
 
