@@ -100,6 +100,7 @@ ACTIONS = (
 FOOTER = (
     "identifier is the short work item prefix, such as ENG. network is 0 for secret or 2 for public. "
     "project_lead and default_assignee are member ids -- get them from `member list_workspace`. "
+    "archive_in or close_in of 0 turns that automation off. "
     "Feature toggles are booleans; omitted ones are left as they are."
 )
 
@@ -150,8 +151,9 @@ def register(mcp: FastMCP) -> None:
         # 0 is a real value (secret), so network cannot use the 0 sentinel.
         network: int | None = None,
         timezone: str = "",
-        archive_in: int = 0,
-        close_in: int = 0,
+        # 0 turns the auto-archive and auto-close automations off, so these cannot use the 0 sentinel.
+        archive_in: int | None = None,
+        close_in: int | None = None,
         default_state: str = "",
         estimate: str = "",
         external_source: str = "",
@@ -218,8 +220,8 @@ def register(mcp: FastMCP) -> None:
                     issue_views_view=views,
                     page_view=pages,
                     intake_view=intakes,
-                    archive_in=opt(archive_in),
-                    close_in=opt(close_in),
+                    archive_in=archive_in,
+                    close_in=close_in,
                     timezone=zone,
                     external_source=opt(external_source),
                     external_id=opt(external_id),
@@ -252,8 +254,8 @@ def register(mcp: FastMCP) -> None:
                     issue_views_view=views,
                     page_view=pages,
                     intake_view=intakes,
-                    archive_in=opt(archive_in),
-                    close_in=opt(close_in),
+                    archive_in=archive_in,
+                    close_in=close_in,
                     timezone=zone,
                     external_source=opt(external_source),
                     external_id=opt(external_id),
